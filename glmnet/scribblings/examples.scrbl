@@ -16,3 +16,4 @@ guaranteed to stay in sync with the code.
 @local-table-of-contents[]
 
 @lp-include["../examples/00-hello-fortran.rkt"]
+@lp-include["../examples/01-ols.rkt"]

@@ -39,6 +39,26 @@ different parameters:
        (list "Lasso"             "1"              "> 0")
        (list "Elastic net"       "0 < α < 1"      "> 0"))]
 
+@section[#:tag "guide-fitting"]{Fitting a model}
+
+@racket[elnet-fit] is the one entry point behind every model; the four core
+cases have convenience wrappers. A fit takes the predictor matrix as a list of
+rows and the response as a list, and returns an @racket[elnet-result]:
+
+@racketblock[
+(require glmnet)
+(define X '((1.0 2.0) (2.0 1.0) (3.0 4.0) (4.0 3.0) (5.0 6.0)))
+(define y '(1.0 4.0 3.0 6.0 5.0))
+(define fit (ols X y))
+(elnet-result-intercept fit)
+(elnet-result-coefficients fit)]
+
+@racket[ols] is just @racket[elnet-fit] with @racket[#:lambda 0.0]. The
+penalized models pass @racket[#:alpha] and a positive @racket[#:lambda]; see
+@secref["ex-ols"] for the worked OLS example, and the reference for the full
+keyword list. See @secref["reference"] for @racket[elnet-fit] and
+@racket[elnet-result].
+
 @section[#:tag "guide-standardize"]{Standardization and intercept}
 
 By default glmnet standardizes each predictor column to unit variance before
