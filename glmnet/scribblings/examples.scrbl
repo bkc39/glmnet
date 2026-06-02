@@ -19,3 +19,4 @@ guaranteed to stay in sync with the code.
 @lp-include["../examples/01-ols.rkt"]
 @lp-include["../examples/02-ridge.rkt"]
 @lp-include["../examples/03-lasso.rkt"]
+@lp-include["../examples/04-elastic-net.rkt"]

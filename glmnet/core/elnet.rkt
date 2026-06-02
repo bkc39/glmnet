@@ -41,6 +41,13 @@
          #:intercept? boolean?
          #:thresh (>/c 0)
          #:max-iters exact-positive-integer?)
+        elnet-result?)]
+  [elastic-net
+   (->* (matrix/c response/c #:alpha (real-in 0 1) #:lambda (>=/c 0))
+        (#:standardize? boolean?
+         #:intercept? boolean?
+         #:thresh (>/c 0)
+         #:max-iters exact-positive-integer?)
         elnet-result?)]))
 
 ;; A fitted model. `coefficients` is a vector of length ni on the original
@@ -170,6 +177,23 @@
                #:max-iters [max-iters 100000])
   (elnet-fit X y
              #:alpha 1.0
+             #:lambda lambda
+             #:standardize? standardize?
+             #:intercept? intercept?
+             #:thresh thresh
+             #:max-iters max-iters))
+
+;; Elastic net at an explicit alpha in [0,1]: blends the lasso's selection with
+;; the ridge's shrinkage. alpha 0 reduces to `ridge`, alpha 1 to `lasso`.
+(define (elastic-net X y
+                     #:alpha alpha
+                     #:lambda lambda
+                     #:standardize? [standardize? #t]
+                     #:intercept? [intercept? #t]
+                     #:thresh [thresh 1e-7]
+                     #:max-iters [max-iters 100000])
+  (elnet-fit X y
+             #:alpha alpha
              #:lambda lambda
              #:standardize? standardize?
              #:intercept? intercept?

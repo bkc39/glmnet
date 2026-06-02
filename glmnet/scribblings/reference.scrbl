@@ -84,6 +84,21 @@ cases.
   @racket[lambda] grows. See @secref["ex-lasso"].
 }
 
+@defproc[(elastic-net [X (and/c (listof (listof real?)) pair?)]
+                      [y (and/c (listof real?) pair?)]
+                      [#:alpha alpha (real-in 0 1)]
+                      [#:lambda lambda (>=/c 0)]
+                      [#:standardize? standardize? boolean? #t]
+                      [#:intercept? intercept? boolean? #t]
+                      [#:thresh thresh (>/c 0) 1e-7]
+                      [#:max-iters max-iters exact-positive-integer? 100000])
+         elnet-result?]{
+  Elastic net at an explicit @racket[alpha] in @racket[(real-in 0 1)]: blends the
+  lasso's selection with the ridge's shrinkage. @racket[#:alpha 0.0] reduces to
+  @racket[ridge] and @racket[#:alpha 1.0] to @racket[lasso]. See
+  @secref["ex-elastic-net"].
+}
+
 @section[#:tag "ref-connectivity"]{Connectivity and self-checks}
 
 These entry points call directly into the C-ABI shim. They are used by

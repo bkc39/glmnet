@@ -79,6 +79,27 @@
     (check-= (elnet-result-intercept r) 4.5 1e-6)
     (check-equal? (num-zeros (elnet-result-coefficients r)) 3))
 
+  ;; --- elastic net (0 < alpha < 1) ---
+  (test-case "elastic net at alpha 0 equals ridge"
+    (check-equal?
+     (vector->list (elnet-result-coefficients (elastic-net X3 y3 #:alpha 0.0 #:lambda 0.3)))
+     (vector->list (elnet-result-coefficients (ridge X3 y3 #:lambda 0.3)))))
+
+  (test-case "elastic net at alpha 1 equals lasso"
+    (check-equal?
+     (vector->list (elnet-result-coefficients (elastic-net X3 y3 #:alpha 1.0 #:lambda 0.3)))
+     (vector->list (elnet-result-coefficients (lasso X3 y3 #:lambda 0.3)))))
+
+  (test-case "elastic-net sparsity sits between ridge and lasso"
+    (define (nz r) (for/sum ([x (in-vector (elnet-result-coefficients r))] #:when (zero? x)) 1))
+    (define nz-ridge (nz (ridge X3 y3 #:lambda 0.5)))
+    (define nz-enet  (nz (elastic-net X3 y3 #:alpha 0.5 #:lambda 0.5)))
+    (define nz-lasso (nz (lasso X3 y3 #:lambda 0.5)))
+    (check-equal? nz-ridge 0)
+    (check-true (>= nz-lasso 1))
+    (check-true (<= nz-ridge nz-enet))
+    (check-true (<= nz-enet nz-lasso)))
+
   ;; --- input validation / contracts ---
 
   (test-case "ragged predictor matrix is rejected"
