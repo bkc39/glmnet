@@ -34,6 +34,32 @@
     (check-= (vector-ref (elnet-result-coefficients r) 0) 2.0 1e-4)
     (check-= (vector-ref (elnet-result-coefficients r) 1) -1.0 1e-4))
 
+  ;; --- ridge (alpha = 0) ---
+  ;; Fixture with an irrelevant predictor x3 = x1^2; mean(y) = 4.5.
+  (define X3 '((1.0 2.0  1.0)
+               (2.0 1.0  4.0)
+               (3.0 4.0  9.0)
+               (4.0 3.0 16.0)
+               (5.0 6.0 25.0)
+               (6.0 5.0 36.0)))
+  (define y3 '(1.0 4.0 3.0 6.0 5.0 8.0))
+
+  (test-case "ridge keeps every coefficient nonzero"
+    (define b (elnet-result-coefficients (ridge X3 y3 #:lambda 0.1)))
+    (check-true (for/and ([bi (in-vector b)]) (not (zero? bi)))))
+
+  (test-case "ridge shrinkage grows with lambda"
+    (define b-small (elnet-result-coefficients (ridge X3 y3 #:lambda 0.1)))
+    (define b-large (elnet-result-coefficients (ridge X3 y3 #:lambda 2.0)))
+    (check-true (< (abs (vector-ref b-large 0)) (abs (vector-ref b-small 0)))
+                "leading coefficient shrinks further at larger lambda"))
+
+  (test-case "ridge at huge lambda collapses to the mean"
+    (define r (ridge X3 y3 #:lambda 1e6))
+    (check-= (elnet-result-intercept r) 4.5 1e-2)
+    (check-true (for/and ([bi (in-vector (elnet-result-coefficients r))])
+                  (< (abs bi) 1e-2))))
+
   ;; --- input validation / contracts ---
 
   (test-case "ragged predictor matrix is rejected"

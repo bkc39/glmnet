@@ -54,10 +54,11 @@ rows and the response as a list, and returns an @racket[elnet-result]:
 (elnet-result-coefficients fit)]
 
 @racket[ols] is just @racket[elnet-fit] with @racket[#:lambda 0.0]. The
-penalized models pass @racket[#:alpha] and a positive @racket[#:lambda]; see
-@secref["ex-ols"] for the worked OLS example, and the reference for the full
-keyword list. See @secref["reference"] for @racket[elnet-fit] and
-@racket[elnet-result].
+penalized models pass @racket[#:alpha] and a positive @racket[#:lambda], and
+each has a convenience wrapper: @racket[ridge] (@math{α = 0}), with
+@racket[lasso] and @racket[elastic-net] to follow. See @secref["ex-ols"] and
+@secref["ex-ridge"] for worked examples, and @secref["reference"] for the full
+keyword list.
 
 @section[#:tag "guide-standardize"]{Standardization and intercept}
 

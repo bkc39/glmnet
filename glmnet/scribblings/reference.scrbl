@@ -58,6 +58,19 @@ cases.
   solution as the threshold tightens. See @secref["ex-ols"].
 }
 
+@defproc[(ridge [X (and/c (listof (listof real?)) pair?)]
+                [y (and/c (listof real?) pair?)]
+                [#:lambda lambda (>=/c 0)]
+                [#:standardize? standardize? boolean? #t]
+                [#:intercept? intercept? boolean? #t]
+                [#:thresh thresh (>/c 0) 1e-7]
+                [#:max-iters max-iters exact-positive-integer? 100000])
+         elnet-result?]{
+  Ridge regression: @racket[elnet-fit] with @racket[#:alpha 0.0] (pure L2
+  penalty). Shrinks every coefficient smoothly toward zero as @racket[lambda]
+  grows but never sets one exactly to zero. See @secref["ex-ridge"].
+}
+
 @section[#:tag "ref-connectivity"]{Connectivity and self-checks}
 
 These entry points call directly into the C-ABI shim. They are used by

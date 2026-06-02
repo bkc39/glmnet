@@ -17,3 +17,4 @@ guaranteed to stay in sync with the code.
 
 @lp-include["../examples/00-hello-fortran.rkt"]
 @lp-include["../examples/01-ols.rkt"]
+@lp-include["../examples/02-ridge.rkt"]
