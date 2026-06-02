@@ -101,6 +101,27 @@ racket glmnet/examples/test/00-hello-fortran.rkt
 Or `nix build .#native` (runs the Fortran ctest suite) and `nix flake check`
 (builds the native lib + Racket package, runs `raco test`, renders the docs).
 
+## Shipping native libraries (catalog candidates)
+
+Using the package needs no toolchain because a prebuilt `libglmnetcompat` (plus
+its gfortran/quadmath runtime) is committed per platform under
+`glmnet/native-libs/candidates/<platform>/` and staged at install time by
+`private/install-glmnet-native.rkt` (env var → already-staged → candidate).
+
+Build a candidate with `scripts/build-so.sh <darwin|linux|linux-aarch64>`. It
+builds the `.#native` derivation, bundles the runtime closure, sets portable
+rpaths (`@rpath`/`@loader_path` on macOS; `RUNPATH=$ORIGIN` on Linux), and on
+Linux runs `polyfill-glibc` + `libglmnetshim.so` (scripts/glibc-shim.c) to drop
+the glibc floor to 2.17 so it loads on Ubuntu 22.04 (the catalog build server)
+and older. `scripts/test-local.sh` then installs from the candidate with a plain
+Racket (no Nix) and runs the suite — exactly what `pkgs.racket-lang.org` does.
+
+The script needs Nix and must run **on each target platform**: build the
+`darwin` candidate on macOS and the `linux`/`linux-aarch64` candidates on a Linux
+host (`.github/workflows/raco-catalog.yml` builds and validates them in CI, with
+`ubuntu-22.04` exercised explicitly). Commit the resulting `candidates/<platform>/`
+files; only the loose copies directly under `native-libs/` are git-ignored.
+
 ## Roadmap
 
 v1 = Phase 0 hello + OLS / ridge / lasso / elastic net (single-λ "solo" fits).

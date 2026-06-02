@@ -1,0 +1,151 @@
+name: Catalog install (native candidates)
+
+# Builds the per-platform native-lib candidates with scripts/build-so.sh, checks
+# they are portable, then installs glmnet from the candidate with a plain Racket
+# (no Nix) and runs the test suite -- reproducing what pkgs.racket-lang.org does.
+# Ubuntu 22.04 is the catalog build server's OS and is exercised explicitly.
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  build:
+    name: Build candidate (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            platform: linux
+            candidate: linux-cpu
+          - os: macos-latest
+            platform: darwin
+            candidate: darwin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v22
+      - uses: DeterminateSystems/magic-nix-cache-action@v13
+
+      - name: Build native candidate
+        run: scripts/build-so.sh ${{ matrix.platform }}
+
+      - name: Portability check (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir="glmnet/native-libs/candidates/${{ matrix.candidate }}"
+          for lib in "$dir"/*.so*; do
+            [ -f "$lib" ] || continue
+            echo "=== $lib ===" && ldd "$lib" || true
+            if ldd "$lib" 2>&1 | grep -q '/nix/store/'; then
+              echo "ERROR: Nix store path in ldd output for $lib" >&2; exit 1
+            fi
+          done
+          # The shim seed must carry RUNPATH=$ORIGIN so it finds its bundled deps.
+          if ! readelf -d "$dir/libglmnetcompat.so" | grep -E 'R(UN)?PATH' | grep -q '\$ORIGIN'; then
+            echo "ERROR: libglmnetcompat.so missing RUNPATH=\$ORIGIN" >&2; exit 1
+          fi
+          # The gfortran runtime must be bundled.
+          ls "$dir"/libgfortran*.so* >/dev/null 2>&1 || { echo "ERROR: libgfortran not bundled" >&2; exit 1; }
+          # glibc baseline: nothing newer than 2.17 (manylinux2014).
+          for lib in "$dir"/*.so*; do
+            [ -f "$lib" ] || continue
+            maxv=$(readelf -V "$lib" 2>/dev/null | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -V | tail -1)
+            [ -z "$maxv" ] && continue
+            if [ "$(printf '%s\nGLIBC_2.17\n' "$maxv" | sort -V | tail -1)" != "GLIBC_2.17" ]; then
+              echo "ERROR: $lib requires $maxv (> GLIBC_2.17)" >&2; exit 1
+            fi
+          done
+          echo "Linux portability check passed"
+
+      - name: Portability check (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir="glmnet/native-libs/candidates/${{ matrix.candidate }}"
+          for lib in "$dir"/*.dylib; do
+            echo "=== $lib ===" && otool -L "$lib"
+            if otool -L "$lib" | tail -n +2 | grep -q '/nix/store'; then
+              echo "ERROR: Nix store path in $lib" >&2; exit 1
+            fi
+          done
+          echo "macOS portability check passed"
+
+      - name: Upload candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidate-${{ matrix.candidate }}
+          path: glmnet/native-libs/candidates/${{ matrix.candidate }}/
+
+  catalog:
+    name: Catalog install (${{ matrix.label }})
+    needs: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            candidate: linux-cpu
+            arch: x64
+            label: ubuntu-22.04 (catalog target)
+          - os: ubuntu-latest
+            candidate: linux-cpu
+            arch: x64
+            label: ubuntu-latest (forward-compat)
+          - os: macos-latest
+            candidate: darwin
+            arch: arm64
+            label: macos-latest (darwin)
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Racket
+        uses: Bogdanp/setup-racket@v1.15
+        with:
+          version: stable
+          architecture: ${{ matrix.arch }}
+
+      - name: Download candidate
+        uses: actions/download-artifact@v4
+        with:
+          name: candidate-${{ matrix.candidate }}
+          path: glmnet/native-libs/candidates/${{ matrix.candidate }}/
+
+      - name: Install from candidate and test
+        run: bash scripts/test-local.sh
+
+  old-glibc-load:
+    name: Old-glibc load test (manylinux2014 / glibc 2.17)
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download linux candidate
+        uses: actions/download-artifact@v4
+        with:
+          name: candidate-linux-cpu
+          path: cand
+      - name: dlopen libglmnetcompat.so under glibc 2.17
+        run: |
+          cat > probe.c <<'EOF'
+          #include <dlfcn.h>
+          #include <stdio.h>
+          int main(int argc, char** argv) {
+            void* h = dlopen(argv[1], RTLD_NOW);
+            if (!h) { fprintf(stderr, "dlopen failed: %s\n", dlerror()); return 1; }
+            void* s = dlsym(h, "glmnet_default_real_bytes");
+            if (!s) { fprintf(stderr, "dlsym failed: %s\n", dlerror()); return 1; }
+            printf("OK: loaded and resolved glmnet_default_real_bytes\n");
+            return 0;
+          }
+          EOF
+          docker run --rm -v "$PWD:/w" -w /w quay.io/pypa/manylinux2014_x86_64 bash -c '
+            set -e
+            gcc probe.c -o probe -ldl
+            ./probe cand/libglmnetcompat.so
+          '

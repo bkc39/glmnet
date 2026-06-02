@@ -1,0 +1,47 @@
+// Rename rules applied to the bundled .so files so polyfill-glibc can drop
+// their max glibc dependency to the 2.17 baseline (CentOS 7 / manylinux2014),
+// which covers pkg-build.racket-lang.org, Ubuntu 22.04, and every Linux distro
+// from the last decade.
+//
+// polyfill-glibc handles the bulk of the downgrade automatically (pthread_*,
+// fmod@2.38, __isoc23_*, etc.).  The only symbols it cannot rewrite are
+// libgfortran.so.5's _Float128 (quad-precision) math functions, added in glibc
+// 2.26 with no older equivalent.  We redirect each to a definition in
+// libglmnetshim.so (built from scripts/glibc-shim.c), bundled alongside and
+// resolved at load time via RUNPATH=$ORIGIN.  glmnet solves in double precision
+// (-fdefault-real-8), so these are never reached; the shim stubs abort().
+
+acosf128@GLIBC_2.26     libglmnetshim.so::acosf128
+acoshf128@GLIBC_2.26    libglmnetshim.so::acoshf128
+asinf128@GLIBC_2.26     libglmnetshim.so::asinf128
+asinhf128@GLIBC_2.26    libglmnetshim.so::asinhf128
+atan2f128@GLIBC_2.26    libglmnetshim.so::atan2f128
+atanf128@GLIBC_2.26     libglmnetshim.so::atanf128
+atanhf128@GLIBC_2.26    libglmnetshim.so::atanhf128
+cabsf128@GLIBC_2.26     libglmnetshim.so::cabsf128
+ccosf128@GLIBC_2.26     libglmnetshim.so::ccosf128
+cexpf128@GLIBC_2.26     libglmnetshim.so::cexpf128
+clogf128@GLIBC_2.26     libglmnetshim.so::clogf128
+copysignf128@GLIBC_2.26 libglmnetshim.so::copysignf128
+cosf128@GLIBC_2.26      libglmnetshim.so::cosf128
+coshf128@GLIBC_2.26     libglmnetshim.so::coshf128
+csinf128@GLIBC_2.26     libglmnetshim.so::csinf128
+csqrtf128@GLIBC_2.26    libglmnetshim.so::csqrtf128
+erfcf128@GLIBC_2.26     libglmnetshim.so::erfcf128
+expf128@GLIBC_2.26      libglmnetshim.so::expf128
+fmaf128@GLIBC_2.26      libglmnetshim.so::fmaf128
+fmodf128@GLIBC_2.26     libglmnetshim.so::fmodf128
+jnf128@GLIBC_2.26       libglmnetshim.so::jnf128
+log10f128@GLIBC_2.26    libglmnetshim.so::log10f128
+logf128@GLIBC_2.26      libglmnetshim.so::logf128
+lroundf128@GLIBC_2.26   libglmnetshim.so::lroundf128
+roundf128@GLIBC_2.26    libglmnetshim.so::roundf128
+sinf128@GLIBC_2.26      libglmnetshim.so::sinf128
+sinhf128@GLIBC_2.26     libglmnetshim.so::sinhf128
+sqrtf128@GLIBC_2.26     libglmnetshim.so::sqrtf128
+strfromf128@GLIBC_2.26  libglmnetshim.so::strfromf128
+strtof128@GLIBC_2.26    libglmnetshim.so::strtof128
+tanf128@GLIBC_2.26      libglmnetshim.so::tanf128
+tanhf128@GLIBC_2.26     libglmnetshim.so::tanhf128
+truncf128@GLIBC_2.26    libglmnetshim.so::truncf128
+ynf128@GLIBC_2.26       libglmnetshim.so::ynf128
