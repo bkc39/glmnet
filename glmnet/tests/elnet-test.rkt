@@ -60,6 +60,25 @@
     (check-true (for/and ([bi (in-vector (elnet-result-coefficients r))])
                   (< (abs bi) 1e-2))))
 
+  ;; --- lasso (alpha = 1) ---
+  (define (num-zeros v) (for/sum ([x (in-vector v)] #:when (zero? x)) 1))
+
+  (test-case "lasso selects the irrelevant predictor out"
+    (define b (elnet-result-coefficients (lasso X3 y3 #:lambda 0.05)))
+    (check-equal? (vector-ref b 2) 0.0)
+    (check-true (not (zero? (vector-ref b 0))))
+    (check-true (not (zero? (vector-ref b 1)))))
+
+  (test-case "lasso sparsity grows with lambda"
+    (define b-small (elnet-result-coefficients (lasso X3 y3 #:lambda 0.05)))
+    (define b-large (elnet-result-coefficients (lasso X3 y3 #:lambda 0.5)))
+    (check-true (> (num-zeros b-large) (num-zeros b-small))))
+
+  (test-case "lasso at huge lambda is intercept-only at the mean"
+    (define r (lasso X3 y3 #:lambda 1e6))
+    (check-= (elnet-result-intercept r) 4.5 1e-6)
+    (check-equal? (num-zeros (elnet-result-coefficients r)) 3))
+
   ;; --- input validation / contracts ---
 
   (test-case "ragged predictor matrix is rejected"

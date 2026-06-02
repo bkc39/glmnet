@@ -71,6 +71,19 @@ cases.
   grows but never sets one exactly to zero. See @secref["ex-ridge"].
 }
 
+@defproc[(lasso [X (and/c (listof (listof real?)) pair?)]
+                [y (and/c (listof real?) pair?)]
+                [#:lambda lambda (>=/c 0)]
+                [#:standardize? standardize? boolean? #t]
+                [#:intercept? intercept? boolean? #t]
+                [#:thresh thresh (>/c 0) 1e-7]
+                [#:max-iters max-iters exact-positive-integer? 100000])
+         elnet-result?]{
+  Lasso: @racket[elnet-fit] with @racket[#:alpha 1.0] (pure L1 penalty). Performs
+  variable selection --- drives coefficients exactly to zero, more of them as
+  @racket[lambda] grows. See @secref["ex-lasso"].
+}
+
 @section[#:tag "ref-connectivity"]{Connectivity and self-checks}
 
 These entry points call directly into the C-ABI shim. They are used by

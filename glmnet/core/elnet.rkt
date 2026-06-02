@@ -34,6 +34,13 @@
          #:intercept? boolean?
          #:thresh (>/c 0)
          #:max-iters exact-positive-integer?)
+        elnet-result?)]
+  [lasso
+   (->* (matrix/c response/c #:lambda (>=/c 0))
+        (#:standardize? boolean?
+         #:intercept? boolean?
+         #:thresh (>/c 0)
+         #:max-iters exact-positive-integer?)
         elnet-result?)]))
 
 ;; A fitted model. `coefficients` is a vector of length ni on the original
@@ -146,6 +153,23 @@
                #:max-iters [max-iters 100000])
   (elnet-fit X y
              #:alpha 0.0
+             #:lambda lambda
+             #:standardize? standardize?
+             #:intercept? intercept?
+             #:thresh thresh
+             #:max-iters max-iters))
+
+;; Lasso = elastic net at alpha 1 (pure L1 penalty). Performs variable
+;; selection: coefficients are driven exactly to zero, more of them as lambda
+;; grows.
+(define (lasso X y
+               #:lambda lambda
+               #:standardize? [standardize? #t]
+               #:intercept? [intercept? #t]
+               #:thresh [thresh 1e-7]
+               #:max-iters [max-iters 100000])
+  (elnet-fit X y
+             #:alpha 1.0
              #:lambda lambda
              #:standardize? standardize?
              #:intercept? intercept?
