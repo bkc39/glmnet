@@ -1,0 +1,21 @@
+name: Nix checks
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  flake-check:
+    name: nix flake check (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v22
+      - uses: DeterminateSystems/magic-nix-cache-action@v13
+      - name: Build native lib + Racket package, run tests, render docs
+        run: nix flake check --print-build-logs
