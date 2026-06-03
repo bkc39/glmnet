@@ -1,0 +1,26 @@
+# Racket bytecode
+compiled/
+**/compiled/
+
+# Rendered Scribble output
+/glmnet/doc/
+doc/
+
+# Fortran / CMake build tree
+/fortran/build/
+
+# Nix
+result
+result-*
+/.racket-user/
+
+# Dev-staged native libraries (copied into place by the pre-install hook or
+# scripts/build-so.sh). The per-platform prebuilt candidates under
+# native-libs/candidates/ ARE committed; the loose copies here are not.
+/glmnet/native-libs/*.dylib
+/glmnet/native-libs/*.so
+/glmnet/native-libs/*.so.*
+
+# Editor / OS
+*~
+.DS_Store

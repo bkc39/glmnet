@@ -1,0 +1,27 @@
+# Vendored third-party source
+
+## `glmnet5.f90`
+
+- **What:** the classic Friedman/Hastie/Tibshirani coordinate-descent Fortran
+  implementation of the elastic-net (`elnet`/`spelnet`/`lognet`/`coxnet`/…),
+  self-contained (no BLAS/LAPACK dependency).
+- **Source:** `deps/glmnet5.f90` from
+  <https://github.com/JuliaStats/GLMNet.jl>
+- **Pinned commit:** `99739ec97f077cd7d3ce0386cd8f243f44e92352`
+- **Retrieved:** 2026-06-02
+- **License:** GPL-2.0 (the upstream glmnet license). See
+  `GLMNet.jl-LICENSE.md` in this directory and the project root `LICENSE`.
+
+This file is **fixed-form** Fortran (column-1 `c` comments, `*` continuation in
+column 6, sequence numbers in columns 73–80) even though it carries a `.f90`
+extension. The build forces fixed-form on it (`Fortran_FORMAT FIXED` in
+`../CMakeLists.txt`); the default 72-column width ignores the sequence numbers.
+
+All floating-point arrays are declared single-precision `real`. The whole
+package treats the elnet ABI as **double precision** by compiling this file with
+`-fdefault-real-8` (so default `real` is 8 bytes). This matches how R's `glmnet`
+and Julia's `glmnet_jll` build it. The `glmnet_default_real_bytes()` probe in
+`../glmnet_capi.f90` exists to assert that flag is active.
+
+Because we vendor and link GPL-2.0 Fortran, this binding package as a whole is
+distributed under **GPL-2.0-or-later** (see root `LICENSE`).
