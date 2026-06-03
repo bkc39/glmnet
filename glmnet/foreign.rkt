@@ -8,9 +8,8 @@
 
 (provide
  (contract-out
-  ;; Connectivity / self-check surface (Phase 0).
+  ;; Native-library self-check surface.
   [glmnet-capi-abi-version   (-> exact-positive-integer?)]
-  [glmnet-hello              (-> real? real? real?)]
   [glmnet-default-real-bytes (-> exact-positive-integer?)]))
 
 ;; Load-time precision guard. The vendored glmnet Fortran declares its arrays as

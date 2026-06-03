@@ -16,14 +16,19 @@ package; you only need one to rebuild the native library (see @secref["guide"]).
 
 @section{A first call}
 
-The @secref["ex-hello"] example is a pure connectivity check --- it confirms the
-bindings load, that values marshal correctly across the C ABI, and that the
-native library was compiled with the double-precision contract the numeric API
-depends on:
+Fit ordinary least squares and read off the result:
 
 @racketblock[
 (require glmnet)
-(glmnet-hello 2.5 4.0)         (code:comment "=> 6.5")
+(define fit (ols '((1.0 2.0) (2.0 1.0) (3.0 4.0) (4.0 3.0)) '(1.0 4.0 3.0 6.0)))
+(elnet-result-intercept fit)
+(elnet-result-coefficients fit)
+]
+
+You can also confirm the native library loaded and was built with the
+double-precision contract the numeric API depends on:
+
+@racketblock[
 (glmnet-default-real-bytes)    (code:comment "=> 8")
 (glmnet-capi-abi-version)      (code:comment "=> 1")
 ]

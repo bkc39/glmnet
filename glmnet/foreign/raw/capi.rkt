@@ -15,10 +15,6 @@
 (define-glmnet glmnet-capi-abi-version
   (_fun -> _int))
 
-;; double glmnet_hello(double a, double b);  -- returns a + b
-(define-glmnet glmnet-hello
-  (_fun _double _double -> _double))
-
 ;; int glmnet_default_real_bytes(void);  -- MUST be 8 (see library precision contract)
 (define-glmnet glmnet-default-real-bytes
   (_fun -> _int))

@@ -29,18 +29,26 @@ needed to use the package.
 
 ```racket
 (require glmnet)
-(glmnet-hello 2.5 4.0)        ; => 6.5
+(ols '((1.0 2.0) (2.0 1.0) (3.0 4.0) (4.0 3.0)) '(1.0 4.0 3.0 6.0))  ; => an elnet-result
 (glmnet-default-real-bytes)  ; => 8   (the -fdefault-real-8 precision contract)
 ```
 
-## Build from source
+## Build and run the examples (via Nix)
 
 ```bash
-nix build .#native      # build libglmnetcompat + run the Fortran ctest suite
-nix flake check         # build everything, run raco test, render docs
+nix develop                     # builds the native lib + link-installs the package
+bash scripts/run-examples.sh    # runs OLS, ridge, lasso, elastic net; prints each fit
+raco test ./glmnet/             # full suite: unit tests + example harnesses
 ```
 
-or with a local toolchain (gfortran + cmake + Racket): see `AGENTS.md`.
+Or verify everything in one shot:
+
+```bash
+nix build .#native              # build libglmnetcompat + run the Fortran ctest suite
+nix flake check                 # build everything, run raco test, render the docs
+```
+
+A local toolchain (gfortran + cmake + Racket) works too; see `AGENTS.md`.
 
 ## License
 

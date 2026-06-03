@@ -95,7 +95,7 @@ cp fortran/build/libglmnetcompat.* glmnet/native-libs/      # stage for the load
 # racket (link mode, once)
 raco pkg install --batch --auto --link --name glmnet ./glmnet
 raco test ./glmnet/
-racket glmnet/examples/test/00-hello-fortran.rkt
+bash scripts/run-examples.sh                                 # run every example
 ```
 
 Or `nix build .#native` (runs the Fortran ctest suite) and `nix flake check`
@@ -121,6 +121,10 @@ The script needs Nix and must run **on each target platform**: build the
 host (`.github/workflows/raco-catalog.yml` builds and validates them in CI, with
 `ubuntu-22.04` exercised explicitly). Commit the resulting `candidates/<platform>/`
 files; only the loose copies directly under `native-libs/` are git-ignored.
+
+The **Linux candidate has a known blocker** (polyfill-glibc vs libmvec SIMD math)
+and its CI legs are currently allowed-to-fail — see **`LINUX_CANDIDATE.md`** for
+the build steps, the diagnosis, and the fix to apply on the Linux host.
 
 ## Roadmap
 

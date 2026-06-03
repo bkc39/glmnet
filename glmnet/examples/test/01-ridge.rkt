@@ -1,9 +1,9 @@
 #lang racket/base
 
-;; Runner + tests for the literate example ../02-ridge.rkt.
+;; Runner + tests for the literate example ../01-ridge.rkt.
 
 (require glmnet
-         "../02-ridge.rkt")
+         "../01-ridge.rkt")
 
 (module+ main
   (define r (run-example))

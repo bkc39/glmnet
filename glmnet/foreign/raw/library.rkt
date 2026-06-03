@@ -5,7 +5,7 @@
 ;; libglmnetcompat is our C-ABI shim (fortran/glmnet_capi.f90) statically linked
 ;; with the vendored glmnet Fortran (fortran/vendor/glmnet5.f90). It exports
 ;; clean bind(C) symbols, so `define-glmnet` maps hyphenated Racket names to the
-;; underscored C names (glmnet-hello -> glmnet_hello).
+;; underscored C names (glmnet-elnet-solo -> glmnet_elnet_solo).
 ;;
 ;; `native-libs-dir` is resolved relative to this file, which lives at
 ;; glmnet/foreign/raw/ -- two directories below the collection root -- so the

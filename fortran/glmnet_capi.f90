@@ -16,7 +16,7 @@ module glmnet_capi
   use, intrinsic :: iso_c_binding
   implicit none
   private
-  public :: glmnet_capi_abi_version, glmnet_hello, glmnet_default_real_bytes
+  public :: glmnet_capi_abi_version, glmnet_default_real_bytes
   public :: glmnet_elnet_solo
 
   ! glmnet's "+/- infinity" sentinel for unconstrained coefficient bounds.
@@ -29,14 +29,6 @@ contains
        bind(C, name="glmnet_capi_abi_version")
     glmnet_capi_abi_version = 1_c_int
   end function glmnet_capi_abi_version
-
-  ! Hello-world numeric round-trip: proves clean by-value double marshalling
-  ! across the FFI boundary. Returns a + b.
-  real(c_double) function glmnet_hello(a, b) bind(C, name="glmnet_hello")
-    real(c_double), value, intent(in) :: a
-    real(c_double), value, intent(in) :: b
-    glmnet_hello = a + b
-  end function glmnet_hello
 
   ! Size in bytes of the Fortran default `real`. MUST be 8 -- i.e. the library
   ! was compiled with -fdefault-real-8 -- or the elnet ABI does not match the

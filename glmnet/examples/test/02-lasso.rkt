@@ -1,9 +1,9 @@
 #lang racket/base
 
-;; Runner + tests for the literate example ../03-lasso.rkt.
+;; Runner + tests for the literate example ../02-lasso.rkt.
 
 (require glmnet
-         "../03-lasso.rkt")
+         "../02-lasso.rkt")
 
 (module+ main
   (define r (run-example))

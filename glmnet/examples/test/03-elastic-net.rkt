@@ -1,9 +1,9 @@
 #lang racket/base
 
-;; Runner + tests for the literate example ../04-elastic-net.rkt.
+;; Runner + tests for the literate example ../03-elastic-net.rkt.
 
 (require glmnet
-         "../04-elastic-net.rkt")
+         "../03-elastic-net.rkt")
 
 (module+ main
   (define r (run-example))

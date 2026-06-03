@@ -182,9 +182,28 @@
             packages = [ pkgs.racket pkgs.gfortran pkgs.cmake pkgs.gnumake ];
             shellHook = ''
               export PLTUSERHOME="$PWD/.racket-user"
-              echo "glmnet dev shell. Build the native lib with:"
-              echo "  cmake -S fortran -B fortran/build -DBUILD_TESTING=ON && cmake --build fortran/build && ctest --test-dir fortran/build"
-              echo "Then stage it:  cp fortran/build/libglmnetcompat.* glmnet/native-libs/"
+              mkdir -p "$PLTUSERHOME"
+
+              # Build the native library and point the loader + pre-install hook
+              # at it, so (require glmnet) and the examples just work.
+              echo "Building native library (.#native)..."
+              if _np=$(nix build --no-link --print-out-paths .#native 2>/dev/null); then
+                export GLMNET_NATIVE_LIB_PATH="$_np"
+              else
+                echo "  (could not build .#native; see AGENTS.md to build manually)"
+              fi
+
+              # Install the package in link mode on first entry.
+              _stamp="$PLTUSERHOME/.glmnet-linked"
+              if [ ! -f "$_stamp" ]; then
+                raco pkg install --batch --auto --link --no-docs --scope user \
+                  --skip-installed --name glmnet "$PWD/glmnet" && touch "$_stamp" || true
+              fi
+
+              echo ""
+              echo "glmnet dev shell ready."
+              echo "  Run all examples:  bash scripts/run-examples.sh"
+              echo "  Run the tests:     raco test ./glmnet/"
             '';
           };
         });

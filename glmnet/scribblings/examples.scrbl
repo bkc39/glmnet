@@ -15,8 +15,7 @@ guaranteed to stay in sync with the code.
 
 @local-table-of-contents[]
 
-@lp-include["../examples/00-hello-fortran.rkt"]
-@lp-include["../examples/01-ols.rkt"]
-@lp-include["../examples/02-ridge.rkt"]
-@lp-include["../examples/03-lasso.rkt"]
-@lp-include["../examples/04-elastic-net.rkt"]
+@lp-include["../examples/00-ols.rkt"]
+@lp-include["../examples/01-ridge.rkt"]
+@lp-include["../examples/02-lasso.rkt"]
+@lp-include["../examples/03-elastic-net.rkt"]
