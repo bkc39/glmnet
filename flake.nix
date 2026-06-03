@@ -31,40 +31,6 @@
         let
           pkgs = import nixpkgs { inherit system; };
 
-          # polyfill-glibc rewrites ELF binaries built against a newer glibc so
-          # they resolve only symbols available on an older target. Used by
-          # scripts/build-so.sh to make Linux candidates portable back to the
-          # glibc 2.17 baseline (covers Ubuntu 22.04 / pkg-build.racket-lang.org
-          # and older). Not in nixpkgs; pinned to a known-good upstream commit.
-          polyfill-glibc = pkgs.stdenv.mkDerivation {
-            pname = "polyfill-glibc";
-            version = "unstable-2025-dd59051";
-            src = pkgs.fetchFromGitHub {
-              owner = "corsix";
-              repo = "polyfill-glibc";
-              rev = "dd59051faaa10ee63c1b96f1b47bf9fcd3770ee2";
-              hash = "sha256-Qkzy33dIGnv9BOmRwql+LpYaEukZZIADSux09Fz3h7E=";
-            };
-            nativeBuildInputs = [ pkgs.ninja ];
-            dontConfigure = true;
-            buildPhase = ''
-              runHook preBuild
-              ninja polyfill-glibc
-              runHook postBuild
-            '';
-            installPhase = ''
-              runHook preInstall
-              install -Dm755 polyfill-glibc $out/bin/polyfill-glibc
-              runHook postInstall
-            '';
-            meta = {
-              description = "Patch ELF binaries to require an older glibc version";
-              homepage = "https://github.com/corsix/polyfill-glibc";
-              license = pkgs.lib.licenses.mit;
-              platforms = [ "x86_64-linux" "aarch64-linux" ];
-            };
-          };
-
           # The native C-ABI shim: libglmnetcompat, built from the vendored glmnet
           # Fortran (fortran/vendor/glmnet5.f90) plus our iso_c_binding wrapper.
           # ctest runs the Fortran self-checks (incl. the -fdefault-real-8 probe).
@@ -158,8 +124,6 @@
         {
           default = racket;
           inherit native racket copy-native-libs;
-        } // nixpkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
-          inherit polyfill-glibc;
         });
 
       apps = forAllSystems (system: {

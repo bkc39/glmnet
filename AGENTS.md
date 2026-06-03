@@ -25,7 +25,7 @@ glmnet/                        Racket collection
   tests/*.rkt                  rackunit unit tests
   private/install-glmnet-native.rkt   pre-install hook (env -> staged -> candidate)
   native-libs/candidates/<plat>/      committed prebuilt shared objects
-scripts/                       build-so.sh, glibc-shim.c, ... (portable candidates)
+scripts/                       build-so.sh, test-local.sh (portable candidates)
 flake.nix                      native + racket derivations, devShell, checks
 ```
 
@@ -108,23 +108,26 @@ its gfortran/quadmath runtime) is committed per platform under
 `glmnet/native-libs/candidates/<platform>/` and staged at install time by
 `private/install-glmnet-native.rkt` (env var → already-staged → candidate).
 
-Build a candidate with `scripts/build-so.sh <darwin|linux|linux-aarch64>`. It
-builds the `.#native` derivation, bundles the runtime closure, sets portable
-rpaths (`@rpath`/`@loader_path` on macOS; `RUNPATH=$ORIGIN` on Linux), and on
-Linux runs `polyfill-glibc` + `libglmnetshim.so` (scripts/glibc-shim.c) to drop
-the glibc floor to 2.17 so it loads on Ubuntu 22.04 (the catalog build server)
-and older. `scripts/test-local.sh` then installs from the candidate with a plain
-Racket (no Nix) and runs the suite — exactly what `pkgs.racket-lang.org` does.
+Build a candidate with `scripts/build-so.sh <darwin|linux|linux-aarch64>`, which
+bundles the gfortran/quadmath runtime alongside `libglmnetcompat` and sets
+portable rpaths (`@rpath`/`@loader_path` on macOS; `RUNPATH=$ORIGIN` on Linux):
 
-The script needs Nix and must run **on each target platform**: build the
-`darwin` candidate on macOS and the `linux`/`linux-aarch64` candidates on a Linux
-host (`.github/workflows/raco-catalog.yml` builds and validates them in CI, with
+- **darwin** builds the `.#native` flake derivation (needs Nix) and rewrites the
+  dylib closure to `@rpath`.
+- **linux / linux-aarch64** build *inside* the `manylinux2014` container (needs
+  Docker), so the `.so` links natively against **glibc 2.17** — it requires only
+  `GLIBC <= 2.17` and loads on Ubuntu 22.04 (the catalog build server) and every
+  Linux from the last decade, with no ELF post-processing (no polyfill / symbol
+  shim). This mirrors the sibling `rkt-polars` build. See **`LINUX_CANDIDATE.md`**.
+
+`scripts/test-local.sh` then installs from the candidate with a plain Racket (no
+Nix) and runs the suite — exactly what `pkgs.racket-lang.org` does.
+
+The script must run **on each target platform**: build the `darwin` candidate on
+macOS and the `linux`/`linux-aarch64` candidates on the matching Linux host
+(`.github/workflows/raco-catalog.yml` builds and validates them in CI, with
 `ubuntu-22.04` exercised explicitly). Commit the resulting `candidates/<platform>/`
 files; only the loose copies directly under `native-libs/` are git-ignored.
-
-The **Linux candidate has a known blocker** (polyfill-glibc vs libmvec SIMD math)
-and its CI legs are currently allowed-to-fail — see **`LINUX_CANDIDATE.md`** for
-the build steps, the diagnosis, and the fix to apply on the Linux host.
 
 ## Roadmap
 
