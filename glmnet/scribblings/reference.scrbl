@@ -99,6 +99,61 @@ cases.
   @secref["ex-elastic-net"].
 }
 
+@section[#:tag "ref-binomial"]{Fitting binomial (logistic) models}
+
+The binomial family fits a two-class logistic model: the response is a 0/1 class
+label and the fit models the log-odds of class 1. @racket[logistic-fit] mirrors
+@racket[elnet-fit]'s keywords, and prediction helpers turn a fit into class-1
+probabilities or hard labels.
+
+@defstruct*[logistic-result ([intercept real?]
+                             [coefficients (vectorof real?)]
+                             [dev-ratio real?]
+                             [lambda real?]
+                             [num-passes exact-nonnegative-integer?])
+            #:transparent]{
+  A fitted two-class logistic model. @racket[intercept] and the dense
+  @racket[coefficients] (on the original predictor scale) are on the log-odds
+  scale for class 1; @racket[lambda] is the penalty actually used;
+  @racket[dev-ratio] is the fraction of null deviance explained (the logistic
+  analogue of @racket[elnet-result]'s @racket[r-squared]); @racket[num-passes] is
+  glmnet's coordinate-descent pass count.
+}
+
+@defproc[(logistic-fit [X (and/c (listof (listof real?)) pair?)]
+                       [y (and/c (listof (or/c 0 1)) pair?)]
+                       [#:lambda lambda (>=/c 0)]
+                       [#:alpha alpha (real-in 0 1) 1.0]
+                       [#:standardize? standardize? boolean? #t]
+                       [#:intercept? intercept? boolean? #t]
+                       [#:thresh thresh (>/c 0) 1e-7]
+                       [#:max-iters max-iters exact-positive-integer? 100000])
+         logistic-result?]{
+  Fits a single dense two-class logistic elastic-net model. @racket[X] is a
+  non-empty list of equal-length rows and @racket[y] a matching list of 0/1 class
+  labels. @racket[alpha] mixes the penalty (@racket[0.0] ridge logistic,
+  @racket[1.0] lasso logistic, in between elastic net) and @racket[lambda] sets
+  its strength. Raises an error if glmnet reports a fatal condition --- including
+  a class probability collapsing under perfect separation, which a larger
+  @racket[lambda] usually fixes. See @secref["ex-logistic"].
+}
+
+@defproc[(logistic-predict-proba [fit logistic-result?]
+                                 [X (and/c (listof (listof real?)) pair?)])
+         (listof (real-in 0 1))]{
+  The class-1 probability @math{1 / (1 + e^(-(β₀ + xβ)))} for each row of
+  @racket[X]. Each row must have as many features as @racket[fit] has
+  coefficients.
+}
+
+@defproc[(logistic-predict [fit logistic-result?]
+                           [X (and/c (listof (listof real?)) pair?)]
+                           [#:threshold threshold (real-in 0 1) 0.5])
+         (listof (or/c 0 1))]{
+  Hard class labels: @racket[1] where @racket[logistic-predict-proba] is at least
+  @racket[threshold], otherwise @racket[0].
+}
+
 @section[#:tag "ref-connectivity"]{Connectivity and self-checks}
 
 These entry points call directly into the C-ABI shim, for confirming the native
