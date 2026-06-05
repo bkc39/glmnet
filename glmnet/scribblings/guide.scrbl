@@ -99,6 +99,30 @@ to class-1 probabilities through the logistic function, and
 @racket[logistic-predict] thresholds those (at @racket[0.5] by default) into 0/1
 labels. See @secref["ex-logistic"] for a worked classification example.
 
+@section[#:tag "guide-multinomial"]{Multiclass classification: the multinomial family}
+
+The binomial family handles two classes; the @deftech{multinomial family} handles
+@math{K > 2}. It is the same @tt{lognet} solver with the class count set above 1,
+so the elastic-net penalty is unchanged. The response is an integer class label
+in @math{{0, …, K−1}}, and the fit returns @math{K} intercepts and @math{K}
+coefficient vectors (the symmetric parameterization):
+
+@racketblock[
+(require glmnet)
+(define X '((1.0 1.0) (5.0 1.0) (3.0 5.0) (2.0 2.0) (6.0 1.0) (4.0 6.0)))
+(define y '(0 1 2 0 1 2))
+(define fit (multinomial-fit X y #:lambda 0.05))
+(code:comment "K coefficient vectors, one per class:")
+(multinomial-result-coefficients fit)
+(multinomial-predict-proba fit X)
+(multinomial-predict fit X)]
+
+Class probabilities are the @emph{softmax} over the @math{K} linear predictors
+@math{η_k = a0_k + x·β_k}: @racket[multinomial-predict-proba] returns the per-row
+distributions (each summing to 1) and @racket[multinomial-predict] returns the
+argmax class. As with the other families, @racket[#:alpha 1.0] is the sparse
+(lasso) fit and @racket[#:alpha 0.0] the ridge fit. See @secref["ex-multinomial"].
+
 @section[#:tag "guide-precision"]{The precision contract}
 
 The vendored Fortran declares its arrays as single-precision @tt{real}, but the

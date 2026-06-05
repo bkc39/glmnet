@@ -19,6 +19,7 @@ module glmnet_capi
   public :: glmnet_capi_abi_version, glmnet_default_real_bytes
   public :: glmnet_elnet_solo
   public :: glmnet_lognet_solo
+  public :: glmnet_multinomial_solo
 
   ! glmnet's "+/- infinity" sentinel for unconstrained coefficient bounds.
   real(c_double), parameter :: big = 9.9e35_c_double
@@ -225,5 +226,108 @@ contains
 
     deallocate(xw, yw, gw, vp, cl, ulam, a0, ca, alm, dev, jd, ia, nin)
   end subroutine glmnet_lognet_solo
+
+  ! Fit a single dense K-class multinomial elastic-net model -- one alpha, one
+  ! lambda -- and return DENSE per-class coefficient vectors plus per-class
+  ! intercepts. This is the multiclass extension of glmnet_lognet_solo: the same
+  ! vendored `lognet`, but with nc = K (>= 2), which routes internally to the
+  ! multiclass `lognetn` path.
+  !
+  ! The response y is an integer class label in 0..K-1 per observation. glmnet
+  ! wants an no-by-K indicator matrix; we build it as a one-hot of y. The fit is
+  ! the symmetric multinomial parameterization, so there are K intercepts and K
+  ! coefficient columns; the predicted probabilities are the softmax over the K
+  ! linear predictors  eta_k = a0_k + x . beta_k.
+  !
+  !   alpha          : elastic-net mixing in [0,1] (0 = ridge, 1 = lasso)
+  !   no, ni, nc     : observations, predictors, classes (nc = K >= 2)
+  !   x(no,ni)       : column-major predictor matrix (NOT modified -- copied)
+  !   y(no)          : integer class labels 0..K-1 (NOT modified -- copied)
+  !   lambda         : the single penalty value to fit
+  !   standardize    : 1 => standardize predictors (glmnet default), 0 => no
+  !   intercept      : 1 => fit intercepts, 0 => no
+  !   thresh, maxit  : convergence threshold and max passes
+  !
+  !   intercept_out(nc)  : the K fitted intercepts (log-odds scale)
+  !   beta_out(ni*nc)    : DENSE coefficients, CLASS-MAJOR -- class ic (1..nc)
+  !                        predictor j (1..ni) lives at (ic-1)*ni + j
+  !   dev_ratio_out      : fraction of null deviance explained (multinomial "R^2")
+  !   lambda_out         : the lambda actually used
+  !   nlp_out            : number of passes over the data
+  !   jerr_out           : 0 ok; >0 fatal (no output); <0 non-fatal partial
+  !                        (see vendor/glmnet5.f90 header for the codes)
+  subroutine glmnet_multinomial_solo(alpha, no, ni, nc, x, y, lambda, &
+       standardize, intercept, thresh, maxit, &
+       intercept_out, beta_out, dev_ratio_out, lambda_out, nlp_out, jerr_out) &
+       bind(C, name="glmnet_multinomial_solo")
+    real(c_double),    value, intent(in)  :: alpha, lambda, thresh
+    integer(c_int),    value, intent(in)  :: no, ni, nc, standardize, intercept, maxit
+    real(c_double),           intent(in)  :: x(no, ni)
+    real(c_double),           intent(in)  :: y(no)
+    real(c_double),           intent(out) :: intercept_out(nc)
+    real(c_double),           intent(out) :: beta_out(ni*nc)
+    real(c_double),           intent(out) :: dev_ratio_out, lambda_out
+    integer(c_int),           intent(out) :: nlp_out, jerr_out
+
+    ! lognet is an external (non-module) subroutine from vendor/glmnet5.f90.
+    external :: lognet
+
+    ! Work copies (lognet standardizes x and normalizes y in place) plus the
+    ! lognet scratch/output arrays. For the multiclass case a0/ca/dev carry nc
+    ! class columns and the active set (ia/nin) is SHARED across classes.
+    real(c_double), allocatable :: xw(:,:), yw(:,:), gw(:,:), vp(:), cl(:,:)
+    real(c_double), allocatable :: ulam(:), a0(:,:), ca(:,:,:), alm(:), dev(:)
+    integer(c_int), allocatable :: jd(:), ia(:), nin(:)
+    integer(c_int) :: nlam, isd, intr, kopt, lmu, nlp, jerr, l, ic, lbl
+    real(c_double) :: dev0
+
+    nlam = 1            ! single lambda -> "solo" fit
+    isd  = standardize
+    intr = intercept
+    kopt = 0            ! 0 = exact Newton, ungrouped (R type.multinomial="ungrouped")
+
+    allocate(xw(no, ni), yw(no, nc), gw(no, nc), vp(ni), cl(2, ni))
+    allocate(ulam(nlam), a0(nc, nlam), ca(ni, nc, nlam), alm(nlam), dev(nlam))
+    allocate(jd(1), ia(ni), nin(nlam))
+
+    xw = x                          ! copy: lognet destroys (standardizes) its x
+    yw = 0.0_c_double               ! one-hot the integer labels 0..nc-1
+    do l = 1, no
+       lbl = nint(y(l)) + 1         ! label 0..nc-1 -> column 1..nc
+       yw(l, lbl) = 1.0_c_double
+    end do
+    gw      = 0.0_c_double          ! no offset
+    vp      = 1.0_c_double          ! equal per-predictor penalty factors
+    cl(1,:) = -big                  ! no lower bound on coefficients
+    cl(2,:) =  big                  ! no upper bound
+    jd(1)   = 0                     ! use all variables
+    ulam(1) = lambda                ! flmin >= 1 => use this supplied lambda
+
+    call lognet(alpha, no, ni, nc, xw, yw, gw, jd, vp, cl, ni + 1, ni, nlam, &
+         1.0_c_double, ulam, thresh, isd, intr, maxit, kopt, &
+         lmu, a0, ca, ia, nin, dev0, dev, alm, nlp, jerr)
+
+    jerr_out      = jerr
+    nlp_out       = nlp
+    intercept_out = 0.0_c_double
+    beta_out      = 0.0_c_double
+    dev_ratio_out = 0.0_c_double
+    lambda_out    = 0.0_c_double
+
+    ! jerr > 0 is fatal (no output). Otherwise densify the first (only) solution;
+    ! ia(1..nin) is the active set shared by all classes, ca(l,ic,1) its weight.
+    if (jerr <= 0 .and. lmu >= 1) then
+       intercept_out(1:nc) = a0(1:nc, 1)
+       dev_ratio_out       = dev(1)
+       lambda_out          = alm(1)
+       do l = 1, nin(1)
+          do ic = 1, nc
+             beta_out((ic - 1) * ni + ia(l)) = ca(l, ic, 1)
+          end do
+       end do
+    end if
+
+    deallocate(xw, yw, gw, vp, cl, ulam, a0, ca, alm, dev, jd, ia, nin)
+  end subroutine glmnet_multinomial_solo
 
 end module glmnet_capi

@@ -154,6 +154,59 @@ probabilities or hard labels.
   @racket[threshold], otherwise @racket[0].
 }
 
+@section[#:tag "ref-multinomial"]{Fitting multinomial (multiclass) models}
+
+The multinomial family fits a K-class classifier: the response is a list of
+integer class labels @math{0..K-1} and the fit returns K intercepts and K
+coefficient vectors.
+
+@defstruct*[multinomial-result ([intercepts (vectorof real?)]
+                                [coefficients (vectorof (vectorof real?))]
+                                [dev-ratio real?]
+                                [lambda real?]
+                                [num-passes exact-nonnegative-integer?])
+            #:transparent]{
+  A fitted K-class model. @racket[intercepts] is a vector of K reals;
+  @racket[coefficients] is a vector of K coefficient vectors (each of length
+  @racket[_ni]), one per class, on the original predictor scale.
+  @racket[dev-ratio] is the fraction of null deviance explained (the multiclass
+  analogue of @racket[elnet-result]'s @racket[r-squared]); @racket[lambda] is the
+  penalty used; @racket[num-passes] is glmnet's pass count.
+}
+
+@defproc[(multinomial-fit [X (and/c (listof (listof real?)) pair?)]
+                          [y (and/c (listof exact-nonnegative-integer?) pair?)]
+                          [#:lambda lambda (>=/c 0)]
+                          [#:alpha alpha (real-in 0 1) 1.0]
+                          [#:standardize? standardize? boolean? #t]
+                          [#:intercept? intercept? boolean? #t]
+                          [#:thresh thresh (>/c 0) 1e-7]
+                          [#:max-iters max-iters exact-positive-integer? 100000])
+         multinomial-result?]{
+  Fits a single dense K-class multinomial elastic-net model. @racket[y] is a list
+  of integer class labels that must cover @racket[0]..@racket[(sub1 K)]
+  contiguously (every class present). @racket[alpha] mixes the penalty
+  (@racket[0.0] ridge, @racket[1.0] lasso) and @racket[lambda] sets its strength.
+  Raises an error on a fatal glmnet condition (e.g. a class probability
+  collapsing under perfect separation --- use a larger @racket[lambda]). See
+  @secref["ex-multinomial"].
+}
+
+@defproc[(multinomial-predict-proba [fit multinomial-result?]
+                                    [X (and/c (listof (listof real?)) pair?)])
+         (listof (listof (real-in 0 1)))]{
+  The per-class softmax probabilities for each row of @racket[X]; each inner list
+  has K entries summing to 1. Each row must have as many features as @racket[fit]
+  has coefficients.
+}
+
+@defproc[(multinomial-predict [fit multinomial-result?]
+                              [X (and/c (listof (listof real?)) pair?)])
+         (listof exact-nonnegative-integer?)]{
+  The predicted class label @math{0..K-1} for each row of @racket[X] --- the
+  argmax of @racket[multinomial-predict-proba].
+}
+
 @section[#:tag "ref-connectivity"]{Connectivity and self-checks}
 
 These entry points call directly into the C-ABI shim, for confirming the native
