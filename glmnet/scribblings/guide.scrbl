@@ -68,6 +68,37 @@ fitting and reports coefficients on the original scale, and it fits an
 unpenalized intercept. These match the conventions in the R package's vignette
 and are the defaults the bindings expose.
 
+@section[#:tag "guide-binomial"]{Classification: the binomial family}
+
+The models above fit a numeric response with the Gaussian @tt{elnet} solver. For
+@bold{binary classification}, the @deftech{binomial family} fits a two-class
+logistic model with glmnet's @tt{lognet} solver instead: the response @math{y} is
+a 0/1 class label, and the model predicts the @emph{log-odds} of class 1,
+
+@centered{@math{log( P(y=1) / P(y=0) ) = β₀ + Xβ},}
+
+minimizing the penalized binomial deviance under the same elastic-net penalty.
+The @math{α} and @math{λ} knobs mean exactly what they do for the Gaussian
+models, so @racket[#:alpha 1.0] is the sparse (lasso) logistic and
+@racket[#:alpha 0.0] the ridge logistic.
+
+@racketblock[
+(require glmnet)
+(define X '((1.0 5.0) (2.0 4.0) (5.0 1.0) (4.0 2.0)))
+(define y '(0 0 1 1))
+(define fit (logistic-fit X y #:lambda 0.05))
+(logistic-result-coefficients fit)
+(code:comment "class-1 probabilities, then hard 0/1 labels:")
+(logistic-predict-proba fit X)
+(logistic-predict fit X)]
+
+@racket[logistic-fit] returns a @racket[logistic-result] whose
+@racket[logistic-result-dev-ratio] is the fraction of null deviance explained ---
+the logistic analogue of @math{R²}. @racket[logistic-predict-proba] maps new rows
+to class-1 probabilities through the logistic function, and
+@racket[logistic-predict] thresholds those (at @racket[0.5] by default) into 0/1
+labels. See @secref["ex-logistic"] for a worked classification example.
+
 @section[#:tag "guide-precision"]{The precision contract}
 
 The vendored Fortran declares its arrays as single-precision @tt{real}, but the
