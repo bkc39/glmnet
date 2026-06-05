@@ -4,7 +4,7 @@
                      glmnet))
 
 @title[#:style '(toc)]{glmnet: lasso and elastic-net regularized models}
-@author{bkc}
+@author[(author+email "bkc" "bkcschemer@gmail.com")]
 
 @defmodule[glmnet]
 
