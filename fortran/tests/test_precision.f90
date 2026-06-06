@@ -28,8 +28,8 @@ program test_precision
   end if
 
   abi = glmnet_capi_abi_version()
-  if (abi /= 1) then
-     print *, "FAIL: glmnet_capi_abi_version =", abi, "; expected 1"
+  if (abi /= 2) then
+     print *, "FAIL: glmnet_capi_abi_version =", abi, "; expected 2"
      error stop 1
   end if
 
