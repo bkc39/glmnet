@@ -21,6 +21,10 @@ result-*
 /glmnet/native-libs/*.so
 /glmnet/native-libs/*.so.*
 
+# R-parity goldens are generated on demand (nix run .#gen-goldens / checks.parity),
+# never committed. The datasets under glmnet/private/data/ ARE committed.
+/scripts/r-parity/goldens/
+
 # Editor / OS
 *~
 .DS_Store

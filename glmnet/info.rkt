@@ -6,7 +6,10 @@
 
 (define collection "glmnet")
 (define version "0.1")
-(define deps '("base"))
+;; net-lib provides net/url, used by private/demo-utils.rkt (the parity/demo
+;; dataset loaders). It ships with the main Racket distribution, so the catalog
+;; resolves it trivially; main.rkt itself stays base-only.
+(define deps '("base" "net-lib"))
 (define build-deps '("scribble-lib" "racket-doc" "rackunit-lib"))
 (define scribblings '(("scribblings/glmnet.scrbl" (multi-page))))
 (define pkg-desc
