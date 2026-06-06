@@ -23,3 +23,4 @@ guaranteed to stay in sync with the code.
 @lp-include["../examples/05-multinomial.rkt"]
 @lp-include["../examples/06-cox.rkt"]
 @lp-include["../examples/07-poisson.rkt"]
+@lp-include["../examples/08-mgaussian.rkt"]

@@ -22,6 +22,7 @@ module glmnet_capi
   public :: glmnet_multinomial_solo
   public :: glmnet_coxnet_solo
   public :: glmnet_fishnet_solo
+  public :: glmnet_mgaussian_solo
 
   ! glmnet's "+/- infinity" sentinel for unconstrained coefficient bounds.
   real(c_double), parameter :: big = 9.9e35_c_double
@@ -510,5 +511,101 @@ contains
 
     deallocate(xw, yw, gw, ww, vp, cl, ulam, a0, ca, alm, dev, jd, ia, nin)
   end subroutine glmnet_fishnet_solo
+
+  ! Fit a single dense multi-response Gaussian ("mgaussian") elastic-net model --
+  ! one alpha, one lambda -- and return DENSE per-response coefficient vectors plus
+  ! per-response intercepts. One call to the vendored `multelnet` with nlam = 1.
+  !
+  ! The response is an no-by-nr matrix (nr response columns). multelnet applies a
+  ! GROUPED lasso across the responses: a predictor enters or leaves for all nr
+  ! responses together, so the active set (ia/nin) is shared and the coefficient
+  ! matrix has shared row support. Each response gets its own intercept; this is a
+  ! plain (identity-link) Gaussian fit, so prediction is  y_r = a0_r + x . beta_r.
+  !
+  !   alpha          : elastic-net mixing in [0,1] (0 = ridge, 1 = grouped lasso)
+  !   no, ni, nr     : observations, predictors, responses
+  !   x(no,ni)       : column-major predictor matrix (NOT modified -- copied)
+  !   y(no,nr)       : column-major response matrix (NOT modified -- copied)
+  !   lambda         : the single penalty value to fit
+  !   standardize    : 1 => standardize predictors (glmnet default), 0 => no
+  !   intercept      : 1 => fit intercepts, 0 => no
+  !   thresh, maxit  : convergence threshold and max passes
+  !
+  !   intercept_out(nr)  : the nr fitted intercepts
+  !   beta_out(ni*nr)    : DENSE coefficients, RESPONSE-MAJOR -- response r (1..nr)
+  !                        predictor j (1..ni) lives at (r-1)*ni + j
+  !   rsq_out            : fraction of (multi-response) variance explained (R^2)
+  !   lambda_out         : the lambda actually used
+  !   nlp_out            : number of passes over the data
+  !   jerr_out           : 0 ok; >0 fatal (no output); <0 non-fatal partial
+  !                        (see vendor/glmnet5.f90 header for the codes)
+  subroutine glmnet_mgaussian_solo(alpha, no, ni, nr, x, y, lambda, &
+       standardize, intercept, thresh, maxit, &
+       intercept_out, beta_out, rsq_out, lambda_out, nlp_out, jerr_out) &
+       bind(C, name="glmnet_mgaussian_solo")
+    real(c_double),    value, intent(in)  :: alpha, lambda, thresh
+    integer(c_int),    value, intent(in)  :: no, ni, nr, standardize, intercept, maxit
+    real(c_double),           intent(in)  :: x(no, ni)
+    real(c_double),           intent(in)  :: y(no, nr)
+    real(c_double),           intent(out) :: intercept_out(nr)
+    real(c_double),           intent(out) :: beta_out(ni*nr)
+    real(c_double),           intent(out) :: rsq_out, lambda_out
+    integer(c_int),           intent(out) :: nlp_out, jerr_out
+
+    ! multelnet is an external (non-module) subroutine from vendor/glmnet5.f90.
+    external :: multelnet
+
+    ! Work copies (multelnet standardizes x and y in place) plus the multelnet
+    ! scratch/output arrays. a0/ca carry nr response columns; the active set
+    ! (ia/nin) is SHARED across responses.
+    real(c_double), allocatable :: xw(:,:), yw(:,:), ww(:), vp(:), cl(:,:)
+    real(c_double), allocatable :: ulam(:), a0(:,:), ca(:,:,:), alm(:), rsq(:)
+    integer(c_int), allocatable :: jd(:), ia(:), nin(:)
+    integer(c_int) :: nlam, isd, jsd, intr, lmu, nlp, jerr, l, r
+
+    nlam = 1            ! single lambda -> "solo" fit
+    isd  = standardize
+    jsd  = 0            ! do NOT standardize the responses (R standardize.response=FALSE)
+    intr = intercept
+
+    allocate(xw(no, ni), yw(no, nr), ww(no), vp(ni), cl(2, ni))
+    allocate(ulam(nlam), a0(nr, nlam), ca(ni, nr, nlam), alm(nlam), rsq(nlam))
+    allocate(jd(1), ia(ni), nin(nlam))
+
+    xw      = x                  ! copy: multelnet standardizes x in place
+    yw      = y                  ! copy: multelnet standardizes y in place
+    ww      = 1.0_c_double       ! equal observation weights
+    vp      = 1.0_c_double       ! equal per-predictor penalty factors
+    cl(1,:) = -big               ! no lower bound on coefficients
+    cl(2,:) =  big               ! no upper bound
+    jd(1)   = 0                  ! use all variables
+    ulam(1) = lambda             ! flmin >= 1 => use this supplied lambda
+
+    call multelnet(alpha, no, ni, nr, xw, yw, ww, jd, vp, cl, ni + 1, ni, nlam, &
+         1.0_c_double, ulam, thresh, isd, jsd, intr, maxit, &
+         lmu, a0, ca, ia, nin, rsq, alm, nlp, jerr)
+
+    jerr_out      = jerr
+    nlp_out       = nlp
+    intercept_out = 0.0_c_double
+    beta_out      = 0.0_c_double
+    rsq_out       = 0.0_c_double
+    lambda_out    = 0.0_c_double
+
+    ! jerr > 0 is fatal (no output). Otherwise densify the first (only) solution;
+    ! ia(1..nin) is the active set shared by all responses, ca(l,r,1) its weight.
+    if (jerr <= 0 .and. lmu >= 1) then
+       intercept_out(1:nr) = a0(1:nr, 1)
+       rsq_out             = rsq(1)
+       lambda_out          = alm(1)
+       do l = 1, nin(1)
+          do r = 1, nr
+             beta_out((r - 1) * ni + ia(l)) = ca(l, r, 1)
+          end do
+       end do
+    end if
+
+    deallocate(xw, yw, ww, vp, cl, ulam, a0, ca, alm, rsq, jd, ia, nin)
+  end subroutine glmnet_mgaussian_solo
 
 end module glmnet_capi

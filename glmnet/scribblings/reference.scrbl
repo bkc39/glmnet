@@ -292,6 +292,48 @@ The Poisson family fits a non-negative count response with a log link.
   row must have as many features as @racket[fit] has coefficients.
 }
 
+@section[#:tag "ref-mgaussian"]{Fitting multi-response Gaussian models}
+
+The multi-response Gaussian family fits several numeric responses jointly with a
+grouped lasso across responses.
+
+@defstruct*[mgaussian-result ([intercepts (vectorof real?)]
+                              [coefficients (vectorof (vectorof real?))]
+                              [r-squared real?]
+                              [lambda real?]
+                              [num-passes exact-nonnegative-integer?])
+            #:transparent]{
+  A fitted multi-response model. @racket[intercepts] is a vector of nr reals;
+  @racket[coefficients] is a vector of nr coefficient vectors (each of length
+  @racket[_ni]), one per response, on the original predictor scale.
+  @racket[r-squared] is the fraction of (multi-response) variance explained;
+  @racket[lambda] is the penalty used; @racket[num-passes] is glmnet's pass count.
+}
+
+@defproc[(mgaussian-fit [X (and/c (listof (listof real?)) pair?)]
+                        [Y (and/c (listof (listof real?)) pair?)]
+                        [#:lambda lambda (>=/c 0)]
+                        [#:alpha alpha (real-in 0 1) 1.0]
+                        [#:standardize? standardize? boolean? #t]
+                        [#:intercept? intercept? boolean? #t]
+                        [#:thresh thresh (>/c 0) 1e-7]
+                        [#:max-iters max-iters exact-positive-integer? 100000])
+         mgaussian-result?]{
+  Fits a single dense multi-response Gaussian elastic-net model. @racket[Y] is a
+  response matrix (a non-empty list of equal-length rows, one column per response)
+  with one row per observation. The grouped lasso (@racket[alpha] toward
+  @racket[1.0]) selects predictors for all responses jointly; @racket[#:alpha 0.0]
+  is the ridge. See @secref["ex-mgaussian"].
+}
+
+@defproc[(mgaussian-predict [fit mgaussian-result?]
+                            [X (and/c (listof (listof real?)) pair?)])
+         (listof (listof real?))]{
+  The per-response predictions @math{a0_r + x·β_r} for each row of @racket[X] ---
+  one inner list (one entry per response) per row. Each row must have as many
+  features as @racket[fit] has coefficients.
+}
+
 @section[#:tag "ref-connectivity"]{Connectivity and self-checks}
 
 These entry points call directly into the C-ABI shim, for confirming the native
