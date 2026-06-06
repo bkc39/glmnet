@@ -254,6 +254,44 @@ indicator. There is no intercept --- the baseline hazard absorbs it.
   multiplicative effect on the baseline hazard.
 }
 
+@section[#:tag "ref-poisson"]{Fitting Poisson (count) models}
+
+The Poisson family fits a non-negative count response with a log link.
+
+@defstruct*[poisson-result ([intercept real?]
+                            [coefficients (vectorof real?)]
+                            [dev-ratio real?]
+                            [lambda real?]
+                            [num-passes exact-nonnegative-integer?])
+            #:transparent]{
+  A fitted Poisson model. @racket[intercept] and the dense @racket[coefficients]
+  (length @racket[_ni], on the original predictor scale) are on the log-mean
+  scale. @racket[dev-ratio] is the fraction of null deviance explained;
+  @racket[lambda] is the penalty used; @racket[num-passes] is glmnet's pass count.
+}
+
+@defproc[(poisson-fit [X (and/c (listof (listof real?)) pair?)]
+                      [y (and/c (listof (>=/c 0)) pair?)]
+                      [#:lambda lambda (>=/c 0)]
+                      [#:alpha alpha (real-in 0 1) 1.0]
+                      [#:standardize? standardize? boolean? #t]
+                      [#:intercept? intercept? boolean? #t]
+                      [#:thresh thresh (>/c 0) 1e-7]
+                      [#:max-iters max-iters exact-positive-integer? 100000])
+         poisson-result?]{
+  Fits a single dense Poisson elastic-net model. @racket[y] is a list of
+  non-negative counts. @racket[alpha] mixes the penalty (@racket[0.0] ridge,
+  @racket[1.0] lasso) and @racket[lambda] sets its strength. See
+  @secref["ex-poisson"].
+}
+
+@defproc[(poisson-predict-mean [fit poisson-result?]
+                               [X (and/c (listof (listof real?)) pair?)])
+         (listof (>/c 0))]{
+  The fitted Poisson mean @math{exp(β₀ + x·β)} for each row of @racket[X]. Each
+  row must have as many features as @racket[fit] has coefficients.
+}
+
 @section[#:tag "ref-connectivity"]{Connectivity and self-checks}
 
 These entry points call directly into the C-ABI shim, for confirming the native

@@ -154,6 +154,33 @@ relative to baseline, for ranking subjects --- and @racket[cox-linear-predictor]
 the raw @math{x·β}. As elsewhere, @racket[#:alpha 1.0] is the lasso and
 @racket[#:alpha 0.0] the ridge. See @secref["ex-cox"].
 
+@section[#:tag "guide-poisson"]{Count data: the Poisson family}
+
+The @deftech{Poisson family} models @bold{count} responses --- non-negative
+numbers such as events per interval. It uses a @emph{log link}, so the fitted
+mean is
+
+@centered{@math{μ = exp(β₀ + Xβ)},}
+
+and a positive coefficient multiplies the expected count. Poisson has an
+intercept, and the elastic-net penalty is unchanged.
+
+@racketblock[
+(require glmnet)
+(define X '((1.0 2.0) (3.0 1.0) (5.0 2.0) (8.0 1.0)))
+(code:comment "non-negative counts")
+(define y '(1 2 4 11))
+(define fit (poisson-fit X y #:lambda 0.1))
+(poisson-result-coefficients fit)
+(poisson-predict-mean fit X)]
+
+@racket[poisson-fit] returns a @racket[poisson-result] with an
+@racket[poisson-result-intercept], @racket[poisson-result-coefficients] (on the
+log-mean scale), and @racket[poisson-result-dev-ratio].
+@racket[poisson-predict-mean] applies the log link to give the fitted rate
+@math{exp(β₀ + x·β)} for new predictors. As elsewhere, @racket[#:alpha 1.0] is
+the lasso and @racket[#:alpha 0.0] the ridge. See @secref["ex-poisson"].
+
 @section[#:tag "guide-precision"]{The precision contract}
 
 The vendored Fortran declares its arrays as single-precision @tt{real}, but the
