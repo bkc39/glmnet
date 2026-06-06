@@ -21,6 +21,7 @@ module glmnet_capi
   public :: glmnet_lognet_solo
   public :: glmnet_multinomial_solo
   public :: glmnet_coxnet_solo
+  public :: glmnet_fishnet_solo
 
   ! glmnet's "+/- infinity" sentinel for unconstrained coefficient bounds.
   real(c_double), parameter :: big = 9.9e35_c_double
@@ -419,5 +420,95 @@ contains
 
     deallocate(xw, yw, dw, gw, ww, vp, cl, ulam, ca, alm, dev, jd, ia, nin)
   end subroutine glmnet_coxnet_solo
+
+  ! Fit a single dense Poisson elastic-net model -- one alpha, one lambda -- and
+  ! return a DENSE coefficient vector plus the fitted intercept. One call to the
+  ! vendored `fishnet` with nlam = 1.
+  !
+  ! The response y is a non-negative count per observation; the model uses a log
+  ! link, so the fitted mean is  mu = exp(intercept + x . beta). A positive
+  ! coefficient raises the expected count.
+  !
+  !   alpha          : elastic-net mixing in [0,1] (0 = ridge, 1 = lasso)
+  !   no, ni         : observations, predictors
+  !   x(no,ni)       : column-major predictor matrix (NOT modified -- copied)
+  !   y(no)          : non-negative counts (NOT modified -- copied)
+  !   lambda         : the single penalty value to fit
+  !   standardize    : 1 => standardize predictors (glmnet default), 0 => no
+  !   intercept      : 1 => fit an intercept, 0 => no
+  !   thresh, maxit  : convergence threshold and max passes
+  !
+  !   intercept_out  : fitted intercept (log-mean scale)
+  !   beta_out(ni)   : DENSE coefficients on the original predictor scale
+  !   dev_ratio_out  : fraction of null deviance explained (Poisson "R^2")
+  !   lambda_out     : the lambda actually used
+  !   nlp_out        : number of passes over the data
+  !   jerr_out       : 0 ok; >0 fatal (no output); <0 non-fatal partial
+  !                    (see vendor/glmnet5.f90 header for the codes)
+  subroutine glmnet_fishnet_solo(alpha, no, ni, x, y, lambda, &
+       standardize, intercept, thresh, maxit, &
+       intercept_out, beta_out, dev_ratio_out, lambda_out, nlp_out, jerr_out) &
+       bind(C, name="glmnet_fishnet_solo")
+    real(c_double),    value, intent(in)  :: alpha, lambda, thresh
+    integer(c_int),    value, intent(in)  :: no, ni, standardize, intercept, maxit
+    real(c_double),           intent(in)  :: x(no, ni)
+    real(c_double),           intent(in)  :: y(no)
+    real(c_double),           intent(out) :: intercept_out
+    real(c_double),           intent(out) :: beta_out(ni)
+    real(c_double),           intent(out) :: dev_ratio_out, lambda_out
+    integer(c_int),           intent(out) :: nlp_out, jerr_out
+
+    ! fishnet is an external (non-module) subroutine from vendor/glmnet5.f90.
+    external :: fishnet
+
+    ! Work copies (fishnet standardizes x in place) plus the fishnet scratch/output
+    ! arrays. Like elnet, a0 is a scalar intercept per lambda and ca is 2-D.
+    real(c_double), allocatable :: xw(:,:), yw(:), gw(:), ww(:), vp(:), cl(:,:)
+    real(c_double), allocatable :: ulam(:), a0(:), ca(:,:), alm(:), dev(:)
+    integer(c_int), allocatable :: jd(:), ia(:), nin(:)
+    integer(c_int) :: nlam, isd, intr, lmu, nlp, jerr, l
+    real(c_double) :: dev0
+
+    nlam = 1            ! single lambda -> "solo" fit
+    isd  = standardize
+    intr = intercept
+
+    allocate(xw(no, ni), yw(no), gw(no), ww(no), vp(ni), cl(2, ni))
+    allocate(ulam(nlam), a0(nlam), ca(ni, nlam), alm(nlam), dev(nlam))
+    allocate(jd(1), ia(ni), nin(nlam))
+
+    xw      = x                  ! copy: fishnet standardizes its x in place
+    yw      = y                  ! non-negative counts
+    gw      = 0.0_c_double       ! no offset
+    ww      = 1.0_c_double       ! equal observation weights
+    vp      = 1.0_c_double       ! equal per-predictor penalty factors
+    cl(1,:) = -big               ! no lower bound on coefficients
+    cl(2,:) =  big               ! no upper bound
+    jd(1)   = 0                  ! use all variables
+    ulam(1) = lambda             ! flmin >= 1 => use this supplied lambda
+
+    call fishnet(alpha, no, ni, xw, yw, gw, ww, jd, vp, cl, ni + 1, ni, nlam, &
+         1.0_c_double, ulam, thresh, isd, intr, maxit, &
+         lmu, a0, ca, ia, nin, dev0, dev, alm, nlp, jerr)
+
+    jerr_out      = jerr
+    nlp_out       = nlp
+    intercept_out = 0.0_c_double
+    beta_out      = 0.0_c_double
+    dev_ratio_out = 0.0_c_double
+    lambda_out    = 0.0_c_double
+
+    ! jerr > 0 is fatal (no output). Otherwise densify the first (only) solution.
+    if (jerr <= 0 .and. lmu >= 1) then
+       intercept_out = a0(1)
+       dev_ratio_out = dev(1)
+       lambda_out    = alm(1)
+       do l = 1, nin(1)
+          beta_out(ia(l)) = ca(l, 1)
+       end do
+    end if
+
+    deallocate(xw, yw, gw, ww, vp, cl, ulam, a0, ca, alm, dev, jd, ia, nin)
+  end subroutine glmnet_fishnet_solo
 
 end module glmnet_capi
