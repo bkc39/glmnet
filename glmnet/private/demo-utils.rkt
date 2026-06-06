@@ -19,7 +19,11 @@
 
 (provide try-download
          load-longley
-         load-wdbc)
+         load-wdbc
+         load-iris
+         load-veteran
+         load-warpbreaks
+         load-linnerud)
 
 (define-runtime-path data-dir "data")
 
@@ -68,3 +72,34 @@
   (define rows (parse-numeric-csv (read-data-csv "wdbc.csv")))
   (values (map cdr rows)
           (map car rows)))
+
+;; Iris (UCI, 150x5). Returns (values X y) with 4 features and integer class
+;; labels y in {0,1,2} (setosa=0, versicolor=1, virginica=2). Multinomial.
+(define (load-iris)
+  (define rows (parse-numeric-csv (read-data-csv "iris.csv")))
+  (values (map (lambda (r) (take r 4)) rows)
+          (map (lambda (r) (list-ref r 4)) rows)))
+
+;; Veteran lung-cancer survival data (137x7). Returns (values X times statuses):
+;; 5 numeric features (trt, karno, diagtime, age, prior), the follow-up time, and
+;; the 1 = death / 0 = censored indicator. Cox.
+(define (load-veteran)
+  (define rows (parse-numeric-csv (read-data-csv "veteran.csv")))
+  (values (map (lambda (r) (take r 5)) rows)
+          (map (lambda (r) (list-ref r 5)) rows)
+          (map (lambda (r) (list-ref r 6)) rows)))
+
+;; Warpbreaks (54x4). Returns (values X y) with 3 dummy features (woolB,
+;; tensionM, tensionH) and y = breaks (a non-negative count). Poisson.
+(define (load-warpbreaks)
+  (define rows (parse-numeric-csv (read-data-csv "warpbreaks.csv")))
+  (values (map (lambda (r) (take r 3)) rows)
+          (map (lambda (r) (list-ref r 3)) rows)))
+
+;; Linnerud (20x6). Returns (values X Y): 3 exercise predictors (chins, situps,
+;; jumps) and a 3-column physiological response matrix (weight, waist, pulse).
+;; Multi-response Gaussian.
+(define (load-linnerud)
+  (define rows (parse-numeric-csv (read-data-csv "linnerud.csv")))
+  (values (map (lambda (r) (take r 3)) rows)
+          (map (lambda (r) (drop r 3)) rows)))

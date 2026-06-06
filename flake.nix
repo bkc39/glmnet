@@ -31,7 +31,7 @@
       # app, and the checks.parity gate -- never by the default build or by the
       # `racket` check, so `nix flake check`'s core stays R-free.
       rEnvFor = pkgs: pkgs.rWrapper.override {
-        packages = with pkgs.rPackages; [ glmnet jsonlite ];
+        packages = with pkgs.rPackages; [ glmnet jsonlite survival ];
       };
     in
     {
