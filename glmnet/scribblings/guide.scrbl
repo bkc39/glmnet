@@ -123,6 +123,37 @@ distributions (each summing to 1) and @racket[multinomial-predict] returns the
 argmax class. As with the other families, @racket[#:alpha 1.0] is the sparse
 (lasso) fit and @racket[#:alpha 0.0] the ridge fit. See @secref["ex-multinomial"].
 
+@section[#:tag "guide-cox"]{Survival analysis: the Cox family}
+
+The families above all predict from a feature vector to a label or a number. The
+@deftech{Cox family} instead models @bold{survival data}: each observation has a
+follow-up time and a 0/1 event indicator (1 = the event happened, 0 =
+right-censored). It fits Cox's proportional-hazards model, in which the hazard is
+
+@centered{@math{h(t | x) = h₀(t) · exp(x·β)},}
+
+so there is @bold{no intercept} (the baseline hazard @math{h₀} is left
+unspecified) and a positive coefficient @emph{raises} the hazard --- shortening
+survival. The elastic-net penalty is unchanged.
+
+@racketblock[
+(require glmnet)
+(define X '((0.5 1.0) (2.0 2.0) (3.5 1.0) (4.0 2.0)))
+(define times '(12.0 8.0 4.0 3.0))
+(code:comment "0 = right-censored, 1 = event observed")
+(define statuses '(0 1 1 1))
+(define fit (cox-fit X times statuses #:lambda 0.1))
+(cox-result-coefficients fit)
+(cox-relative-risk fit X)]
+
+@racket[cox-fit] returns a @racket[cox-result] with
+@racket[cox-result-coefficients] (no intercept) and
+@racket[cox-result-dev-ratio] (the fraction of null partial-likelihood deviance
+explained). @racket[cox-relative-risk] gives @math{exp(x·β)} --- the hazard
+relative to baseline, for ranking subjects --- and @racket[cox-linear-predictor]
+the raw @math{x·β}. As elsewhere, @racket[#:alpha 1.0] is the lasso and
+@racket[#:alpha 0.0] the ridge. See @secref["ex-cox"].
+
 @section[#:tag "guide-precision"]{The precision contract}
 
 The vendored Fortran declares its arrays as single-precision @tt{real}, but the

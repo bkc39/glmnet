@@ -20,6 +20,7 @@ module glmnet_capi
   public :: glmnet_elnet_solo
   public :: glmnet_lognet_solo
   public :: glmnet_multinomial_solo
+  public :: glmnet_coxnet_solo
 
   ! glmnet's "+/- infinity" sentinel for unconstrained coefficient bounds.
   real(c_double), parameter :: big = 9.9e35_c_double
@@ -329,5 +330,94 @@ contains
 
     deallocate(xw, yw, gw, vp, cl, ulam, a0, ca, alm, dev, jd, ia, nin)
   end subroutine glmnet_multinomial_solo
+
+  ! Fit a single dense Cox proportional-hazards elastic-net model -- one alpha,
+  ! one lambda -- and return a DENSE coefficient vector. One call to the vendored
+  ! `coxnet` with nlam = 1.
+  !
+  ! Cox is a survival model: there is NO intercept (the baseline hazard is left
+  ! unspecified and absorbs it), so this returns coefficients only. The response
+  ! is a follow-up time plus a 0/1 event indicator. The fit models the log relative
+  ! hazard  x . beta  (a positive coefficient => higher hazard / shorter survival).
+  !
+  !   alpha          : elastic-net mixing in [0,1] (0 = ridge, 1 = lasso)
+  !   no, ni         : observations, predictors
+  !   x(no,ni)       : column-major predictor matrix (NOT modified -- copied)
+  !   time(no)       : follow-up / survival time (> 0; NOT modified -- copied)
+  !   status(no)     : 1 = event observed, 0 = right-censored (NOT modified -- copied)
+  !   lambda         : the single penalty value to fit
+  !   standardize    : 1 => standardize predictors (glmnet default), 0 => no
+  !   thresh, maxit  : convergence threshold and max passes
+  !
+  !   beta_out(ni)   : DENSE coefficients on the original predictor scale
+  !   dev_ratio_out  : fraction of null deviance explained (Cox partial-likelihood)
+  !   lambda_out     : the lambda actually used
+  !   nlp_out        : number of passes over the data
+  !   jerr_out       : 0 ok; >0 fatal (no output); <0 non-fatal partial
+  !                    (see vendor/glmnet5.f90 header for the codes)
+  subroutine glmnet_coxnet_solo(alpha, no, ni, x, time, status, lambda, &
+       standardize, thresh, maxit, &
+       beta_out, dev_ratio_out, lambda_out, nlp_out, jerr_out) &
+       bind(C, name="glmnet_coxnet_solo")
+    real(c_double),    value, intent(in)  :: alpha, lambda, thresh
+    integer(c_int),    value, intent(in)  :: no, ni, standardize, maxit
+    real(c_double),           intent(in)  :: x(no, ni)
+    real(c_double),           intent(in)  :: time(no)
+    real(c_double),           intent(in)  :: status(no)
+    real(c_double),           intent(out) :: beta_out(ni)
+    real(c_double),           intent(out) :: dev_ratio_out, lambda_out
+    integer(c_int),           intent(out) :: nlp_out, jerr_out
+
+    ! coxnet is an external (non-module) subroutine from vendor/glmnet5.f90.
+    external :: coxnet
+
+    ! Work copies (coxnet standardizes x in place) plus the coxnet scratch/output
+    ! arrays. There is no a0 -- Cox has no intercept -- so ca is 2-D (nx, nlam).
+    real(c_double), allocatable :: xw(:,:), yw(:), dw(:), gw(:), ww(:), vp(:), cl(:,:)
+    real(c_double), allocatable :: ulam(:), ca(:,:), alm(:), dev(:)
+    integer(c_int), allocatable :: jd(:), ia(:), nin(:)
+    integer(c_int) :: nlam, isd, lmu, nlp, jerr, l
+    real(c_double) :: dev0
+
+    nlam = 1            ! single lambda -> "solo" fit
+    isd  = standardize
+
+    allocate(xw(no, ni), yw(no), dw(no), gw(no), ww(no), vp(ni), cl(2, ni))
+    allocate(ulam(nlam), ca(ni, nlam), alm(nlam), dev(nlam))
+    allocate(jd(1), ia(ni), nin(nlam))
+
+    xw      = x                  ! copy: coxnet standardizes its x in place
+    yw      = time               ! survival/follow-up times
+    dw      = status             ! 1 = event, 0 = censored
+    gw      = 0.0_c_double       ! no offset
+    ww      = 1.0_c_double       ! equal observation weights
+    vp      = 1.0_c_double       ! equal per-predictor penalty factors
+    cl(1,:) = -big               ! no lower bound on coefficients
+    cl(2,:) =  big               ! no upper bound
+    jd(1)   = 0                  ! use all variables
+    ulam(1) = lambda             ! flmin >= 1 => use this supplied lambda
+
+    ! NOTE coxnet's argument order is thr, maxit, isd (no intercept argument).
+    call coxnet(alpha, no, ni, xw, yw, dw, gw, ww, jd, vp, cl, ni + 1, ni, nlam, &
+         1.0_c_double, ulam, thresh, maxit, isd, &
+         lmu, ca, ia, nin, dev0, dev, alm, nlp, jerr)
+
+    jerr_out      = jerr
+    nlp_out       = nlp
+    beta_out      = 0.0_c_double
+    dev_ratio_out = 0.0_c_double
+    lambda_out    = 0.0_c_double
+
+    ! jerr > 0 is fatal (no output). Otherwise densify the first (only) solution.
+    if (jerr <= 0 .and. lmu >= 1) then
+       dev_ratio_out = dev(1)
+       lambda_out    = alm(1)
+       do l = 1, nin(1)
+          beta_out(ia(l)) = ca(l, 1)
+       end do
+    end if
+
+    deallocate(xw, yw, dw, gw, ww, vp, cl, ulam, ca, alm, dev, jd, ia, nin)
+  end subroutine glmnet_coxnet_solo
 
 end module glmnet_capi

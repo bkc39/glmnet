@@ -207,6 +207,53 @@ coefficient vectors.
   argmax of @racket[multinomial-predict-proba].
 }
 
+@section[#:tag "ref-cox"]{Fitting Cox proportional-hazards models}
+
+The Cox family fits a survival model from a follow-up time and a 0/1 event
+indicator. There is no intercept --- the baseline hazard absorbs it.
+
+@defstruct*[cox-result ([coefficients (vectorof real?)]
+                        [dev-ratio real?]
+                        [lambda real?]
+                        [num-passes exact-nonnegative-integer?])
+            #:transparent]{
+  A fitted Cox model. @racket[coefficients] is a dense vector of length
+  @racket[_ni] on the log relative-hazard scale (no intercept); @racket[dev-ratio]
+  is the fraction of null partial-likelihood deviance explained; @racket[lambda]
+  is the penalty used; @racket[num-passes] is glmnet's pass count.
+}
+
+@defproc[(cox-fit [X (and/c (listof (listof real?)) pair?)]
+                  [times (and/c (listof (>/c 0)) pair?)]
+                  [statuses (and/c (listof (or/c 0 1)) pair?)]
+                  [#:lambda lambda (>=/c 0)]
+                  [#:alpha alpha (real-in 0 1) 1.0]
+                  [#:standardize? standardize? boolean? #t]
+                  [#:thresh thresh (>/c 0) 1e-7]
+                  [#:max-iters max-iters exact-positive-integer? 100000])
+         cox-result?]{
+  Fits a single dense Cox proportional-hazards elastic-net model. @racket[times]
+  are positive follow-up times and @racket[statuses] the matching 0/1 event
+  indicators (@racket[1] = event, @racket[0] = right-censored); at least one must
+  be an event. @racket[alpha] mixes the penalty (@racket[0.0] ridge, @racket[1.0]
+  lasso) and @racket[lambda] sets its strength. There is no @racket[#:intercept?]
+  keyword --- Cox has no intercept. See @secref["ex-cox"].
+}
+
+@defproc[(cox-linear-predictor [fit cox-result?]
+                               [X (and/c (listof (listof real?)) pair?)])
+         (listof real?)]{
+  The log relative hazard @math{x·β} for each row of @racket[X] (no intercept).
+  Each row must have as many features as @racket[fit] has coefficients.
+}
+
+@defproc[(cox-relative-risk [fit cox-result?]
+                            [X (and/c (listof (listof real?)) pair?)])
+         (listof (>/c 0))]{
+  The relative risk @math{exp(x·β)} for each row of @racket[X] --- the
+  multiplicative effect on the baseline hazard.
+}
+
 @section[#:tag "ref-connectivity"]{Connectivity and self-checks}
 
 These entry points call directly into the C-ABI shim, for confirming the native

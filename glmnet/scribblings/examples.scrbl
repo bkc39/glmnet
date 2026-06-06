@@ -21,3 +21,4 @@ guaranteed to stay in sync with the code.
 @lp-include["../examples/03-elastic-net.rkt"]
 @lp-include["../examples/04-logistic.rkt"]
 @lp-include["../examples/05-multinomial.rkt"]
+@lp-include["../examples/06-cox.rkt"]
