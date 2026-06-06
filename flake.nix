@@ -25,6 +25,14 @@
             && !(pkgs.lib.hasSuffix ".dylib" base)
             && !(pkgs.lib.hasSuffix ".so" base);
         };
+
+      # R environment for the parity harness: the R `glmnet` oracle plus jsonlite
+      # for golden output. Used ONLY by the r-parity devShell, the gen-goldens
+      # app, and the checks.parity gate -- never by the default build or by the
+      # `racket` check, so `nix flake check`'s core stays R-free.
+      rEnvFor = pkgs: pkgs.rWrapper.override {
+        packages = with pkgs.rPackages; [ glmnet jsonlite ];
+      };
     in
     {
       packages = forAllSystems (system:
@@ -120,10 +128,69 @@
               ls -la "$DEST"
             '';
           };
+
+          # `nix run .#gen-goldens` -- regenerate the R parity goldens (and any
+          # R-exported dataset CSVs) from the pinned R glmnet. Run from repo root.
+          gen-goldens = pkgs.writeShellApplication {
+            name = "gen-goldens";
+            runtimeInputs = [ (rEnvFor pkgs) ];
+            text = ''
+              Rscript "$(pwd)/scripts/r-parity/gen-reference.R" "$@"
+            '';
+          };
+
+          # Live R-backed parity gate: install the package, generate goldens fresh
+          # with the pinned R glmnet oracle (into a temp dir -- nothing committed),
+          # then assert our bindings reproduce them. This is the only place R
+          # touches CI; the `racket` check stays R-free.
+          parity = pkgs.stdenv.mkDerivation {
+            pname = "glmnet-parity";
+            inherit version;
+            src = cleanSrc pkgs ./.;
+
+            nativeBuildInputs = [ pkgs.racket (rEnvFor pkgs) ];
+            buildInputs = [ native ];
+
+            buildPhase = ''
+              runHook preBuild
+              export PLTUSERHOME=$TMPDIR/racket-home
+              export GLMNET_NATIVE_LIB_PATH=${native}
+              mkdir -p $PLTUSERHOME ./glmnet/native-libs
+              cp ${native}/lib/libglmnetcompat.* ./glmnet/native-libs/ 2>/dev/null || true
+              raco pkg install --batch --deps fail --no-setup --copy --scope user \
+                --name glmnet ./glmnet
+              raco setup --no-docs --pkgs glmnet
+              runHook postBuild
+            '';
+
+            doCheck = true;
+            checkPhase = ''
+              runHook preCheck
+              export PLTUSERHOME=$TMPDIR/racket-home
+              export GLMNET_NATIVE_LIB_PATH=${native}
+
+              # Generate goldens fresh from the pinned R glmnet oracle into a temp
+              # dir (nothing committed), then assert our bindings reproduce them.
+              export GLMNET_GOLDENS_OUT=$TMPDIR/goldens
+              Rscript scripts/r-parity/gen-reference.R
+
+              echo "--- live parity: bindings vs fresh R goldens ---"
+              GLMNET_PARITY_GOLDENS=$GLMNET_GOLDENS_OUT \
+                raco test glmnet/tests/parity-test.rkt
+              runHook postCheck
+            '';
+
+            installPhase = ''
+              runHook preInstall
+              mkdir -p $out
+              echo "glmnet parity check passed" > $out/parity-ok
+              runHook postInstall
+            '';
+          };
         in
         {
           default = racket;
-          inherit native racket copy-native-libs;
+          inherit native racket copy-native-libs gen-goldens parity;
         });
 
       apps = forAllSystems (system: {
@@ -131,10 +198,14 @@
           type = "app";
           program = "${self.packages.${system}.copy-native-libs}/bin/copy-native-libs";
         };
+        gen-goldens = {
+          type = "app";
+          program = "${self.packages.${system}.gen-goldens}/bin/gen-goldens";
+        };
       });
 
       checks = forAllSystems (system: {
-        inherit (self.packages.${system}) native racket;
+        inherit (self.packages.${system}) native racket parity;
       });
 
       devShells = forAllSystems (system:
@@ -168,6 +239,16 @@
               echo "glmnet dev shell ready."
               echo "  Run all examples:  bash scripts/run-examples.sh"
               echo "  Run the tests:     raco test ./glmnet/"
+            '';
+          };
+
+          # R-enabled shell for (re)generating the parity goldens. Kept separate
+          # from `default` so the everyday shell needs no R.
+          r-parity = pkgs.mkShell {
+            packages = [ pkgs.racket (rEnvFor pkgs) ];
+            shellHook = ''
+              echo "glmnet R-parity shell."
+              echo "  Regenerate goldens:  Rscript scripts/r-parity/gen-reference.R"
             '';
           };
         });
