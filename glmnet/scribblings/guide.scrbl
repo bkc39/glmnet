@@ -181,6 +181,32 @@ log-mean scale), and @racket[poisson-result-dev-ratio].
 @math{exp(β₀ + x·β)} for new predictors. As elsewhere, @racket[#:alpha 1.0] is
 the lasso and @racket[#:alpha 0.0] the ridge. See @secref["ex-poisson"].
 
+@section[#:tag "guide-mgaussian"]{Multiple responses: the multi-response Gaussian family}
+
+The Gaussian models above fit one numeric response. The @deftech{multi-response
+Gaussian family} (@racket[mgaussian-fit]) fits several at once: the response is a
+matrix @math{Y} with one column per response. It uses a @bold{grouped lasso}
+across the responses --- a predictor is selected for @emph{all} responses or none
+--- so the fitted coefficient rows share support. Each response gets its own
+intercept.
+
+@racketblock[
+(require glmnet)
+(define X '((1.0 2.0) (3.0 1.0) (5.0 2.0) (6.0 1.0)))
+(code:comment "two responses, one column each")
+(define Y '((3.0 9.0) (7.0 7.0) (11.0 5.0) (13.0 4.0)))
+(define fit (mgaussian-fit X Y #:lambda 0.1))
+(mgaussian-result-coefficients fit)
+(mgaussian-predict fit X)]
+
+@racket[mgaussian-fit] returns a @racket[mgaussian-result] with
+@racket[mgaussian-result-intercepts] (one per response),
+@racket[mgaussian-result-coefficients] (a vector of per-response coefficient
+vectors), and @racket[mgaussian-result-r-squared]. @racket[mgaussian-predict]
+returns the per-response predictions @math{a0_r + x·β_r} for each row. As
+elsewhere, @racket[#:alpha 1.0] is the (grouped) lasso and @racket[#:alpha 0.0]
+the ridge. See @secref["ex-mgaussian"].
+
 @section[#:tag "guide-precision"]{The precision contract}
 
 The vendored Fortran declares its arrays as single-precision @tt{real}, but the
