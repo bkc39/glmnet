@@ -13,11 +13,16 @@
 (define build-deps '("scribble-lib" "racket-doc" "rackunit-lib"))
 (define scribblings '(("scribblings/glmnet.scrbl" (multi-page))))
 (define pkg-desc
-  "Racket bindings for glmnet: lasso and elastic-net regularized models")
+  (string-append
+   "Racket FFI bindings to glmnet: lasso, ridge, and elastic-net regularized GLMs"
+   " -- linear, logistic, multinomial, Poisson, Cox, and multi-response"))
 (define pkg-authors '(bkc))
 ;; The vendored glmnet Fortran (fortran/vendor/glmnet5.f90) is GPL-2.0, so this
 ;; binding is distributed under GPL-2.0-or-later. See the project root LICENSE.
 (define license 'GPL-2.0-or-later)
 (define pkg-tags
-  '("machine-learning" "statistics" "regression" "lasso" "elastic-net" "glmnet"))
+  '("machine-learning" "statistics" "data-science" "glmnet"
+    "regression" "classification" "regularization"
+    "lasso" "ridge" "elastic-net"
+    "generalized-linear-models" "survival-analysis"))
 (define pre-install-collection "private/install-glmnet-native.rkt")

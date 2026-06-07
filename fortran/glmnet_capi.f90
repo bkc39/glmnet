@@ -29,10 +29,14 @@ module glmnet_capi
 
 contains
 
-  ! ABI version of this shim. Bump on any breaking change to a C entry point.
+  ! ABI version of this shim: the set of bind(C) entry points it exports. Bump on
+  ! any change to that set (a new family symbol, a signature change) so the
+  ! load-time guard in foreign.rkt rejects a stale prebuilt native candidate.
+  !   1 -> elnet only (initial)
+  !   2 -> + lognet, multinomial, coxnet, fishnet, mgaussian (all six families)
   integer(c_int) function glmnet_capi_abi_version() &
        bind(C, name="glmnet_capi_abi_version")
-    glmnet_capi_abi_version = 1_c_int
+    glmnet_capi_abi_version = 2_c_int
   end function glmnet_capi_abi_version
 
   ! Size in bytes of the Fortran default `real`. MUST be 8 -- i.e. the library
