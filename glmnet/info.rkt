@@ -9,8 +9,13 @@
 ;; net-lib provides net/url, used by private/demo-utils.rkt (the parity/demo
 ;; dataset loaders). It ships with the main Racket distribution, so the catalog
 ;; resolves it trivially; main.rkt itself stays base-only.
-(define deps '("base" "net-lib"))
-(define build-deps '("scribble-lib" "racket-doc" "rackunit-lib"))
+;; scribble-lib is a RUN dependency, not build-only: the examples/NN-*.rkt files
+;; are #lang scribble/lp2 literate programs that ship as compiled collection
+;; modules (lp-included by the docs, required by examples/test/*.rkt), so their
+;; .zo files import scribble's lp2 runtime (scribble/lp/lang/lang2.rkt). The
+;; catalog's `raco setup --check-pkg-deps` flags it under deps, not build-deps.
+(define deps '("base" "net-lib" "scribble-lib"))
+(define build-deps '("racket-doc" "rackunit-lib"))
 (define scribblings '(("scribblings/glmnet.scrbl" (multi-page))))
 (define pkg-desc
   (string-append

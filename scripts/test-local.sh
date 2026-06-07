@@ -32,6 +32,9 @@ find glmnet/native-libs -maxdepth 1 -type f -name 'lib*' -delete 2>/dev/null || 
 echo "--- installing from candidates ---"
 "$RACO" pkg install --batch --auto --name glmnet ./glmnet
 
+echo "--- raco setup --check-pkg-deps glmnet (mirrors catalog dependency check) ---"
+"$RACO" setup --check-pkg-deps --pkgs glmnet
+
 echo "--- raco test glmnet/ (package + example companions) ---"
 "$RACO" test glmnet/
 
