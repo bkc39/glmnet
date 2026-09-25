@@ -6,18 +6,20 @@ project(glmnetcompat VERSION 0.1.0 LANGUAGES Fortran)
 # real to 8 bytes so the elnet ABI is double precision -- this is what R's
 # glmnet and Julia's glmnet_jll do, and what the Racket bindings assume. The
 # `glmnet_default_real_bytes` probe asserts this flag took effect.
-add_compile_options(-fdefault-real-8 -O2 -fPIC)
+add_compile_options(-fdefault-real-8 -fdefault-double-8 -O2 -fPIC)
 
 # --- Source forms ---------------------------------------------------------
 # The vendored glmnet5.f90 is FIXED-FORM (col-1 `c` comments, `*` continuation
 # in col 6, sequence numbers in cols 73-80) despite the .f90 name. Force fixed
 # form on it; gfortran's default 72-col width ignores the sequence numbers.
 # Our shim is modern free-form.
-set_source_files_properties(vendor/glmnet5.f90 PROPERTIES Fortran_FORMAT FIXED)
+set_source_files_properties(vendor/glmnet5dpclean.f PROPERTIES Fortran_FORMAT FIXED)
+set_source_files_properties(r_stubs.f90 PROPERTIES Fortran_FORMAT FREE)
 set_source_files_properties(glmnet_capi.f90    PROPERTIES Fortran_FORMAT FREE)
 
 add_library(glmnetcompat SHARED
-  vendor/glmnet5.f90
+  vendor/glmnet5dpclean.f
+  r_stubs.f90
   glmnet_capi.f90)
 set_target_properties(glmnetcompat PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
