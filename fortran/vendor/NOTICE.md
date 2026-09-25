@@ -26,6 +26,21 @@ and Julia's `glmnet_jll` build it. The `glmnet_default_real_bytes()` probe in
 Because we vendor and link GPL-2.0 Fortran, this binding package as a whole is
 distributed under **GPL-2.0-or-later** (see root `LICENSE`).
 
+### Local modifications
+
+The file differs from the pinned commit only as listed here. Each change is
+marked in the file with a `c     local fix (#N)` comment, and the file header
+records it.
+
+- **2026-09-25, #33:** in the `intr=0` (no intercept) branches of `standard`,
+  `standard1`, `spstandard` and `spstandard1`, the response is left uncentered
+  but was scaled by its *centered* norm, which made Gaussian `rsq` exceed 1
+  and shifted penalized coefficients. The four lines now use the uncentered
+  norm (`ys=sqrt(dot_product(y,y))` dense, `ys=sqrt(dot_product(w,y**2))`
+  sparse), matching R glmnet 3.0-3 and later ("`Intercept=FALSE` with
+  "Gaussian" is fixed ... changed directly in 4 places"). Re-vendoring a newer
+  upstream (#21) supersedes this patch.
+
 ## Parity reference (R `glmnet`)
 
 The parity goldens under `scripts/r-parity/goldens/` are R `glmnet`'s reference

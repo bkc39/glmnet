@@ -78,7 +78,8 @@
       (cond
         [(string=? family "gaussian")
          (define y (second ds))
-         (define r (elnet-fit X y #:lambda lambda #:alpha alpha #:thresh thresh))
+         (define r (elnet-fit X y #:lambda lambda #:alpha alpha #:thresh thresh
+                              #:intercept? (hash-ref g 'fit_intercept #t)))
          (check-close (elnet-result-lambda r) (hash-ref g 'lambda_used) 1e-12 "lambda")
          (check-close (elnet-result-intercept r) (hash-ref g 'intercept) itol "intercept")
          (check-vec-close (vector->list (elnet-result-coefficients r))

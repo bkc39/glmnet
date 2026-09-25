@@ -1,4 +1,9 @@
 c
+c     Locally modified for the glmnet Racket bindings (2026-09-25, #33):
+c     the intr=0 branches of standard, standard1, spstandard and
+c     spstandard1 now scale y by its uncentered norm, matching R glmnet
+c     3.0-3 and later. See fortran/vendor/NOTICE.md.
+c
 c                          newGLMnet (5/12/14)
 c
 c
@@ -803,7 +808,8 @@ c
       if(intr .ne. 0)goto 10141                                             851
       ym=0.0                                                                851
       y=v*y                                                                 852
-      ys=sqrt(dot_product(y,y)-dot_product(v,y)**2)                         852
+c     local fix (#33): uncentered y, so use its uncentered norm
+      ys=sqrt(dot_product(y,y))                                             852
       y=y/ys                                                                853
 10150 do 10151 j=1,ni                                                       853
       if(ju(j).eq.0)goto 10151                                              853
@@ -1089,7 +1095,8 @@ c
       if(intr .ne. 0)goto 10651                                             995
       ym=0.0                                                                995
       y=v*y                                                                 996
-      ys=sqrt(dot_product(y,y)-dot_product(v,y)**2)                         996
+c     local fix (#33): uncentered y, so use its uncentered norm
+      ys=sqrt(dot_product(y,y))                                             996
       y=y/ys                                                                997
 10660 do 10661 j=1,ni                                                       997
       if(ju(j).eq.0)goto 10661                                              997
@@ -1434,7 +1441,8 @@ c
       w=w/sum(w)                                                           1177
       if(intr .ne. 0)goto 11221                                            1177
       ym=0.0                                                               1178
-      ys=sqrt(dot_product(w,y**2)-dot_product(w,y)**2)                     1178
+c     local fix (#33): uncentered y, so use its uncentered norm
+      ys=sqrt(dot_product(w,y**2))                                         1178
       y=y/ys                                                               1179
 11230 do 11231 j=1,ni                                                      1179
       if(ju(j).eq.0)goto 11231                                             1179
@@ -1715,7 +1723,8 @@ c
       w=w/sum(w)                                                           1317
       if(intr .ne. 0)goto 11711                                            1317
       ym=0.0                                                               1318
-      ys=sqrt(dot_product(w,y**2)-dot_product(w,y)**2)                     1318
+c     local fix (#33): uncentered y, so use its uncentered norm
+      ys=sqrt(dot_product(w,y**2))                                         1318
       y=y/ys                                                               1319
 11720 do 11721 j=1,ni                                                      1319
       if(ju(j).eq.0)goto 11721                                             1319

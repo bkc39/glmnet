@@ -39,7 +39,10 @@ flake.nix                      native + racket derivations, devShell, checks
 2. **`vendor/glmnet5.f90` is FIXED-FORM** (col-1 `c` comments, `*` continuation
    in col 6, sequence numbers in cols 73–80) despite the `.f90` name. The build
    sets `Fortran_FORMAT FIXED` on it and `FREE` on our shim. Do not reformat it;
-   if you re-vendor, update `vendor/NOTICE.md` with the new pinned commit.
+   if you re-vendor, update `vendor/NOTICE.md` with the new pinned commit. A
+   local fix keeps columns 1–6 and 73–80 in place, gets a `c     local fix (#N)`
+   comment, and is listed under *Local modifications* in `vendor/NOTICE.md`
+   (GPL-2 §2(a)).
 3. **Clean C ABI only.** Each shim entry point is `bind(C, name="…")` so it
    exports an unmangled symbol; the Racket side uses
    `convention:hyphen->underscore`. The internal `elnet_`/`spelnet_` symbols are

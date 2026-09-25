@@ -100,6 +100,36 @@
     (check-true (<= nz-ridge nz-enet))
     (check-true (<= nz-enet nz-lasso)))
 
+  ;; --- no intercept (#33) ---
+  ;; Without an intercept y is not centered, so r-squared is relative to
+  ;; sum(y^2). Reference values: R glmnet 4.1.8, glmnet(X, y, intercept = FALSE).
+
+  (define (uncentered-r-squared r)
+    (define rss
+      (for/sum ([row (in-list X)] [yi (in-list y)])
+        (define fitted
+          (for/sum ([b (in-vector (elnet-result-coefficients r))] [x (in-list row)])
+            (* b x)))
+        (expt (- yi fitted) 2)))
+    (- 1.0 (/ rss (for/sum ([yi (in-list y)]) (* yi yi)))))
+
+  (test-case "no-intercept r-squared is 1 - RSS/sum(y^2)"
+    (for ([r (list (ols X y #:intercept? #f)
+                   (lasso X y #:lambda 0.1 #:intercept? #f)
+                   (lasso X y #:lambda 0.1 #:intercept? #f #:standardize? #f))])
+      (check-equal? (elnet-result-intercept r) 0.0)
+      (check-= (elnet-result-r-squared r) (uncentered-r-squared r) 1e-6)))
+
+  (test-case "no-intercept fits match R glmnet"
+    (define (check-r r beta dev-ratio)
+      (check-= (elnet-result-r-squared r) dev-ratio 1e-4)
+      (for ([b (in-vector (elnet-result-coefficients r))] [rb (in-list beta)])
+        (check-= b rb 1e-4)))
+    (check-r (ols X y #:intercept? #f) '(2.2329448 -0.9622848) 0.9896292)
+    (check-r (lasso X y #:lambda 0.1 #:intercept? #f) '(1.8656870 -0.6265096) 0.9832474)
+    (check-r (lasso X y #:lambda 0.1 #:intercept? #f #:standardize? #f)
+             '(1.9955260 -0.7460684) 0.9869714))
+
   ;; --- input validation / contracts ---
 
   (test-case "ragged predictor matrix is rejected"

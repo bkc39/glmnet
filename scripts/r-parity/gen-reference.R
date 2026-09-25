@@ -8,7 +8,8 @@
 ##
 ## Conventions mirrored from fortran/glmnet_capi.f90 (so R == our bindings):
 ##  - single supplied lambda (glmnet uses flmin=1 when `lambda` is scalar),
-##  - standardize=TRUE, intercept=TRUE, thresh=1e-7,
+##  - standardize=TRUE, thresh=1e-7, intercept=TRUE unless a fixture sets
+##    `intercept = FALSE` (recorded in the golden as `fit_intercept`),
 ##  - binomial: factor(levels=c(0,1)) so the 2nd level "1" is P(y==1),
 ##  - type.logistic="Newton" (== our kopt=0).
 
@@ -64,10 +65,10 @@ datasets <- list(longley = load_longley(), wdbc = load_wdbc(),
                  iris = load_iris(), veteran = load_veteran(),
                  warpbreaks = load_warpbreaks(), linnerud = load_linnerud())
 
-fit_gaussian <- function(X, y, alpha, lambda, thresh = 1e-7) {
+fit_gaussian <- function(X, y, alpha, lambda, intercept = TRUE, thresh = 1e-7) {
   fit <- suppressWarnings(glmnet(X, y, family = "gaussian", alpha = alpha,
                                  lambda = lambda, standardize = TRUE,
-                                 intercept = TRUE, thresh = thresh))
+                                 intercept = intercept, thresh = thresh))
   b <- as.numeric(coef(fit, s = lambda, exact = TRUE, x = X, y = y))
   list(intercept    = b[1],
        coefficients = b[-1],
@@ -145,6 +146,8 @@ fixtures <- list(
   list(id = "gaussian-longley-lasso-0.5", dataset = "longley", family = "gaussian", alpha = 1.0, lambda = 0.5),
   list(id = "gaussian-longley-ridge-1.0", dataset = "longley", family = "gaussian", alpha = 0.0, lambda = 1.0),
   list(id = "gaussian-longley-enet-0.5",  dataset = "longley", family = "gaussian", alpha = 0.5, lambda = 0.5),
+  list(id = "gaussian-longley-lasso-0.5-nointercept", dataset = "longley", family = "gaussian", alpha = 1.0, lambda = 0.5, intercept = FALSE),
+  list(id = "gaussian-longley-ridge-1.0-nointercept", dataset = "longley", family = "gaussian", alpha = 0.0, lambda = 1.0, intercept = FALSE),
   list(id = "binomial-wdbc-lasso-0.02",   dataset = "wdbc",    family = "binomial", alpha = 1.0, lambda = 0.02),
   list(id = "binomial-wdbc-lasso-0.05",   dataset = "wdbc",    family = "binomial", alpha = 1.0, lambda = 0.05),
   list(id = "binomial-wdbc-ridge-0.05",   dataset = "wdbc",    family = "binomial", alpha = 0.0, lambda = 0.05),
@@ -160,8 +163,9 @@ fixtures <- list(
 
 for (f in fixtures) {
   d   <- datasets[[f$dataset]]
+  fit_intercept <- if (is.null(f$intercept)) TRUE else f$intercept
   res <- switch(f$family,
-    gaussian    = fit_gaussian(d$X, d$y, f$alpha, f$lambda),
+    gaussian    = fit_gaussian(d$X, d$y, f$alpha, f$lambda, fit_intercept),
     binomial    = fit_binomial(d$X, d$y, f$alpha, f$lambda),
     multinomial = fit_multinomial(d$X, d$y, f$alpha, f$lambda),
     poisson     = fit_poisson(d$X, d$y, f$alpha, f$lambda),
@@ -169,7 +173,8 @@ for (f in fixtures) {
     mgaussian   = fit_mgaussian(d$X, d$Y, f$alpha, f$lambda),
     stop("unknown family ", f$family))
   golden <- c(list(id = f$id, dataset = f$dataset, family = f$family,
-                   alpha = f$alpha, lambda = f$lambda, thresh = 1e-7),
+                   alpha = f$alpha, lambda = f$lambda, thresh = 1e-7,
+                   fit_intercept = fit_intercept),
               res, list(meta = meta))
   path <- file.path(goldens_dir, paste0(f$id, ".json"))
   writeLines(toJSON(golden, digits = NA, auto_unbox = TRUE, pretty = TRUE), path)
