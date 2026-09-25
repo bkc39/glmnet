@@ -393,7 +393,7 @@ contains
     allocate(jd(1), ia(ni), nin(nlam))
 
     xw      = x                  ! copy: coxnet standardizes its x in place
-    yw      = time               ! survival/follow-up times
+    yw      = time + (1.0_c_double - status) * 100.0_c_double * epsilon(1.0_c_double)
     dw      = status             ! 1 = event, 0 = censored
     gw      = 0.0_c_double       ! no offset
     ww      = 1.0_c_double       ! equal observation weights
