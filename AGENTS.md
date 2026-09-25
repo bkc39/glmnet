@@ -10,9 +10,11 @@ native layer.
 
 ```
 fortran/                       native C-ABI shim (built as a Nix subderivation)
-  vendor/glmnet5.f90           vendored GPL-2 glmnet Fortran (FIXED-FORM; pinned)
+  vendor/glmnet5dpclean.f      R glmnet 4.1 Fortran, Cox units removed (FIXED-FORM; pinned)
+  vendor/coxnet5dpclean.f      R glmnet 4.1-10 Cox Fortran, unmodified (FIXED-FORM; pinned)
   glmnet_capi.f90              iso_c_binding wrappers -> clean bind(C) symbols
-  CMakeLists.txt               -fdefault-real-8; per-file FIXED/FREE form; ctest
+  r_stubs.f90                  no-op setpb (R's progress callback)
+  CMakeLists.txt               -fdefault-real-8 -fdefault-double-8; FIXED/FREE form; ctest
   tests/test_*.f90             standalone Fortran test drivers (ctest)
 glmnet/                        Racket collection
   foreign/raw/library.rkt      ffi-lib loader + define-glmnet definer
@@ -26,24 +28,30 @@ glmnet/                        Racket collection
   tests/*.rkt                  rackunit unit tests
   private/install-glmnet-native.rkt   pre-install hook (env -> staged -> candidate)
   native-libs/candidates/<plat>/      committed prebuilt shared objects
-scripts/                       build-so.sh, test-local.sh (portable candidates)
+scripts/                       build-so.sh, test-local.sh (portable candidates),
+                               vendor-fortran.rkt (regenerates fortran/vendor/)
 flake.nix                      native + racket derivations, devShell, checks
 ```
 
 ## Non-negotiable invariants
 
-1. **`-fdefault-real-8`.** `glmnet5.f90` declares single-precision `real`; the
-   whole elnet ABI is double *only* because we promote default `real` to 8
-   bytes. Every binding (R, `glmnet_jll`) does the same. `glmnet_capi.f90`'s
-   `glmnet_default_real_bytes` probe + the load-time guard in `foreign.rkt`
-   exist to enforce this. Never drop the flag.
-2. **`vendor/glmnet5.f90` is FIXED-FORM** (col-1 `c` comments, `*` continuation
-   in col 6, sequence numbers in cols 73–80) despite the `.f90` name. The build
-   sets `Fortran_FORMAT FIXED` on it and `FREE` on our shim. Do not reformat it;
-   if you re-vendor, update `vendor/NOTICE.md` with the new pinned commit. A
-   local fix keeps columns 1–6 and 73–80 in place, gets a `c     local fix (#N)`
-   comment, and is listed under *Local modifications* in `vendor/NOTICE.md`
-   (GPL-2 §2(a)).
+1. **Both reals are 8 bytes.** The whole ABI is double precision. The
+   vendored R Fortran is explicitly `double precision`, and the shim and tests
+   use `real(c_double)`. The build passes `-fdefault-real-8`, which the
+   `glmnet_default_real_bytes` probe and the load-time guard in `foreign.rkt`
+   check, together with `-fdefault-double-8`, without which `-fdefault-real-8`
+   would widen `double precision` to 16 bytes. `tests/test_precision.f90`
+   asserts both. Never drop either flag.
+2. **The vendored Fortran is upstream, regenerated, never hand-edited.**
+   `scripts/vendor-fortran.rkt` writes `fortran/vendor/` from R glmnet's source
+   on the CRAN GitHub mirror at pinned commits. It only removes whole program
+   units that the Cox file duplicates, and stamps that into the file header. A
+   numerical fix belongs upstream: take it by bumping a commit in the script and
+   updating `vendor/NOTICE.md`. The files are FIXED-FORM (col-1 `c` comments,
+   `*` continuation in col 6, sequence numbers in cols 73–80); the build sets
+   `Fortran_FORMAT FIXED` on them and `FREE` on our shim. Behaviour that R adds
+   around a Fortran call belongs in `glmnet_capi.f90` and is listed in
+   `vendor/NOTICE.md`: for example, the Cox ties nudge from R's `coxnet.R`.
 3. **Clean C ABI only.** Each shim entry point is `bind(C, name="…")` so it
    exports an unmangled symbol; the Racket side uses
    `convention:hyphen->underscore`. The internal `elnet_`/`spelnet_` symbols are
@@ -154,4 +162,4 @@ v1 = Phase 0 hello + OLS / ridge / lasso / elastic net (single-λ "solo" fits).
 Future arc (additive, no rework — the wrapper is already path-capable): full
 regularization path (`nlam>1`, `flmin<1`), cross-validation, sparse `spelnet`,
 and other GLM families (`lognet` logistic, `coxnet`, `fishnet`) — all already
-present in `vendor/glmnet5.f90`.
+present in `vendor/`.

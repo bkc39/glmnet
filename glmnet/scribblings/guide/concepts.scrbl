@@ -218,12 +218,12 @@ Problems are reported in three ways:
 
 @section[#:tag "concepts-precision"]{The native library}
 
-The vendored Fortran declares its arrays as single-precision @tt{real}, but
-@tt{libglmnetcompat} is compiled with @tt{-fdefault-real-8}, which promotes
-them to double precision. R's glmnet and Julia's @tt{glmnet_jll} are built the
-same way. When the package loads, it checks that the flag took effect
-(@racket[glmnet-default-real-bytes]) and that the library exports the entry
-points this version expects (@racket[glmnet-capi-abi-version]).
+@tt{libglmnetcompat} is R glmnet's own double-precision Fortran behind a small
+C-ABI shim: the Gaussian, binomial, Poisson and multi-response solvers from R
+glmnet 4.1, and the Cox solver R 4.1-10 runs. When the package loads, it checks
+that the library's reals are 8 bytes (@racket[glmnet-default-real-bytes]) and
+that it exports the entry points this version expects
+(@racket[glmnet-capi-abi-version]).
 
 The pre-install hook stages the library from the first of these that exists:
 

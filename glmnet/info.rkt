@@ -22,7 +22,7 @@
    "Racket FFI bindings to glmnet: lasso, ridge, and elastic-net regularized GLMs"
    " -- linear, logistic, multinomial, Poisson, Cox, and multi-response"))
 (define pkg-authors '(bkc))
-;; The vendored glmnet Fortran (fortran/vendor/glmnet5.f90) is GPL-2.0, so this
+;; The vendored R glmnet Fortran (fortran/vendor/*.f) is GPL-2, so this
 ;; binding is distributed under GPL-2.0-or-later. See the project root LICENSE.
 (define license 'GPL-2.0-or-later)
 (define pkg-tags

@@ -123,18 +123,12 @@
          (define times (second ds))
          (define statuses (third ds))
          (define r (cox-fit X times statuses #:lambda lambda #:alpha alpha #:thresh thresh))
-         ;; For dense, non-stratified, right-censored data R 4.1.10 fits cox via
-         ;; the classic .Fortran("coxnet") -- the same routine we bind -- but our
-         ;; vendored glmnet5.f90 snapshot's coxnet predates upstream refinements
-         ;; (veteran has tied event times, where they bite), so the fits agree to
-         ;; ~1e-3 (identical support and signs, dev-ratio ~1e-4) vs the other
-         ;; families' ~1e-13. Re-vendoring a newer coxnet would tighten this; see #21.
-         (define cox-ctol 5e-3)
-         (define cox-dtol 1e-3)
          (check-close (cox-result-lambda r) (hash-ref g 'lambda_used) 1e-12 "lambda")
          (check-vec-close (vector->list (cox-result-coefficients r))
-                          (hash-ref g 'coefficients) cox-ctol "coef")
-         (check-close (cox-result-dev-ratio r) (hash-ref g 'dev_ratio) cox-dtol "dev-ratio")]
+                          (hash-ref g 'coefficients) ctol "coef")
+         (check-close (cox-result-dev-ratio r) (hash-ref g 'dev_ratio) dtol "dev-ratio")
+         (check-vec-close (cox-linear-predictor r X)
+                          (hash-ref g 'linear_predictor) ptol "linear-predictor")]
         [(string=? family "mgaussian")
          (define Y (second ds))
          (define r (mgaussian-fit X Y #:lambda lambda #:alpha alpha #:thresh thresh))
