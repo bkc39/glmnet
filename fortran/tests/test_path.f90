@@ -16,7 +16,7 @@ program test_path
           bind(C, name="glmnet_elnet_path")
        import :: c_double, c_int
        real(c_double), value :: alpha, flmin, thresh
-       integer(c_int), value :: no, ni, nlam, standardize, intercept, maxit
+       integer(c_int) :: no, ni, nlam, standardize, intercept, maxit
        real(c_double) :: x(no, ni), y(no), ulam(nlam)
        integer(c_int) :: lmu_out, nlp_out, jerr_out
        real(c_double) :: intercept_out(nlam), beta_out(ni, nlam), rsq_out(nlam), lambda_out(nlam)

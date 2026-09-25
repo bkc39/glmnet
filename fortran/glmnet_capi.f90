@@ -23,7 +23,14 @@
 !                    lambdas from lambda_max down to flmin * lambda_max (ulam is
 !                    then ignored)
 !
-! and returns lmu, the number of lambdas actually fitted: glmnet stops early
+! Path entry points take their INTEGER scalars BY REFERENCE, unlike the solo ones.
+! A path call has more than eight integer and pointer arguments, so some spill
+! onto the stack, and Apple's arm64 ABI packs 4-byte ints there while standard
+! AAPCS64 gives each an 8-byte slot. With by-value ints on the stack the caller
+! and gfortran disagreed on macOS and outputs landed in the wrong place; as
+! pointers, every stack argument is 8 bytes under both conventions.
+!
+! A path returns lmu, the number of lambdas actually fitted: glmnet stops early
 ! once the deviance ratio stops improving, so lmu <= nlam and only the first lmu
 ! entries of each per-lambda output are meaningful. In automatic mode glmnet
 ! reports the first lambda as `big`; R replaces it (fix.lam), and so does the
@@ -93,7 +100,7 @@ contains
        lmu_out, intercept_out, beta_out, rsq_out, lambda_out, nlp_out, jerr_out) &
        bind(C, name="glmnet_elnet_path")
     real(c_double),    value, intent(in)  :: alpha, flmin, thresh
-    integer(c_int),    value, intent(in)  :: no, ni, nlam, standardize, intercept, maxit
+    integer(c_int),           intent(in)  :: no, ni, nlam, standardize, intercept, maxit
     real(c_double),           intent(in)  :: x(no, ni), y(no), ulam(nlam)
     integer(c_int),           intent(out) :: lmu_out, nlp_out, jerr_out
     real(c_double),           intent(out) :: intercept_out(nlam), beta_out(ni, nlam)
@@ -193,7 +200,7 @@ contains
        lmu_out, intercept_out, beta_out, dev_ratio_out, lambda_out, nlp_out, jerr_out) &
        bind(C, name="glmnet_lognet_path")
     real(c_double),    value, intent(in)  :: alpha, flmin, thresh
-    integer(c_int),    value, intent(in)  :: no, ni, nlam, standardize, intercept, maxit
+    integer(c_int),           intent(in)  :: no, ni, nlam, standardize, intercept, maxit
     real(c_double),           intent(in)  :: x(no, ni), y(no), ulam(nlam)
     integer(c_int),           intent(out) :: lmu_out, nlp_out, jerr_out
     real(c_double),           intent(out) :: intercept_out(nlam), beta_out(ni, nlam)
@@ -296,7 +303,7 @@ contains
        lmu_out, intercept_out, beta_out, dev_ratio_out, lambda_out, nlp_out, jerr_out) &
        bind(C, name="glmnet_multinomial_path")
     real(c_double),    value, intent(in)  :: alpha, flmin, thresh
-    integer(c_int),    value, intent(in)  :: no, ni, nc, nlam, standardize, intercept, maxit
+    integer(c_int),           intent(in)  :: no, ni, nc, nlam, standardize, intercept, maxit
     real(c_double),           intent(in)  :: x(no, ni), y(no), ulam(nlam)
     integer(c_int),           intent(out) :: lmu_out, nlp_out, jerr_out
     real(c_double),           intent(out) :: intercept_out(nc, nlam), beta_out(ni, nc, nlam)
@@ -403,7 +410,7 @@ contains
        lmu_out, beta_out, dev_ratio_out, lambda_out, nlp_out, jerr_out) &
        bind(C, name="glmnet_coxnet_path")
     real(c_double),    value, intent(in)  :: alpha, flmin, thresh
-    integer(c_int),    value, intent(in)  :: no, ni, nlam, standardize, maxit
+    integer(c_int),           intent(in)  :: no, ni, nlam, standardize, maxit
     real(c_double),           intent(in)  :: x(no, ni), time(no), status(no), ulam(nlam)
     integer(c_int),           intent(out) :: lmu_out, nlp_out, jerr_out
     real(c_double),           intent(out) :: beta_out(ni, nlam)
@@ -499,7 +506,7 @@ contains
        lmu_out, intercept_out, beta_out, dev_ratio_out, lambda_out, nlp_out, jerr_out) &
        bind(C, name="glmnet_fishnet_path")
     real(c_double),    value, intent(in)  :: alpha, flmin, thresh
-    integer(c_int),    value, intent(in)  :: no, ni, nlam, standardize, intercept, maxit
+    integer(c_int),           intent(in)  :: no, ni, nlam, standardize, intercept, maxit
     real(c_double),           intent(in)  :: x(no, ni), y(no), ulam(nlam)
     integer(c_int),           intent(out) :: lmu_out, nlp_out, jerr_out
     real(c_double),           intent(out) :: intercept_out(nlam), beta_out(ni, nlam)
@@ -598,7 +605,7 @@ contains
        lmu_out, intercept_out, beta_out, rsq_out, lambda_out, nlp_out, jerr_out) &
        bind(C, name="glmnet_mgaussian_path")
     real(c_double),    value, intent(in)  :: alpha, flmin, thresh
-    integer(c_int),    value, intent(in)  :: no, ni, nr, nlam, standardize, intercept, maxit
+    integer(c_int),           intent(in)  :: no, ni, nr, nlam, standardize, intercept, maxit
     real(c_double),           intent(in)  :: x(no, ni), y(no, nr), ulam(nlam)
     integer(c_int),           intent(out) :: lmu_out, nlp_out, jerr_out
     real(c_double),           intent(out) :: intercept_out(nr, nlam), beta_out(ni, nr, nlam)
