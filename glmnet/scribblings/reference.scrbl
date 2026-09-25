@@ -1,19 +1,50 @@
 #lang scribble/manual
+@(require "utils.rkt")
 
-@(require (for-label racket/base
-                     glmnet))
+@(define ev (make-glmnet-eval))
 
-@title[#:tag "reference"]{API reference}
+@title[#:tag "reference"]{Reference}
 
 @declare-exporting[glmnet]
 
-The reference documents every public procedure. It grows as each model lands.
+Every binding below is provided by @racketmodname[glmnet]. Each model family
+has a fit procedure, a transparent result struct and, for all but the Gaussian
+family, prediction helpers; @secref["concepts"] explains how they fit together.
 
-@section[#:tag "ref-fitting"]{Fitting Gaussian models}
+@section[#:tag "ref-common"]{Common arguments}
 
-The four core models are one routine, @racket[elnet-fit], called with different
-@racket[#:alpha] and @racket[#:lambda]; convenience wrappers name the common
-cases.
+The fit procedures share their argument conventions:
+
+@itemlist[
+ @item{@racket[X] is a @tech{design matrix}: a non-empty list of equal-length
+       rows of reals, one row per observation. Prediction helpers take new rows
+       in the same layout, each with as many entries as the fit has
+       coefficients.}
+ @item{@racket[#:lambda] is the penalty strength @math{λ ≥ 0}. It is
+       required.}
+ @item{@racket[#:alpha] is the mixing parameter @math{α ∈ [0, 1]}:
+       @racket[0.0] is the ridge penalty, @racket[1.0] (the default) the
+       lasso, and values in between the elastic net.}
+ @item{@racket[#:standardize?] scales each predictor to unit variance before
+       fitting; coefficients are always reported on the original scale.}
+ @item{@racket[#:intercept?] fits an unpenalized intercept; @racket[#f] fixes
+       it at zero.}
+ @item{@racket[#:thresh] is the coordinate-descent convergence threshold and
+       @racket[#:max-iters] the maximum number of passes.}
+]
+
+Before the solver runs, an argument of the wrong type raises
+@racket[exn:fail:contract], and rows or responses of mismatched length raise
+@racket[exn:fail]. A fatal condition reported by glmnet
+raises @racket[exn:fail] with a readable message. If the solver reaches
+@racket[#:max-iters] without converging, the fit returns partial coefficients
+and logs a warning.
+
+@section[#:tag "ref-gaussian"]{Gaussian models}
+
+The @tech{Gaussian family}. The four named models are @racket[elnet-fit] with a
+fixed @racket[#:alpha]. See @secref["ex-ols"], @secref["ex-ridge"],
+@secref["ex-lasso"] and @secref["ex-elastic-net"].
 
 @defstruct*[elnet-result ([intercept real?]
                           [coefficients (vectorof real?)]
@@ -21,11 +52,18 @@ cases.
                           [lambda real?]
                           [num-passes exact-nonnegative-integer?])
             #:transparent]{
-  A fitted model. @racket[coefficients] is a dense vector on the original
-  predictor scale (one entry per column of @racket[_X]); @racket[lambda] is the
-  penalty actually used; @racket[r-squared] is the fraction of null deviance
-  explained; @racket[num-passes] is glmnet's coordinate-descent pass count.
-}
+  A fitted Gaussian model. @racket[coefficients] has one entry per column of
+  @racket[_X], on the original predictor scale; @racket[r-squared] is the
+  fraction of variance explained; @racket[lambda] is the penalty the solver
+  used; @racket[num-passes] is the number of coordinate-descent passes.
+
+  @examples[#:eval ev
+  (define X '((1.0 2.0 1.0) (2.0 1.0 4.0) (3.0 4.0 9.0)
+              (4.0 3.0 16.0) (5.0 6.0 25.0) (6.0 5.0 36.0)))
+  (define y '(1.0 4.0 3.0 6.0 5.0 8.0))
+  (define fit (lasso X y #:lambda 0.05))
+  (elnet-result-intercept fit)
+  (elnet-result-coefficients fit)]}
 
 @defproc[(elnet-fit [X (and/c (listof (listof real?)) pair?)]
                     [y (and/c (listof real?) pair?)]
@@ -36,14 +74,11 @@ cases.
                     [#:thresh thresh (>/c 0) 1e-7]
                     [#:max-iters max-iters exact-positive-integer? 100000])
          elnet-result?]{
-  Fits a single dense Gaussian elastic-net model. @racket[X] is a non-empty list
-  of equal-length rows; @racket[y] is the matching response. @racket[alpha] is
-  the mixing parameter (@racket[0] ridge, @racket[1] lasso, in between elastic
-  net) and @racket[lambda] is the penalty strength. With @racket[standardize?]
-  the predictors are scaled to unit variance before fitting (coefficients are
-  reported on the original scale). Raises an error if glmnet reports a fatal
-  condition (e.g. zero-variance predictors).
-}
+  Fits a Gaussian elastic-net model of the response @racket[y], one real per
+  row of @racket[X], at a single @racket[lambda].
+
+  @examples[#:eval ev
+  (elnet-fit X y #:alpha 0.5 #:lambda 0.5)]}
 
 @defproc[(ols [X (and/c (listof (listof real?)) pair?)]
               [y (and/c (listof real?) pair?)]
@@ -52,11 +87,15 @@ cases.
               [#:thresh thresh (>/c 0) 1e-10]
               [#:max-iters max-iters exact-positive-integer? 100000])
          elnet-result?]{
-  Ordinary least squares: @racket[elnet-fit] with @racket[#:lambda 0.0] (the
-  mixing parameter is then irrelevant). Uses a tighter default @racket[thresh]
-  than the penalized fits, since coordinate descent approaches the unpenalized
-  solution as the threshold tightens. See @secref["ex-ols"].
-}
+  Ordinary least squares: @racket[elnet-fit] with @racket[#:lambda 0.0], where
+  @racket[#:alpha] has no effect. The default @racket[thresh] is tighter than
+  the penalized fits' because coordinate descent approaches the unpenalized
+  solution slowly.
+
+  @examples[#:eval ev
+  (elnet-result-coefficients
+   (ols '((1.0 2.0) (2.0 1.0) (3.0 4.0) (4.0 3.0) (5.0 6.0))
+        '(1.0 4.0 3.0 6.0 5.0)))]}
 
 @defproc[(ridge [X (and/c (listof (listof real?)) pair?)]
                 [y (and/c (listof real?) pair?)]
@@ -66,10 +105,12 @@ cases.
                 [#:thresh thresh (>/c 0) 1e-7]
                 [#:max-iters max-iters exact-positive-integer? 100000])
          elnet-result?]{
-  Ridge regression: @racket[elnet-fit] with @racket[#:alpha 0.0] (pure L2
-  penalty). Shrinks every coefficient smoothly toward zero as @racket[lambda]
-  grows but never sets one exactly to zero. See @secref["ex-ridge"].
-}
+  Ridge regression: @racket[elnet-fit] with @racket[#:alpha 0.0]. Shrinks
+  every coefficient toward zero as @racket[lambda] grows, but sets none exactly
+  to zero.
+
+  @examples[#:eval ev
+  (elnet-result-coefficients (ridge X y #:lambda 0.1))]}
 
 @defproc[(lasso [X (and/c (listof (listof real?)) pair?)]
                 [y (and/c (listof real?) pair?)]
@@ -79,10 +120,11 @@ cases.
                 [#:thresh thresh (>/c 0) 1e-7]
                 [#:max-iters max-iters exact-positive-integer? 100000])
          elnet-result?]{
-  Lasso: @racket[elnet-fit] with @racket[#:alpha 1.0] (pure L1 penalty). Performs
-  variable selection --- drives coefficients exactly to zero, more of them as
-  @racket[lambda] grows. See @secref["ex-lasso"].
-}
+  The lasso: @racket[elnet-fit] with @racket[#:alpha 1.0]. Sets coefficients
+  exactly to zero, more of them as @racket[lambda] grows.
+
+  @examples[#:eval ev
+  (elnet-result-coefficients (lasso X y #:lambda 0.5))]}
 
 @defproc[(elastic-net [X (and/c (listof (listof real?)) pair?)]
                       [y (and/c (listof real?) pair?)]
@@ -93,18 +135,17 @@ cases.
                       [#:thresh thresh (>/c 0) 1e-7]
                       [#:max-iters max-iters exact-positive-integer? 100000])
          elnet-result?]{
-  Elastic net at an explicit @racket[alpha] in @racket[(real-in 0 1)]: blends the
-  lasso's selection with the ridge's shrinkage. @racket[#:alpha 0.0] reduces to
-  @racket[ridge] and @racket[#:alpha 1.0] to @racket[lasso]. See
-  @secref["ex-elastic-net"].
-}
+  The elastic net at an explicit @racket[alpha], which is required here.
+  @racket[#:alpha 0.0] is @racket[ridge] and @racket[#:alpha 1.0] is
+  @racket[lasso].
 
-@section[#:tag "ref-binomial"]{Fitting binomial (logistic) models}
+  @examples[#:eval ev
+  (elnet-result-coefficients (elastic-net X y #:alpha 0.5 #:lambda 0.5))]}
 
-The binomial family fits a two-class logistic model: the response is a 0/1 class
-label and the fit models the log-odds of class 1. @racket[logistic-fit] mirrors
-@racket[elnet-fit]'s keywords, and prediction helpers turn a fit into class-1
-probabilities or hard labels.
+@section[#:tag "ref-binomial"]{Binomial models}
+
+The @tech{binomial family}: two-class logistic regression on 0/1 labels. See
+@secref["ex-logistic"].
 
 @defstruct*[logistic-result ([intercept real?]
                              [coefficients (vectorof real?)]
@@ -112,13 +153,17 @@ probabilities or hard labels.
                              [lambda real?]
                              [num-passes exact-nonnegative-integer?])
             #:transparent]{
-  A fitted two-class logistic model. @racket[intercept] and the dense
-  @racket[coefficients] (on the original predictor scale) are on the log-odds
-  scale for class 1; @racket[lambda] is the penalty actually used;
-  @racket[dev-ratio] is the fraction of null deviance explained (the logistic
-  analogue of @racket[elnet-result]'s @racket[r-squared]); @racket[num-passes] is
-  glmnet's coordinate-descent pass count.
-}
+  A fitted two-class model. @racket[intercept] and @racket[coefficients] are
+  on the log-odds scale for class 1; @racket[dev-ratio] is the fraction of null
+  deviance explained.
+
+  @examples[#:eval ev
+  (define X '((1.0 5.0 2.0) (2.0 6.0 1.0) (2.0 5.0 3.0) (1.0 4.0 1.0)
+              (6.0 2.0 2.0) (5.0 1.0 1.0) (6.0 1.0 3.0) (5.0 2.0 1.0)))
+  (define y '(0 0 0 0 1 1 1 1))
+  (define fit (logistic-fit X y #:lambda 0.05))
+  (logistic-result-coefficients fit)
+  (logistic-result-dev-ratio fit)]}
 
 @defproc[(logistic-fit [X (and/c (listof (listof real?)) pair?)]
                        [y (and/c (listof (or/c 0 1)) pair?)]
@@ -129,36 +174,36 @@ probabilities or hard labels.
                        [#:thresh thresh (>/c 0) 1e-7]
                        [#:max-iters max-iters exact-positive-integer? 100000])
          logistic-result?]{
-  Fits a single dense two-class logistic elastic-net model. @racket[X] is a
-  non-empty list of equal-length rows and @racket[y] a matching list of 0/1 class
-  labels. @racket[alpha] mixes the penalty (@racket[0.0] ridge logistic,
-  @racket[1.0] lasso logistic, in between elastic net) and @racket[lambda] sets
-  its strength. Raises an error if glmnet reports a fatal condition --- including
-  a class probability collapsing under perfect separation, which a larger
-  @racket[lambda] usually fixes. See @secref["ex-logistic"].
-}
+  Fits a two-class logistic elastic-net model of the labels @racket[y]. If a
+  class probability collapses, typically under perfect separation, the
+  @exnraise[exn:fail]; a larger @racket[lambda] usually fixes it.
+
+  @examples[#:eval ev
+  (logistic-fit X y #:lambda 0.05)]}
 
 @defproc[(logistic-predict-proba [fit logistic-result?]
                                  [X (and/c (listof (listof real?)) pair?)])
          (listof (real-in 0 1))]{
-  The class-1 probability @math{1 / (1 + e^(-(β₀ + xβ)))} for each row of
-  @racket[X]. Each row must have as many features as @racket[fit] has
-  coefficients.
-}
+  The class-1 probability @math{1 / (1 + exp(−(β₀ + xβ)))} for each row of
+  @racket[X].
+
+  @examples[#:eval ev
+  (logistic-predict-proba fit '((2.0 5.0 2.0) (5.0 2.0 2.0)))]}
 
 @defproc[(logistic-predict [fit logistic-result?]
                            [X (and/c (listof (listof real?)) pair?)]
                            [#:threshold threshold (real-in 0 1) 0.5])
          (listof (or/c 0 1))]{
-  Hard class labels: @racket[1] where @racket[logistic-predict-proba] is at least
+  Hard labels: @racket[1] where @racket[logistic-predict-proba] is at least
   @racket[threshold], otherwise @racket[0].
-}
 
-@section[#:tag "ref-multinomial"]{Fitting multinomial (multiclass) models}
+  @examples[#:eval ev
+  (logistic-predict fit '((2.0 5.0 2.0) (5.0 2.0 2.0)))]}
 
-The multinomial family fits a K-class classifier: the response is a list of
-integer class labels @math{0..K-1} and the fit returns K intercepts and K
-coefficient vectors.
+@section[#:tag "ref-multinomial"]{Multinomial models}
+
+The @tech{multinomial family}: @math{K}-class logistic regression on integer
+labels. See @secref["ex-multinomial"].
 
 @defstruct*[multinomial-result ([intercepts (vectorof real?)]
                                 [coefficients (vectorof (vectorof real?))]
@@ -166,13 +211,16 @@ coefficient vectors.
                                 [lambda real?]
                                 [num-passes exact-nonnegative-integer?])
             #:transparent]{
-  A fitted K-class model. @racket[intercepts] is a vector of K reals;
-  @racket[coefficients] is a vector of K coefficient vectors (each of length
-  @racket[_ni]), one per class, on the original predictor scale.
-  @racket[dev-ratio] is the fraction of null deviance explained (the multiclass
-  analogue of @racket[elnet-result]'s @racket[r-squared]); @racket[lambda] is the
-  penalty used; @racket[num-passes] is glmnet's pass count.
-}
+  A fitted @math{K}-class model. @racket[intercepts] holds one real per class
+  and @racket[coefficients] one coefficient vector per class, each with one
+  entry per predictor. @racket[dev-ratio] is the fraction of null deviance
+  explained.
+
+  @examples[#:eval ev
+  (define X '((1.0 1.0) (2.0 1.0) (5.0 1.0) (6.0 1.0) (3.0 5.0) (4.0 6.0)))
+  (define y '(0 0 1 1 2 2))
+  (define fit (multinomial-fit X y #:lambda 0.05))
+  (multinomial-result-coefficients fit)]}
 
 @defproc[(multinomial-fit [X (and/c (listof (listof real?)) pair?)]
                           [y (and/c (listof exact-nonnegative-integer?) pair?)]
@@ -183,45 +231,53 @@ coefficient vectors.
                           [#:thresh thresh (>/c 0) 1e-7]
                           [#:max-iters max-iters exact-positive-integer? 100000])
          multinomial-result?]{
-  Fits a single dense K-class multinomial elastic-net model. @racket[y] is a list
-  of integer class labels that must cover @racket[0]..@racket[(sub1 K)]
-  contiguously (every class present). @racket[alpha] mixes the penalty
-  (@racket[0.0] ridge, @racket[1.0] lasso) and @racket[lambda] sets its strength.
-  Raises an error on a fatal glmnet condition (e.g. a class probability
-  collapsing under perfect separation --- use a larger @racket[lambda]). See
-  @secref["ex-multinomial"].
-}
+  Fits a @math{K}-class multinomial elastic-net model. The labels @racket[y]
+  must cover @racket[0] to @math{K−1} with every class present; otherwise the
+  @exnraise[exn:fail]. As with @racket[logistic-fit], a collapsed class
+  probability raises @racket[exn:fail].
+
+  @examples[#:eval ev
+  (multinomial-result-intercepts (multinomial-fit X y #:lambda 0.05))
+  (eval:error (multinomial-fit X '(0 0 2 2 2 2) #:lambda 0.05))]}
 
 @defproc[(multinomial-predict-proba [fit multinomial-result?]
                                     [X (and/c (listof (listof real?)) pair?)])
          (listof (listof (real-in 0 1)))]{
-  The per-class softmax probabilities for each row of @racket[X]; each inner list
-  has K entries summing to 1. Each row must have as many features as @racket[fit]
-  has coefficients.
-}
+  The softmax class probabilities for each row of @racket[X]: one list of
+  @math{K} entries, summing to 1, per row.
+
+  @examples[#:eval ev
+  (multinomial-predict-proba fit '((1.5 1.0) (3.5 5.5)))]}
 
 @defproc[(multinomial-predict [fit multinomial-result?]
                               [X (and/c (listof (listof real?)) pair?)])
          (listof exact-nonnegative-integer?)]{
-  The predicted class label @math{0..K-1} for each row of @racket[X] --- the
-  argmax of @racket[multinomial-predict-proba].
-}
+  The most probable class for each row of @racket[X].
 
-@section[#:tag "ref-cox"]{Fitting Cox proportional-hazards models}
+  @examples[#:eval ev
+  (multinomial-predict fit '((1.5 1.0) (5.5 1.0) (3.5 5.5)))]}
 
-The Cox family fits a survival model from a follow-up time and a 0/1 event
-indicator. There is no intercept --- the baseline hazard absorbs it.
+@section[#:tag "ref-cox"]{Cox models}
+
+The @tech{Cox family}: proportional-hazards survival models. There is no
+intercept, and so no @racket[#:intercept?] keyword. See @secref["ex-cox"].
 
 @defstruct*[cox-result ([coefficients (vectorof real?)]
                         [dev-ratio real?]
                         [lambda real?]
                         [num-passes exact-nonnegative-integer?])
             #:transparent]{
-  A fitted Cox model. @racket[coefficients] is a dense vector of length
-  @racket[_ni] on the log relative-hazard scale (no intercept); @racket[dev-ratio]
-  is the fraction of null partial-likelihood deviance explained; @racket[lambda]
-  is the penalty used; @racket[num-passes] is glmnet's pass count.
-}
+  A fitted Cox model. @racket[coefficients] are on the log-hazard-ratio scale;
+  @racket[dev-ratio] is the fraction of null partial-likelihood deviance
+  explained.
+
+  @examples[#:eval ev
+  (define X '((0.5 1.0) (1.0 2.0) (1.5 1.0) (2.0 2.0)
+              (2.5 1.0) (3.0 2.0) (3.5 1.0) (4.0 2.0)))
+  (define times '(12.0 10.0 11.0 8.0 6.0 7.0 4.0 3.0))
+  (define statuses '(0 0 0 1 1 1 1 1))
+  (define fit (cox-fit X times statuses #:lambda 0.1))
+  (cox-result-coefficients fit)]}
 
 @defproc[(cox-fit [X (and/c (listof (listof real?)) pair?)]
                   [times (and/c (listof (>/c 0)) pair?)]
@@ -232,31 +288,35 @@ indicator. There is no intercept --- the baseline hazard absorbs it.
                   [#:thresh thresh (>/c 0) 1e-7]
                   [#:max-iters max-iters exact-positive-integer? 100000])
          cox-result?]{
-  Fits a single dense Cox proportional-hazards elastic-net model. @racket[times]
-  are positive follow-up times and @racket[statuses] the matching 0/1 event
-  indicators (@racket[1] = event, @racket[0] = right-censored); at least one must
-  be an event. @racket[alpha] mixes the penalty (@racket[0.0] ridge, @racket[1.0]
-  lasso) and @racket[lambda] sets its strength. There is no @racket[#:intercept?]
-  keyword --- Cox has no intercept. See @secref["ex-cox"].
-}
+  Fits a Cox proportional-hazards elastic-net model. @racket[times] are
+  positive follow-up times and @racket[statuses] the matching event indicators:
+  @racket[1] for an observed event, @racket[0] for right-censoring. If no
+  status is @racket[1], the @exnraise[exn:fail].
+
+  @examples[#:eval ev
+  (cox-fit X times statuses #:lambda 0.5)
+  (eval:error (cox-fit X times '(0 0 0 0 0 0 0 0) #:lambda 0.1))]}
 
 @defproc[(cox-linear-predictor [fit cox-result?]
                                [X (and/c (listof (listof real?)) pair?)])
          (listof real?)]{
-  The log relative hazard @math{x·β} for each row of @racket[X] (no intercept).
-  Each row must have as many features as @racket[fit] has coefficients.
-}
+  The log relative hazard @math{xβ} for each row of @racket[X].
+
+  @examples[#:eval ev
+  (cox-linear-predictor fit '((1.0 1.0) (3.0 1.0)))]}
 
 @defproc[(cox-relative-risk [fit cox-result?]
                             [X (and/c (listof (listof real?)) pair?)])
          (listof (>/c 0))]{
-  The relative risk @math{exp(x·β)} for each row of @racket[X] --- the
-  multiplicative effect on the baseline hazard.
-}
+  The relative risk @math{exp(xβ)} for each row of @racket[X]: the factor by
+  which the row's hazard exceeds the baseline hazard.
 
-@section[#:tag "ref-poisson"]{Fitting Poisson (count) models}
+  @examples[#:eval ev
+  (cox-relative-risk fit '((1.0 1.0) (3.0 1.0)))]}
 
-The Poisson family fits a non-negative count response with a log link.
+@section[#:tag "ref-poisson"]{Poisson models}
+
+The @tech{Poisson family}: counts with a log link. See @secref["ex-poisson"].
 
 @defstruct*[poisson-result ([intercept real?]
                             [coefficients (vectorof real?)]
@@ -264,11 +324,17 @@ The Poisson family fits a non-negative count response with a log link.
                             [lambda real?]
                             [num-passes exact-nonnegative-integer?])
             #:transparent]{
-  A fitted Poisson model. @racket[intercept] and the dense @racket[coefficients]
-  (length @racket[_ni], on the original predictor scale) are on the log-mean
-  scale. @racket[dev-ratio] is the fraction of null deviance explained;
-  @racket[lambda] is the penalty used; @racket[num-passes] is glmnet's pass count.
-}
+  A fitted Poisson model. @racket[intercept] and @racket[coefficients] are on
+  the log-mean scale; @racket[dev-ratio] is the fraction of null deviance
+  explained.
+
+  @examples[#:eval ev
+  (define X '((1.0 2.0) (2.0 1.0) (3.0 2.0) (4.0 1.0)
+              (5.0 2.0) (6.0 1.0) (7.0 2.0) (8.0 1.0)))
+  (define y '(1 2 2 3 4 6 8 11))
+  (define fit (poisson-fit X y #:lambda 0.2))
+  (poisson-result-intercept fit)
+  (poisson-result-coefficients fit)]}
 
 @defproc[(poisson-fit [X (and/c (listof (listof real?)) pair?)]
                       [y (and/c (listof (>=/c 0)) pair?)]
@@ -279,23 +345,24 @@ The Poisson family fits a non-negative count response with a log link.
                       [#:thresh thresh (>/c 0) 1e-7]
                       [#:max-iters max-iters exact-positive-integer? 100000])
          poisson-result?]{
-  Fits a single dense Poisson elastic-net model. @racket[y] is a list of
-  non-negative counts. @racket[alpha] mixes the penalty (@racket[0.0] ridge,
-  @racket[1.0] lasso) and @racket[lambda] sets its strength. See
-  @secref["ex-poisson"].
-}
+  Fits a Poisson elastic-net model of the non-negative response @racket[y],
+  which need not be integral.
+
+  @examples[#:eval ev
+  (poisson-fit X y #:lambda 0.5)]}
 
 @defproc[(poisson-predict-mean [fit poisson-result?]
                                [X (and/c (listof (listof real?)) pair?)])
          (listof (>/c 0))]{
-  The fitted Poisson mean @math{exp(β₀ + x·β)} for each row of @racket[X]. Each
-  row must have as many features as @racket[fit] has coefficients.
-}
+  The fitted mean @math{exp(β₀ + xβ)} for each row of @racket[X].
 
-@section[#:tag "ref-mgaussian"]{Fitting multi-response Gaussian models}
+  @examples[#:eval ev
+  (poisson-predict-mean fit '((2.0 1.0) (9.0 1.0)))]}
 
-The multi-response Gaussian family fits several numeric responses jointly with a
-grouped lasso across responses.
+@section[#:tag "ref-mgaussian"]{Multi-response Gaussian models}
+
+The @tech{multi-response Gaussian family}: several numeric responses fitted
+jointly under a grouped penalty. See @secref["ex-mgaussian"].
 
 @defstruct*[mgaussian-result ([intercepts (vectorof real?)]
                               [coefficients (vectorof (vectorof real?))]
@@ -303,12 +370,17 @@ grouped lasso across responses.
                               [lambda real?]
                               [num-passes exact-nonnegative-integer?])
             #:transparent]{
-  A fitted multi-response model. @racket[intercepts] is a vector of nr reals;
-  @racket[coefficients] is a vector of nr coefficient vectors (each of length
-  @racket[_ni]), one per response, on the original predictor scale.
-  @racket[r-squared] is the fraction of (multi-response) variance explained;
-  @racket[lambda] is the penalty used; @racket[num-passes] is glmnet's pass count.
-}
+  A fitted multi-response model. @racket[intercepts] holds one real per
+  response and @racket[coefficients] one coefficient vector per response, each
+  with one entry per predictor. @racket[r-squared] is the fraction of variance
+  explained across all responses.
+
+  @examples[#:eval ev
+  (define X '((1.0 2.0) (2.0 1.0) (3.0 2.0) (4.0 1.0) (5.0 2.0) (6.0 1.0)))
+  (define Y '((3.0 9.0) (5.0 8.0) (7.0 7.0) (9.0 6.0) (11.0 5.0) (13.0 4.0)))
+  (define fit (mgaussian-fit X Y #:lambda 0.1))
+  (mgaussian-result-intercepts fit)
+  (mgaussian-result-coefficients fit)]}
 
 @defproc[(mgaussian-fit [X (and/c (listof (listof real?)) pair?)]
                         [Y (and/c (listof (listof real?)) pair?)]
@@ -319,34 +391,42 @@ grouped lasso across responses.
                         [#:thresh thresh (>/c 0) 1e-7]
                         [#:max-iters max-iters exact-positive-integer? 100000])
          mgaussian-result?]{
-  Fits a single dense multi-response Gaussian elastic-net model. @racket[Y] is a
-  response matrix (a non-empty list of equal-length rows, one column per response)
-  with one row per observation. The grouped lasso (@racket[alpha] toward
-  @racket[1.0]) selects predictors for all responses jointly; @racket[#:alpha 0.0]
-  is the ridge. See @secref["ex-mgaussian"].
-}
+  Fits a multi-response Gaussian elastic-net model. @racket[Y] is a matrix with
+  one row per observation and one column per response. With @racket[alpha]
+  above zero, the grouped lasso keeps or drops each predictor for every
+  response at once.
+
+  @examples[#:eval ev
+  (mgaussian-fit X Y #:lambda 0.5)]}
 
 @defproc[(mgaussian-predict [fit mgaussian-result?]
                             [X (and/c (listof (listof real?)) pair?)])
          (listof (listof real?))]{
-  The per-response predictions @math{a0_r + x·β_r} for each row of @racket[X] ---
-  one inner list (one entry per response) per row. Each row must have as many
-  features as @racket[fit] has coefficients.
-}
+  The predictions @math{a0_r + xβ_r} for each row of @racket[X]: one list per
+  row, with one entry per response.
 
-@section[#:tag "ref-connectivity"]{Connectivity and self-checks}
+  @examples[#:eval ev
+  (mgaussian-predict fit '((7.0 1.0) (8.0 2.0)))]}
 
-These entry points call directly into the C-ABI shim, for confirming the native
-library loaded and was built correctly.
+@section[#:tag "ref-native"]{Native library}
+
+These call straight into @tt{libglmnetcompat}. Loading @racketmodname[glmnet]
+checks both and raises @racket[exn:fail] if either is wrong. See
+@secref["concepts-precision"].
 
 @defproc[(glmnet-default-real-bytes) exact-positive-integer?]{
-  The byte width of the Fortran default @tt{real} in the loaded native library.
-  This is @racket[8] when the library was compiled with @tt{-fdefault-real-8},
-  which the numeric API requires. The package raises an error at load time if it
-  is not @racket[8].
-}
+  The width in bytes of the Fortran default @tt{real} in the loaded library.
+  It is @racket[8] when the library was compiled with @tt{-fdefault-real-8},
+  which the numeric API requires.
+
+  @examples[#:eval ev
+  (glmnet-default-real-bytes)]}
 
 @defproc[(glmnet-capi-abi-version) exact-positive-integer?]{
-  The ABI version of the C-ABI shim. Bumped on any breaking change to a C entry
-  point.
-}
+  The version of the C entry points the library exports. It changes whenever an
+  entry point is added or changed incompatibly.
+
+  @examples[#:eval ev
+  (glmnet-capi-abi-version)]}
+
+@(close-eval ev)
