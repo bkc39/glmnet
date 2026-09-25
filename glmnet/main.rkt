@@ -15,6 +15,7 @@
          "core/cox.rkt"
          "core/poisson.rkt"
          "core/mgaussian.rkt"
+         "core/path.rkt"
          "foreign.rkt")
 
 (provide (all-from-out "core/elnet.rkt")
@@ -23,4 +24,5 @@
          (all-from-out "core/cox.rkt")
          (all-from-out "core/poisson.rkt")
          (all-from-out "core/mgaussian.rkt")
+         (all-from-out "core/path.rkt")
          (all-from-out "foreign.rkt"))

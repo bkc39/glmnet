@@ -12,7 +12,10 @@
 (require racket/contract
          ffi/vector
          "marshal.rkt"
-         "../foreign/raw/fishnet.rkt")
+         "../foreign/raw/fishnet.rkt"
+         "path.rkt"
+         (submod "path.rkt" support)
+         "../foreign/raw/path.rkt")
 
 (provide
  (struct-out poisson-result)
@@ -27,6 +30,20 @@
         poisson-result?)]
   [poisson-predict-mean
    (-> poisson-result? matrix/c (listof (>/c 0)))]))
+
+(provide
+ (contract-out
+  [poisson-path
+   (->* (matrix/c count-response/c)
+           (#:lambda lambda-sequence/c
+            #:nlambda exact-positive-integer?
+            #:lambda-min-ratio lambda-min-ratio/c
+            #:alpha (real-in 0 1)
+            #:standardize? boolean?
+            #:intercept? boolean?
+            #:thresh (>/c 0)
+            #:max-iters exact-positive-integer?)
+        glmnet-path?)]))
 
 ;; A fitted Poisson model. `intercept` and `coefficients` (a dense vector of
 ;; length ni on the original predictor scale) are on the log-mean scale.
@@ -90,3 +107,35 @@
 ;; The fitted Poisson mean exp(intercept + x . beta) for each row of X.
 (define (poisson-predict-mean result X)
   (for/list ([row (in-list X)]) (exp (eta-row result row))))
+
+;; --- regularization path (#10) ---------------------------------------------
+
+(define (poisson-path X y
+                      #:lambda [lambda #f]
+                      #:nlambda [nlambda 100]
+                      #:lambda-min-ratio [lambda-min-ratio #f]
+                      #:alpha [alpha 1.0]
+                      #:standardize? [standardize? #t]
+                      #:intercept? [intercept? #t]
+                      #:thresh [thresh 1e-7]
+                      #:max-iters [max-iters 100000])
+  (define-values (no ni) (rows->dims X 'poisson-path))
+  (define yv (response->f64vector y no 'poisson-path))
+  (define xcol (matrix->colmajor X no ni))
+  (define-values (nlam flmin ulam)
+    (path-lambdas lambda nlambda lambda-min-ratio no ni))
+  (define a0 (make-f64vector nlam 0.0))
+  (define beta (make-f64vector (* ni nlam) 0.0))
+  (define dev (make-f64vector nlam 0.0))
+  (define alm (make-f64vector nlam 0.0))
+  (define-values (lmu nlp jerr)
+    (glmnet-fishnet-path/raw (exact->inexact alpha) no ni xcol yv
+                             nlam flmin ulam
+                             (if standardize? 1 0) (if intercept? 1 0)
+                             (exact->inexact thresh) max-iters
+                             a0 beta dev alm))
+  (check-poisson-jerr jerr 'poisson-path)
+  (define coefficients (unpack-columns beta ni lmu))
+  (glmnet-path 'poisson (finish-lambdas alm lmu (not lambda))
+               (unpack-vector a0 lmu) coefficients (unpack-vector dev lmu)
+               (count-nonzero coefficients) nlp))

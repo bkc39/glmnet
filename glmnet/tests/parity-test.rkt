@@ -61,6 +61,55 @@
       (for/fold ([acc intercept]) ([c (in-vector coefs)] [x (in-list row)])
         (+ acc (* c (exact->inexact x))))))
 
+  ;; A regularization path (#10): R's lambda sequence (or the user's), where it
+  ;; stops, and the fit at every lambda.
+  (define (run-path-golden g)
+    (define id     (hash-ref g 'id))
+    (define family (hash-ref g 'family))
+    (define alpha  (hash-ref g 'alpha))
+    (define thresh (hash-ref g 'thresh))
+    (define lambda (hash-ref g 'lambda_user #f))
+    (define tols   (hash-ref (hash-ref g 'meta) 'tolerances))
+    (define ctol   (hash-ref tols 'coef))
+    (define itol   (hash-ref tols 'intercept))
+    (define dtol   (hash-ref tols 'dev_ratio))
+    (define ds     (load-dataset (hash-ref g 'dataset)))
+    (define X      (first ds))
+    (define p
+      (case family
+        [("gaussian")    (elnet-path X (second ds) #:alpha alpha #:lambda lambda #:thresh thresh)]
+        [("binomial")    (logistic-path X (second ds) #:alpha alpha #:lambda lambda #:thresh thresh)]
+        [("multinomial") (multinomial-path X (second ds) #:alpha alpha #:lambda lambda #:thresh thresh)]
+        [("poisson")     (poisson-path X (second ds) #:alpha alpha #:lambda lambda #:thresh thresh)]
+        [("cox")         (cox-path X (second ds) (third ds) #:alpha alpha #:lambda lambda
+                               #:thresh thresh)]
+        [("mgaussian")   (mgaussian-path X (second ds) #:alpha alpha #:lambda lambda
+                                         #:thresh thresh)]))
+    (define expected-lambda (hash-ref g 'lambda_path))
+    (test-case id
+      (check-equal? (vector-length (glmnet-path-lambda p)) (length expected-lambda)
+                    (format "~a: number of lambdas fitted" id))
+      (check-vec-close (vector->list (glmnet-path-lambda p)) expected-lambda 1e-8 "lambda")
+      (check-vec-close (vector->list (glmnet-path-dev-ratio p))
+                       (hash-ref g 'dev_ratio_path) dtol "dev-ratio")
+      (check-equal? (vector->list (glmnet-path-df p)) (hash-ref g 'df_path) "df")
+      (for ([coefs (in-vector (glmnet-path-coefficients p))]
+            [expected (in-list (hash-ref g 'coefficients_path))]
+            [m (in-naturals)])
+        (if (vector? (vector-ref coefs 0))
+            (for ([c (in-vector coefs)] [e (in-list expected)] [k (in-naturals)])
+              (check-vec-close (vector->list c) e ctol (format "coef[lambda ~a, group ~a]" m k)))
+            (check-vec-close (vector->list coefs) expected ctol (format "coef[lambda ~a]" m))))
+      ;; Multinomial intercepts are identified only up to a common shift, which
+      ;; the softmax absorbs; R centres them, glmnet's Fortran does not.
+      (when (and (glmnet-path-intercepts p) (not (equal? family "multinomial")))
+        (for ([a0 (in-vector (glmnet-path-intercepts p))]
+              [expected (in-list (hash-ref g 'intercepts_path))]
+              [m (in-naturals)])
+          (if (vector? a0)
+              (check-vec-close (vector->list a0) expected itol (format "intercepts[lambda ~a]" m))
+              (check-close a0 expected itol (format "intercept[lambda ~a]" m)))))))
+
   (define (run-golden g)
     (define id     (hash-ref g 'id))
     (define family (hash-ref g 'family))
@@ -156,7 +205,10 @@
   (cond
     [(pair? golden-files)
      (for ([path (in-list golden-files)])
-       (run-golden (call-with-input-file path read-json)))]
+       (define g (call-with-input-file path read-json))
+       (if (equal? (hash-ref g 'kind #f) "path")
+           (run-path-golden g)
+           (run-golden g)))]
     [explicit-goldens?
      ;; The CI gate sets GLMNET_PARITY_GOLDENS; an empty dir there means R
      ;; generation failed -- a real error.

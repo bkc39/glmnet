@@ -69,6 +69,14 @@ Raise @racket[#:lambda] and more coefficients drop out; set it to @racket[0]
 (elnet-result-coefficients (ols X y))
 ]
 
+To try many values of @racket[#:lambda] at once, fit a
+@tech{regularization path} (@secref["concepts-path"]):
+
+@examples[#:eval ev #:label #f
+(define path (elnet-path X y #:nlambda 12))
+(glmnet-path-df path)
+]
+
 @section[#:tag "gs-models"]{Choosing a model}
 
 @racket[ols], @racket[ridge], @racket[lasso] and @racket[elastic-net] are the
@@ -112,9 +120,6 @@ intercept plus the dot product of a row with the coefficients:
 Several R @tt{glmnet} features have no binding yet. Each has an open issue:
 
 @itemlist[
-  @item{A whole regularization path in one call, @tt{glmnet(x, y)} with
-        @tt{nlambda}: every fit here takes a single @racket[#:lambda]
-        (@hyperlink["https://github.com/bkc39/glmnet/issues/10"]{#10}).}
   @item{Cross-validation, @tt{cv.glmnet}, @tt{lambda.min} and @tt{lambda.1se}
         (@hyperlink["https://github.com/bkc39/glmnet/issues/27"]{#27}).}
   @item{Generic @tt{predict} and @tt{coef}, a Gaussian predictor and printed
