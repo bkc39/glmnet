@@ -1,4 +1,4 @@
-! glmnet_capi.f90 -- C-ABI shim over the vendored R glmnet Fortran (vendor/*.f).
+! glmnet_capi.f90 -- C-ABI shim over R glmnet 4.1's Fortran (vendor/glmnet5dpclean.f).
 !
 ! Every entry point here is `bind(C, name=...)` so it exports a clean, unmangled
 ! C symbol (no trailing underscore, no module prefix) that Racket's FFI binds to

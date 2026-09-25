@@ -40,7 +40,7 @@
           pkgs = import nixpkgs { inherit system; };
 
           # The native C-ABI shim: libglmnetcompat, built from the vendored glmnet
-          # Fortran (fortran/vendor/*.f, R glmnet's own) plus our iso_c_binding wrapper.
+          # Fortran (fortran/vendor/glmnet5dpclean.f, R glmnet 4.1) plus our iso_c_binding wrapper.
           # ctest runs the Fortran self-checks (incl. the 8-byte precision probe).
           native = pkgs.stdenv.mkDerivation {
             pname = "glmnet-compat";

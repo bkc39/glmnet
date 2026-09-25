@@ -218,9 +218,9 @@ Problems are reported in three ways:
 
 @section[#:tag "concepts-precision"]{The native library}
 
-@tt{libglmnetcompat} is R glmnet's own double-precision Fortran behind a small
-C-ABI shim: the Gaussian, binomial, Poisson and multi-response solvers from R
-glmnet 4.1, and the Cox solver R 4.1-10 runs. When the package loads, it checks
+@tt{libglmnetcompat} is R glmnet 4.1's own double-precision Fortran, the last
+release with every family in Fortran, behind a small C-ABI shim. When the
+package loads, it checks
 that the library's reals are 8 bytes (@racket[glmnet-default-real-bytes]) and
 that it exports the entry points this version expects
 (@racket[glmnet-capi-abi-version]).

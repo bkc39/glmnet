@@ -1,0 +1,3 @@
+# Pristine upstream R glmnet Fortran (see fortran/vendor/NOTICE.md): collapsed in
+# GitHub diffs and left out of the language statistics.
+fortran/vendor/*.f linguist-generated=true

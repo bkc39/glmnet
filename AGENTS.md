@@ -10,8 +10,7 @@ native layer.
 
 ```
 fortran/                       native C-ABI shim (built as a Nix subderivation)
-  vendor/glmnet5dpclean.f      R glmnet 4.1 Fortran, Cox units removed (FIXED-FORM; pinned)
-  vendor/coxnet5dpclean.f      R glmnet 4.1-10 Cox Fortran, unmodified (FIXED-FORM; pinned)
+  vendor/glmnet5dpclean.f      R glmnet 4.1 Fortran, byte-for-byte (FIXED-FORM; pinned)
   glmnet_capi.f90              iso_c_binding wrappers -> clean bind(C) symbols
   r_stubs.f90                  no-op setpb (R's progress callback)
   CMakeLists.txt               -fdefault-real-8 -fdefault-double-8; FIXED/FREE form; ctest
@@ -28,8 +27,7 @@ glmnet/                        Racket collection
   tests/*.rkt                  rackunit unit tests
   private/install-glmnet-native.rkt   pre-install hook (env -> staged -> candidate)
   native-libs/candidates/<plat>/      committed prebuilt shared objects
-scripts/                       build-so.sh, test-local.sh (portable candidates),
-                               vendor-fortran.rkt (regenerates fortran/vendor/)
+scripts/                       build-so.sh, test-local.sh (portable candidates)
 flake.nix                      native + racket derivations, devShell, checks
 ```
 
@@ -42,16 +40,14 @@ flake.nix                      native + racket derivations, devShell, checks
    check, together with `-fdefault-double-8`, without which `-fdefault-real-8`
    would widen `double precision` to 16 bytes. `tests/test_precision.f90`
    asserts both. Never drop either flag.
-2. **The vendored Fortran is upstream, regenerated, never hand-edited.**
-   `scripts/vendor-fortran.rkt` writes `fortran/vendor/` from R glmnet's source
-   on the CRAN GitHub mirror at pinned commits. It only removes whole program
-   units that the Cox file duplicates, and stamps that into the file header. A
-   numerical fix belongs upstream: take it by bumping a commit in the script and
-   updating `vendor/NOTICE.md`. The files are FIXED-FORM (col-1 `c` comments,
+2. **The vendored Fortran is pristine upstream, never hand-edited.**
+   `vendor/glmnet5dpclean.f` is R glmnet 4.1's file byte-for-byte; its commit,
+   SHA-256 and re-fetch command are in `vendor/NOTICE.md`. A numerical fix
+   belongs upstream. Behaviour that R adds around a Fortran call belongs in
+   `glmnet_capi.f90` and is listed in `vendor/NOTICE.md` (for example, the Cox
+   ties nudge from R's `coxnet.R`). The file is FIXED-FORM (col-1 `c` comments,
    `*` continuation in col 6, sequence numbers in cols 73–80); the build sets
-   `Fortran_FORMAT FIXED` on them and `FREE` on our shim. Behaviour that R adds
-   around a Fortran call belongs in `glmnet_capi.f90` and is listed in
-   `vendor/NOTICE.md`: for example, the Cox ties nudge from R's `coxnet.R`.
+   `Fortran_FORMAT FIXED` on it and `FREE` on our shim.
 3. **Clean C ABI only.** Each shim entry point is `bind(C, name="…")` so it
    exports an unmangled symbol; the Racket side uses
    `convention:hyphen->underscore`. The internal `elnet_`/`spelnet_` symbols are
