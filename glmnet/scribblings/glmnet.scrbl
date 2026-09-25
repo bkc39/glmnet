@@ -6,18 +6,11 @@
 
 @defmodule[glmnet]
 
-@racketmodname[glmnet] provides Racket bindings to
-@hyperlink["https://glmnet.stanford.edu/"]{glmnet}, the
-Friedman/Hastie/Tibshirani coordinate-descent solver for lasso and elastic-net
-regularized generalized linear models. The numerics come from the original,
-self-contained glmnet Fortran (vendored as
-@filepath{fortran/vendor/glmnet5.f90}); a small @tt{iso_c_binding} shim exports
-a clean C ABI that this package binds to through Racket's FFI. Prebuilt shared
-objects for Linux (x86-64) and macOS (arm64) ship with the package and are
-staged at install time, so no Fortran toolchain is needed to use it.
-
-The @racketmodname[glmnet] module fits six model families, each with the same
-elastic-net penalty:
+@racketmodname[glmnet] is a library for building linear statistical models in
+Racket. It is a port of the reference implementation by Friedman, Hastie,
+Tibshirani et al., the R package
+@hyperlink["https://glmnet.stanford.edu/"]{glmnet}, and fits lasso, ridge and
+elastic-net regularized models in six families:
 
 @itemlist[
   @item{@bold{Gaussian} --- ordinary least squares, ridge, lasso and elastic
