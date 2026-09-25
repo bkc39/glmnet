@@ -13,8 +13,13 @@ exports a C ABI that the Racket FFI binds to.
 
 Example-driven, in progress. Phase 0 (toolchain + FFI spine) is complete; the
 four core models — OLS, ridge, lasso, elastic net — land one at a time, each as
-a runnable literate example that doubles as the user guide. See `AGENTS.md` for
-the development workflow and `plans/` notes.
+a runnable literate example with a matching section in the user guide. See
+`AGENTS.md` for the development workflow and `plans/` notes.
+
+The Scribble manual (`glmnet/scribblings/`) has a user guide (getting started,
+concepts, one worked example per model family) and an API reference. With the
+package installed, build it with
+`raco scribble --htmls glmnet/scribblings/glmnet.scrbl`.
 
 ## Install
 

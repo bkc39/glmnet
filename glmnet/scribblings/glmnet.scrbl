@@ -1,34 +1,41 @@
 #lang scribble/manual
+@(require "utils.rkt")
 
-@(require (for-label racket/base
-                     glmnet))
-
-@title[#:style '(toc)]{glmnet: lasso and elastic-net regularized models}
-@author[(author+email "bkc" "bkcschemer@gmail.com")]
+@title{glmnet: lasso and elastic-net regularized models}
+@author{bkc}
 
 @defmodule[glmnet]
 
-These are Racket bindings to @hyperlink["https://glmnet.stanford.edu/"]{glmnet},
-the Friedman/Hastie/Tibshirani coordinate-descent solver for lasso and
-elastic-net regularized generalized linear models. The numerics come from the
-original, self-contained glmnet Fortran (vendored as
-@filepath{fortran/vendor/glmnet5.f90}); a small @tt{iso_c_binding} shim exports a
-clean C ABI that this package binds to through Racket's FFI.
+@racketmodname[glmnet] is a library for building linear statistical models in
+Racket. It is a port of the reference implementation by Friedman, Hastie,
+Tibshirani et al., the R package
+@hyperlink["https://glmnet.stanford.edu/"]{glmnet}, and fits lasso, ridge and
+elastic-net regularized models in six families:
 
-The library is developed @emph{example-first}: every model below ships as a
-runnable @tech{literate program} under @filepath{glmnet/examples/} that is also
-woven into @secref["examples"]. The four core models --- ordinary least squares,
-ridge, lasso, and elastic net --- are all a single call to the same elastic-net
-routine with different values of the mixing parameter @math{α} and the penalty
-@math{λ}.
+@itemlist[
+  @item{@bold{Gaussian} --- ordinary least squares, ridge, lasso and elastic
+        net for a numeric response.}
+  @item{@bold{Binomial} and @bold{multinomial} --- two-class and
+        @math{K}-class logistic classifiers.}
+  @item{@bold{Cox} --- proportional-hazards survival models.}
+  @item{@bold{Poisson} --- counts, with a log link.}
+  @item{@bold{Multi-response Gaussian} --- several numeric responses fitted
+        jointly under a grouped lasso.}
+]
+
+This manual has two parts: the @secref["guide"] works through the library by
+example, and the @secref["reference"] documents the public API.
 
 @bold{License.} Because this package vendors and links the GPL-2.0 glmnet
 Fortran, it is distributed under @bold{GPL-2.0-or-later} --- unlike the
 permissively licensed bindings in the same family.
 
-@table-of-contents[]
+@bold{Acknowledgements.} The solver and its algorithms are the work of Jerome
+Friedman, Trevor Hastie, Rob Tibshirani and the other authors of the
+@hyperlink["https://glmnet.stanford.edu/"]{R glmnet package}, whose vignettes
+shaped this manual.
 
-@include-section["start.scrbl"]
+@local-table-of-contents[]
+
 @include-section["guide.scrbl"]
-@include-section["examples.scrbl"]
 @include-section["reference.scrbl"]

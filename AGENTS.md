@@ -21,7 +21,8 @@ glmnet/                        Racket collection
   main.rkt                     public API (require glmnet)
   examples/NN-*.rkt            #lang scribble/lp2 literate examples (run-example)
   examples/test/NN-*.rkt       companion runners + rackunit harnesses
-  scribblings/*.scrbl          user guide (guide/examples/reference)
+  scribblings/glmnet.scrbl     manual root: guide.scrbl (guide/*.scrbl) + reference.scrbl
+  scribblings/utils.rkt        for-label imports + make-glmnet-eval for live examples
   tests/*.rkt                  rackunit unit tests
   private/install-glmnet-native.rkt   pre-install hook (env -> staged -> candidate)
   native-libs/candidates/<plat>/      committed prebuilt shared objects
@@ -78,14 +79,29 @@ different `α` (`parm`) and `λ`. Each new capability is shipped as one unit:
 6. **Verify the example end to end.** Wire `glmnet/examples/test/NN-name.rkt`
    (`module+ main` runner + `module+ test` asserting the documented result);
    `raco test` passes; `racket glmnet/examples/test/NN-name.rkt` prints it.
-7. **Add the user-guide page.** Extend `scribblings/guide.scrbl` (concept) and
-   `@lp-include` the example in `scribblings/examples.scrbl`.
-8. **Add the reference entry.** Document the new public proc in
-   `scribblings/reference.scrbl` (contract + short example).
+7. **Add the user-guide pages.** Add the family to `scribblings/guide/concepts.scrbl`
+   (its `@deftech`, response shape, table rows) and convert the example into
+   `scribblings/guide/examples/name.scrbl`, included from
+   `guide/examples.scrbl`: the lp2 prose and chunks as live `@examples`, plus a
+   λ/α sweep and the prediction helpers on new data.
+8. **Add the reference entry.** Document the new public procs and result struct
+   in `scribblings/reference.scrbl` (contract matching `contract-out` + a live
+   example each).
 
 **Gate (all green before the next feature):**
-`raco test ./glmnet/` · `raco scribble --htmls …/glmnet.scrbl` renders ·
-`nix flake check` · resyntax clean.
+`raco test ./glmnet/` · `raco scribble --htmls …/glmnet.scrbl` renders with no
+`collected information for key multiple times` warnings · `nix flake check` ·
+resyntax clean.
+
+## Documentation
+
+The manual follows racket-doc's own guide and reference, as rkt-polars does.
+Snippets are `@examples[#:eval ev #:label #f ...]` evaluated at build time with
+the evaluator from `scribblings/utils.rkt`; never paste output by hand. Use
+`eval:error` for expected failures. Each `@deftech` is defined once, in
+`guide/concepts.scrbl`. Every `@section` gets an explicit `#:tag`; the `ex-*`
+tags name the example pages and stay stable. An example section changes when
+its `glmnet/examples/NN-*.rkt` changes.
 
 ## Local dev loop
 
