@@ -27,6 +27,15 @@ program test_precision
      error stop 1
   end if
 
+  ! R's glmnet5dpclean.f is DOUBLE PRECISION throughout. -fdefault-real-8 alone
+  ! would widen that to 16 bytes; -fdefault-double-8 keeps it at 8. This program
+  ! is compiled with the library's flags, so its own kind is the library's.
+  if (storage_size(1.0d0) /= 64) then
+     print *, "FAIL: double precision is", storage_size(1.0d0) / 8, "bytes; ", &
+              "expected 8 (build needs -fdefault-double-8 beside -fdefault-real-8)"
+     error stop 1
+  end if
+
   abi = glmnet_capi_abi_version()
   if (abi /= 2) then
      print *, "FAIL: glmnet_capi_abi_version =", abi, "; expected 2"

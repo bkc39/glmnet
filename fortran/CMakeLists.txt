@@ -2,22 +2,23 @@ cmake_minimum_required(VERSION 3.18)
 project(glmnetcompat VERSION 0.1.0 LANGUAGES Fortran)
 
 # --- Precision contract ---------------------------------------------------
-# glmnet5.f90 declares all arrays as single-precision `real`. Promote default
-# real to 8 bytes so the elnet ABI is double precision -- this is what R's
-# glmnet and Julia's glmnet_jll do, and what the Racket bindings assume. The
-# `glmnet_default_real_bytes` probe asserts this flag took effect.
-add_compile_options(-fdefault-real-8 -O2 -fPIC)
+# R glmnet's Fortran (vendor/glmnet5dpclean.f) is explicitly DOUBLE PRECISION.
+# Default real is promoted to 8 bytes too, and -fdefault-double-8 keeps DOUBLE
+# PRECISION at 8 bytes, which -fdefault-real-8 alone would widen to 16. The
+# `glmnet_default_real_bytes` probe and tests/test_precision.f90 assert both.
+add_compile_options(-fdefault-real-8 -fdefault-double-8 -O2 -fPIC)
 
 # --- Source forms ---------------------------------------------------------
-# The vendored glmnet5.f90 is FIXED-FORM (col-1 `c` comments, `*` continuation
-# in col 6, sequence numbers in cols 73-80) despite the .f90 name. Force fixed
-# form on it; gfortran's default 72-col width ignores the sequence numbers.
-# Our shim is modern free-form.
-set_source_files_properties(vendor/glmnet5.f90 PROPERTIES Fortran_FORMAT FIXED)
+# The vendored R Fortran is FIXED-FORM (col-1 `c` comments, `*` continuation in
+# col 6, sequence numbers in cols 73-80); gfortran's default 72-col width ignores
+# the sequence numbers. Our shim and the setpb stub are modern free-form.
+set_source_files_properties(vendor/glmnet5dpclean.f PROPERTIES Fortran_FORMAT FIXED)
+set_source_files_properties(r_stubs.f90 PROPERTIES Fortran_FORMAT FREE)
 set_source_files_properties(glmnet_capi.f90    PROPERTIES Fortran_FORMAT FREE)
 
 add_library(glmnetcompat SHARED
-  vendor/glmnet5.f90
+  vendor/glmnet5dpclean.f
+  r_stubs.f90
   glmnet_capi.f90)
 set_target_properties(glmnetcompat PROPERTIES POSITION_INDEPENDENT_CODE ON)
 

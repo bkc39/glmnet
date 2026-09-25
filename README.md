@@ -35,7 +35,7 @@ needed to use the package.
 ```racket
 (require glmnet)
 (ols '((1.0 2.0) (2.0 1.0) (3.0 4.0) (4.0 3.0)) '(1.0 4.0 3.0 6.0))  ; => an elnet-result
-(glmnet-default-real-bytes)  ; => 8   (the -fdefault-real-8 precision contract)
+(glmnet-default-real-bytes)  ; => 8   (the double-precision contract)
 ```
 
 ## Build and run the examples (via Nix)
@@ -58,4 +58,5 @@ A local toolchain (gfortran + cmake + Racket) works too; see `AGENTS.md`.
 ## License
 
 **GPL-2.0-or-later.** This package vendors and links the GPL-2.0 glmnet Fortran
-(`fortran/vendor/glmnet5.f90`); see `LICENSE` and `fortran/vendor/NOTICE.md`.
+(R glmnet's own, under `fortran/vendor/`); see `LICENSE` and
+`fortran/vendor/NOTICE.md`.

@@ -416,8 +416,8 @@ checks both and raises @racket[exn:fail] if either is wrong. See
 
 @defproc[(glmnet-default-real-bytes) exact-positive-integer?]{
   The width in bytes of the Fortran default @tt{real} in the loaded library.
-  It is @racket[8] when the library was compiled with @tt{-fdefault-real-8},
-  which the numeric API requires.
+  It is @racket[8] for a correctly built library, which the numeric API
+  requires.
 
   @examples[#:eval ev
   (glmnet-default-real-bytes)]}

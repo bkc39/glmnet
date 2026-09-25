@@ -3,7 +3,7 @@
 ;; Native library handle and the FFI definer shared by the raw layer.
 ;;
 ;; libglmnetcompat is our C-ABI shim (fortran/glmnet_capi.f90) statically linked
-;; with the vendored glmnet Fortran (fortran/vendor/glmnet5.f90). It exports
+;; with R glmnet 4.1's Fortran (fortran/vendor/glmnet5dpclean.f). It exports
 ;; clean bind(C) symbols, so `define-glmnet` maps hyphenated Racket names to the
 ;; underscored C names (glmnet-elnet-solo -> glmnet_elnet_solo).
 ;;

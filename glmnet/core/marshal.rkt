@@ -47,7 +47,7 @@
 
 ;; --- error handling --------------------------------------------------------
 
-;; Map glmnet's jerr flag (documented in fortran/vendor/glmnet5.f90) to a Racket
+;; Map glmnet's jerr flag (documented in R glmnet's R/jerr.R) to a Racket
 ;; error (fatal) or a logged warning (non-fatal partial result). Handles the
 ;; codes shared across model families; family-specific positive codes (e.g. the
 ;; logistic 8000/9000 range) are intercepted by the caller before delegating

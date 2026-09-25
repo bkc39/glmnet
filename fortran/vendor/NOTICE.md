@@ -1,55 +1,49 @@
 # Vendored third-party source
 
-## `glmnet5.f90`
+## `glmnet5dpclean.f`
 
-- **What:** the classic Friedman/Hastie/Tibshirani coordinate-descent Fortran
-  implementation of the elastic-net (`elnet`/`spelnet`/`lognet`/`coxnet`/…),
-  self-contained (no BLAS/LAPACK dependency).
-- **Source:** `deps/glmnet5.f90` from
-  <https://github.com/JuliaStats/GLMNet.jl>
-- **Pinned commit:** `99739ec97f077cd7d3ce0386cd8f243f44e92352`
-- **Retrieved:** 2026-06-02
-- **License:** GPL-2.0 (the upstream glmnet license). See
-  `GLMNet.jl-LICENSE.md` in this directory and the project root `LICENSE`.
+This is R glmnet's own Fortran: the classic Friedman/Hastie/Tibshirani coordinate-descent solvers for every family we bind (`elnet`, `lognet`, `coxnet`, `fishnet`, `multelnet`, plus the sparse variants). It is self-contained, with no BLAS/LAPACK dependency, and it is **byte-for-byte upstream, with no local modifications**.
 
-This file is **fixed-form** Fortran (column-1 `c` comments, `*` continuation in
-column 6, sequence numbers in columns 73–80) even though it carries a `.f90`
-extension. The build forces fixed-form on it (`Fortran_FORMAT FIXED` in
-`../CMakeLists.txt`); the default 72-column width ignores the sequence numbers.
+| | |
+| --- | --- |
+| Upstream | `src/glmnet5dpclean.f` from R glmnet **4.1**, via the CRAN GitHub mirror <https://github.com/cran/glmnet> |
+| Pinned commit | `537e1a9ea45f0c98ff64e65d818cf250b4b2851b` (tag `4.1`) |
+| SHA-256 | `1954875ba66f81ffe1fb24997718f65cf1ab1510546121f65a52b088ef99d177` |
+| Retrieved | 2026-09-25 |
+| License | GPL-2 (only), per R glmnet's `DESCRIPTION`, copied here as `R-glmnet-DESCRIPTION`. The GPL-2 text is the project root `LICENSE`. |
 
-All floating-point arrays are declared single-precision `real`. The whole
-package treats the elnet ABI as **double precision** by compiling this file with
-`-fdefault-real-8` (so default `real` is 8 bytes). This matches how R's `glmnet`
-and Julia's `glmnet_jll` build it. The `glmnet_default_real_bytes()` probe in
-`../glmnet_capi.f90` exists to assert that flag is active.
+To re-fetch and verify:
 
-Because we vendor and link GPL-2.0 Fortran, this binding package as a whole is
-distributed under **GPL-2.0-or-later** (see root `LICENSE`).
+```bash
+curl -fsSL https://raw.githubusercontent.com/cran/glmnet/537e1a9ea45f0c98ff64e65d818cf250b4b2851b/src/glmnet5dpclean.f \
+  -o fortran/vendor/glmnet5dpclean.f
+echo "1954875ba66f81ffe1fb24997718f65cf1ab1510546121f65a52b088ef99d177  fortran/vendor/glmnet5dpclean.f" | sha256sum -c
+```
 
-### Local modifications
+### Why R glmnet 4.1
 
-The file differs from the pinned commit only as listed here. Each change is
-marked in the file with a `c     local fix (#N)` comment, and the file header
-records it.
+4.1 is the **last** R glmnet release that contains this file. From 4.1-1 on, R runs the Gaussian, binomial, Poisson and multi-response solvers in C++ (`glmnetpp`) and keeps only its Cox solver in Fortran (`src/coxnet5dpclean.f`). That later Cox Fortran differs from this file's `coxnet` only by a `maxit` guard in `coxnet1`. The guard matters only when a fit fails to converge, and it is not needed for parity (see below).
 
-- **2026-09-25, #33:** in the `intr=0` (no intercept) branches of `standard`,
-  `standard1`, `spstandard` and `spstandard1`, the response is left uncentered
-  but was scaled by its *centered* norm, which made Gaussian `rsq` exceed 1
-  and shifted penalized coefficients. The four lines now use the uncentered
-  norm (`ys=sqrt(dot_product(y,y))` dense, `ys=sqrt(dot_product(w,y**2))`
-  sparse), matching R glmnet 3.0-3 and later ("`Intercept=FALSE` with
-  "Gaussian" is fixed ... changed directly in 4 places"). Re-vendoring a newer
-  upstream (#21) supersedes this patch.
+The Gaussian no-intercept fix (#33) is part of upstream since R glmnet 3.0-3.
+
+## Behaviour R adds around the Fortran
+
+R's R-level wrappers do some work before calling the Fortran. What our shim (`../glmnet_capi.f90`) reproduces:
+
+- **Cox ties.** R's `coxnet` wrapper (`R/coxnet.R`) nudges censored times up by `100 * .Machine$double.eps`, so that a subject censored at an event time stays in that event's risk set. `glmnet_coxnet_solo` does the same (#21). Without it, tied data gives fits that differ from R's.
+
+## Build notes
+
+- **Form.** The file is **fixed-form** Fortran. `../CMakeLists.txt` sets `Fortran_FORMAT FIXED`, whose default 72-column width ignores the sequence numbers in columns 73–80.
+- **Precision.** The file is explicitly `double precision` (`implicit double precision(a-h,o-z)`). The build keeps `-fdefault-real-8`, which the `glmnet_default_real_bytes` probe checks, and adds `-fdefault-double-8`. Without that second flag, `-fdefault-real-8` would widen `double precision` to 16 bytes. `tests/test_precision.f90` asserts both kinds are 8 bytes.
+- **`setpb`.** R's Fortran reports progress through `setpb`, which R defines in C. It is only called when `itrace` is nonzero (the default is 0), so `../r_stubs.f90` supplies a no-op.
+- **Diffs.** `.gitattributes` marks the file `linguist-generated`, so GitHub collapses it in PR diffs.
 
 ## Parity reference (R `glmnet`)
 
-The parity goldens under `scripts/r-parity/goldens/` are R `glmnet`'s reference
-outputs, used by `glmnet/tests/parity-test.rkt` to prove these bindings reproduce
-R's numbers on real datasets. They are regenerated by `scripts/r-parity/gen-reference.R`
-through the Nix-pinned R environment (`nix run .#gen-goldens`), so the version is
-fixed by `flake.lock`:
+The parity goldens are R glmnet's reference outputs. `glmnet/tests/parity-test.rkt` uses them to check that these bindings reproduce R's numbers on real datasets. `scripts/r-parity/gen-reference.R` regenerates them through the Nix-pinned R environment (`nix run .#gen-goldens`), so `flake.lock` fixes the versions:
 
 - **R version:** 4.5.3
 - **R `glmnet` package:** 4.1.10
 
-Bump these when the goldens are regenerated against a newer pinned `glmnet`.
+Update these when the goldens are regenerated against a newer pinned glmnet.

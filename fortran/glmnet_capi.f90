@@ -1,16 +1,16 @@
-! glmnet_capi.f90 -- C-ABI shim over the vendored glmnet Fortran (vendor/glmnet5.f90).
+! glmnet_capi.f90 -- C-ABI shim over R glmnet 4.1's Fortran (vendor/glmnet5dpclean.f).
 !
 ! Every entry point here is `bind(C, name=...)` so it exports a clean, unmangled
 ! C symbol (no trailing underscore, no module prefix) that Racket's FFI binds to
 ! directly via `define-ffi-definer ... convention:hyphen->underscore`.
 !
-! This is modern FREE-FORM Fortran. The vendored glmnet5.f90 is FIXED-FORM; the
+! This is modern FREE-FORM Fortran. The vendored R Fortran is FIXED-FORM; the
 ! build (../CMakeLists.txt) sets the format per source file.
 !
-! PRECISION CONTRACT: glmnet5.f90 declares its arrays as single `real`, but the
-! whole project is compiled with -fdefault-real-8 so `real` is 8 bytes and the
-! elnet ABI is effectively double precision. `glmnet_default_real_bytes` below
-! lets callers assert that flag is in force. Keep all `real(c_double)` here.
+! PRECISION CONTRACT: the vendored R Fortran is DOUBLE PRECISION, and the build
+! (-fdefault-real-8 -fdefault-double-8) keeps both default real and double
+! precision at 8 bytes. `glmnet_default_real_bytes` below lets callers assert
+! it. Keep all `real(c_double)` here.
 
 module glmnet_capi
   use, intrinsic :: iso_c_binding
@@ -40,8 +40,8 @@ contains
   end function glmnet_capi_abi_version
 
   ! Size in bytes of the Fortran default `real`. MUST be 8 -- i.e. the library
-  ! was compiled with -fdefault-real-8 -- or the elnet ABI does not match the
-  ! double-precision Racket bindings and every numeric result is garbage.
+  ! was compiled with the project's precision flags -- or the build does not
+  ! match the double-precision Racket bindings.
   integer(c_int) function glmnet_default_real_bytes() &
        bind(C, name="glmnet_default_real_bytes")
     real :: probe
@@ -68,7 +68,7 @@ contains
   !   lambda_out     : the lambda actually used
   !   nlp_out        : number of passes over the data
   !   jerr_out       : 0 ok; >0 fatal (no output); <0 non-fatal partial
-  !                    (see vendor/glmnet5.f90 header for the codes)
+  !                    (codes: R glmnet's R/jerr.R)
   subroutine glmnet_elnet_solo(alpha, no, ni, x, y, lambda, &
        standardize, intercept, thresh, maxit, &
        intercept_out, beta_out, rsq_out, lambda_out, nlp_out, jerr_out) &
@@ -82,7 +82,7 @@ contains
     real(c_double),           intent(out) :: rsq_out, lambda_out
     integer(c_int),           intent(out) :: nlp_out, jerr_out
 
-    ! elnet is an external (non-module) subroutine from vendor/glmnet5.f90.
+    ! elnet is an external (non-module) subroutine from vendor/.
     external :: elnet
 
     ! Work copies (elnet overwrites x, y, w) and elnet scratch/output arrays.
@@ -162,7 +162,7 @@ contains
   !   lambda_out     : the lambda actually used
   !   nlp_out        : number of passes over the data
   !   jerr_out       : 0 ok; >0 fatal (no output); <0 non-fatal partial
-  !                    (see vendor/glmnet5.f90 header for the codes)
+  !                    (codes: R glmnet's R/jerr.R)
   subroutine glmnet_lognet_solo(alpha, no, ni, x, y, lambda, &
        standardize, intercept, thresh, maxit, &
        intercept_out, beta_out, dev_ratio_out, lambda_out, nlp_out, jerr_out) &
@@ -176,7 +176,7 @@ contains
     real(c_double),           intent(out) :: dev_ratio_out, lambda_out
     integer(c_int),           intent(out) :: nlp_out, jerr_out
 
-    ! lognet is an external (non-module) subroutine from vendor/glmnet5.f90.
+    ! lognet is an external (non-module) subroutine from vendor/.
     external :: lognet
 
     ! Work copies (lognet standardizes x and normalizes y in place) plus the
@@ -262,7 +262,7 @@ contains
   !   lambda_out         : the lambda actually used
   !   nlp_out            : number of passes over the data
   !   jerr_out           : 0 ok; >0 fatal (no output); <0 non-fatal partial
-  !                        (see vendor/glmnet5.f90 header for the codes)
+  !                        (codes: R glmnet's R/jerr.R)
   subroutine glmnet_multinomial_solo(alpha, no, ni, nc, x, y, lambda, &
        standardize, intercept, thresh, maxit, &
        intercept_out, beta_out, dev_ratio_out, lambda_out, nlp_out, jerr_out) &
@@ -276,7 +276,7 @@ contains
     real(c_double),           intent(out) :: dev_ratio_out, lambda_out
     integer(c_int),           intent(out) :: nlp_out, jerr_out
 
-    ! lognet is an external (non-module) subroutine from vendor/glmnet5.f90.
+    ! lognet is an external (non-module) subroutine from vendor/.
     external :: lognet
 
     ! Work copies (lognet standardizes x and normalizes y in place) plus the
@@ -360,7 +360,7 @@ contains
   !   lambda_out     : the lambda actually used
   !   nlp_out        : number of passes over the data
   !   jerr_out       : 0 ok; >0 fatal (no output); <0 non-fatal partial
-  !                    (see vendor/glmnet5.f90 header for the codes)
+  !                    (codes: R glmnet's R/jerr.R)
   subroutine glmnet_coxnet_solo(alpha, no, ni, x, time, status, lambda, &
        standardize, thresh, maxit, &
        beta_out, dev_ratio_out, lambda_out, nlp_out, jerr_out) &
@@ -374,7 +374,7 @@ contains
     real(c_double),           intent(out) :: dev_ratio_out, lambda_out
     integer(c_int),           intent(out) :: nlp_out, jerr_out
 
-    ! coxnet is an external (non-module) subroutine from vendor/glmnet5.f90.
+    ! coxnet is an external (non-module) subroutine from vendor/.
     external :: coxnet
 
     ! Work copies (coxnet standardizes x in place) plus the coxnet scratch/output
@@ -393,7 +393,10 @@ contains
     allocate(jd(1), ia(ni), nin(nlam))
 
     xw      = x                  ! copy: coxnet standardizes its x in place
-    yw      = time               ! survival/follow-up times
+    ! R's coxnet wrapper nudges censored times up by 100 machine epsilons, so a
+    ! subject censored at an event time stays in that event's risk set. Match
+    ! it exactly; without it, tied event/censoring times give R-divergent fits.
+    yw      = time + (1.0_c_double - status) * 100.0_c_double * epsilon(1.0_c_double)
     dw      = status             ! 1 = event, 0 = censored
     gw      = 0.0_c_double       ! no offset
     ww      = 1.0_c_double       ! equal observation weights
@@ -449,7 +452,7 @@ contains
   !   lambda_out     : the lambda actually used
   !   nlp_out        : number of passes over the data
   !   jerr_out       : 0 ok; >0 fatal (no output); <0 non-fatal partial
-  !                    (see vendor/glmnet5.f90 header for the codes)
+  !                    (codes: R glmnet's R/jerr.R)
   subroutine glmnet_fishnet_solo(alpha, no, ni, x, y, lambda, &
        standardize, intercept, thresh, maxit, &
        intercept_out, beta_out, dev_ratio_out, lambda_out, nlp_out, jerr_out) &
@@ -463,7 +466,7 @@ contains
     real(c_double),           intent(out) :: dev_ratio_out, lambda_out
     integer(c_int),           intent(out) :: nlp_out, jerr_out
 
-    ! fishnet is an external (non-module) subroutine from vendor/glmnet5.f90.
+    ! fishnet is an external (non-module) subroutine from vendor/.
     external :: fishnet
 
     ! Work copies (fishnet standardizes x in place) plus the fishnet scratch/output
@@ -542,7 +545,7 @@ contains
   !   lambda_out         : the lambda actually used
   !   nlp_out            : number of passes over the data
   !   jerr_out           : 0 ok; >0 fatal (no output); <0 non-fatal partial
-  !                        (see vendor/glmnet5.f90 header for the codes)
+  !                        (codes: R glmnet's R/jerr.R)
   subroutine glmnet_mgaussian_solo(alpha, no, ni, nr, x, y, lambda, &
        standardize, intercept, thresh, maxit, &
        intercept_out, beta_out, rsq_out, lambda_out, nlp_out, jerr_out) &
@@ -556,7 +559,7 @@ contains
     real(c_double),           intent(out) :: rsq_out, lambda_out
     integer(c_int),           intent(out) :: nlp_out, jerr_out
 
-    ! multelnet is an external (non-module) subroutine from vendor/glmnet5.f90.
+    ! multelnet is an external (non-module) subroutine from vendor/.
     external :: multelnet
 
     ! Work copies (multelnet standardizes x and y in place) plus the multelnet

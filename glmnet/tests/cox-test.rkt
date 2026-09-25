@@ -78,6 +78,24 @@
     (check-exn exn:fail?
                (lambda () (cox-fit '((1.0 2.0) (3.0 4.0)) '(5.0 6.0) '(1) #:lambda 0.05))))
 
+  ;; --- tied event and censoring times (#21) ---------------------------------
+  ;; Subjects censored at an event time (times 8 and 6 below) stay in that
+  ;; event's risk set, as in R's coxnet wrapper. Reference values: R glmnet
+  ;; 4.1.10, glmnet(X, Surv(t, s), family = "cox", lambda = ., thresh = 1e-10).
+
+  (test-case "tied event and censoring times match R glmnet"
+    (define Xt '((0.5 1.0) (1.0 2.0) (1.5 1.0) (2.0 2.0)
+                 (2.5 1.0) (3.0 2.0) (3.5 1.0) (4.0 2.0)))
+    (define tt '(8.0 10.0 6.0 8.0 6.0 7.0 4.0 3.0))
+    (define st '(0 0 0 1 1 1 1 1))
+    (for ([lam (in-list '(0.05 0.2))]
+          [beta (in-list '((2.5513204956 -0.9582438344) (1.2528569134 0.0)))]
+          [dev-ratio (in-list '(0.7630335340 0.5681419195))])
+      (define r (cox-fit Xt tt st #:lambda lam #:thresh 1e-10))
+      (for ([b (in-vector (cox-result-coefficients r))] [rb (in-list beta)])
+        (check-= b rb 1e-8))
+      (check-= (cox-result-dev-ratio r) dev-ratio 1e-8)))
+
   (test-case "alpha outside [0,1] is a contract error"
     (check-exn exn:fail:contract?
                (lambda () (cox-fit X times statuses #:lambda 0.05 #:alpha 2.0))))

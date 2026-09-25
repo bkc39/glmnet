@@ -1,7 +1,7 @@
 ! Gaussian elnet without an intercept (#33). With intr = 0 the response is not
 ! centered, so the fraction of deviance explained is relative to sum(y^2):
-! rsq = 1 - RSS / sum(y^2). The vendored snapshot scaled y by its centered norm
-! instead, giving rsq ~ 5.8 on this fixture and shifting penalized coefficients.
+! rsq = 1 - RSS / sum(y^2). The GLMNet.jl snapshot vendored before #21 scaled y
+! by its centered norm instead, giving rsq ~ 5.8 here and shifting coefficients.
 ! Reference values are R glmnet 4.1.8, glmnet(x, y, lambda = ., intercept = FALSE).
 program test_no_intercept
   use, intrinsic :: iso_c_binding
