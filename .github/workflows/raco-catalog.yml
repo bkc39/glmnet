@@ -2,8 +2,8 @@ name: Catalog install (native candidates)
 
 # Builds the per-platform native-lib candidates with scripts/build-so.sh, checks
 # they are portable, then installs glmnet from the candidate with a plain Racket
-# (no Nix), installs glmnet-plot on top of it, and runs both test suites --
-# reproducing what pkgs.racket-lang.org does.
+# (no Nix), which also installs plot-lib for glmnet/plot, and runs the test
+# suite -- reproducing what pkgs.racket-lang.org does.
 # Ubuntu 22.04 is the catalog build server's OS and is exercised explicitly.
 
 on:

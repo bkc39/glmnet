@@ -13,7 +13,9 @@
 ;; `deviance-ratio` work on any of them. core/formula.rkt is the formula front
 ;; end, which fits any family from a table by column name. `data.rkt` is the
 ;; design-matrix layer every fitter reads its input through, and `foreign.rkt`
-;; also re-exports the Phase 0 connectivity checks.
+;; also re-exports the Phase 0 connectivity checks. The plots, plot.rkt, are
+;; `(require glmnet/plot)` and are not re-exported here, so that fitting a
+;; model does not load plot-lib.
 
 (require "data.rkt"
          "core/elnet.rkt"

@@ -261,9 +261,9 @@ keyed by the response's name, as R names the elements of its lists:
 
 @section[#:tag "formulas-plots"]{Plots}
 
-The plots of the separate @tt{glmnet-plot} package accept a formula model
-whose fit is a path or a cross-validated path. With @racket[#:label #t], they
-label each curve with its predictor's name; see @|plot-manual|.
+The plots of @racketmodname[glmnet/plot] accept a formula model whose fit is
+a path or a cross-validated path. With @racket[#:label #t], they label each
+curve with its predictor's name; see @secref["plot-path-names"].
 
 @section[#:tag "formulas-r"]{Matching R}
 

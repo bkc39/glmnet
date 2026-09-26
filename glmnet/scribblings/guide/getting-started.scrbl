@@ -31,6 +31,11 @@ with double-precision default reals (see @secref["concepts-precision"]). If it
 is not, or if the library's ABI version is not the one this package expects,
 @racket[(require glmnet)] raises an error rather than returning wrong numbers.
 
+The plots of paths and cross-validation curves (@secref["plots"]) are in a
+module of their own, which @racket[(require glmnet)] does not load:
+
+@racketblock[(require glmnet/plot)]
+
 @section[#:tag "gs-first-fit"]{A first fit}
 
 The simplest form of a @tech{design matrix} is a list of rows, one per
@@ -93,9 +98,9 @@ To choose one of those values, cross-validate: @racket[elnet-cv] estimates the
 prediction error at each @math{λ} on held-out data and picks R's
 @tt{lambda.min} and @tt{lambda.1se}, at which @racket[predict] and
 @racket[coef] then evaluate the fit. Six observations are too few for that;
-@secref["concepts-cv"] works through an example. The separate
-@tt{glmnet-plot} package plots paths and cross-validation curves as R does;
-see @|plot-manual|.
+@secref["concepts-cv"] works through an example.
+@racketmodname[glmnet/plot] plots paths and cross-validation curves as R does;
+see @secref["plots"].
 
 @section[#:tag "gs-formulas"]{Fitting from named columns}
 

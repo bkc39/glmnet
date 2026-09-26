@@ -1,11 +1,11 @@
 #lang racket/base
 
-;; Every binding exported by `(require glmnet)` has a reference entry: a
-;; defproc, defproc*, defstruct, defstruct*, defthing, defform, defform*,
-;; defidform or defparam in glmnet/scribblings/ (deftogether is searched
-;; through). A defstruct covers the struct's constructor, predicate, field
-;; accessors and struct-type binding. The .scrbl sources are read with
-;; Scribble's @-reader, not rendered.
+;; Every binding exported by `(require glmnet)` or `(require glmnet/plot)` has
+;; a reference entry: a defproc, defproc*, defstruct, defstruct*, defthing,
+;; defform, defform*, defidform or defparam in glmnet/scribblings/ (deftogether
+;; is searched through). A defstruct covers the struct's constructor,
+;; predicate, field accessors and struct-type binding. The .scrbl sources are
+;; read with Scribble's @-reader, not rendered.
 
 (module+ test
   (require rackunit
@@ -14,17 +14,18 @@
            racket/runtime-path
            racket/set
            scribble/reader
-           (only-in glmnet))
+           (only-in glmnet)
+           (only-in glmnet/plot))
 
   (define-runtime-path scribblings-dir "../scribblings")
 
-  (define exported
-    (let-values ([(variables syntaxes) (module->exports 'glmnet)])
-      (for*/set ([exports (in-list (list variables syntaxes))]
-                 [phase+names (in-list exports)]
-                 #:when (eqv? (car phase+names) 0)
-                 [name+origins (in-list (cdr phase+names))])
-        (car name+origins))))
+  (define (exported mod)
+    (define-values (variables syntaxes) (module->exports mod))
+    (for*/set ([exports (in-list (list variables syntaxes))]
+               [phase+names (in-list exports)]
+               #:when (eqv? (car phase+names) 0)
+               [name+origins (in-list (cdr phase+names))])
+      (car name+origins)))
 
   (define (read-scrbl path)
     (call-with-input-file path read-inside))
@@ -87,11 +88,13 @@
   (test-case "the reference is found and read"
     (check-true (pair? scrbl-files))
     (check-true (set-member? documented 'elnet-fit))
-    (check-true (set-member? documented 'elnet-result-coefficients)))
+    (check-true (set-member? documented 'elnet-result-coefficients))
+    (check-true (set-member? documented 'plot-coefficient-path)))
 
-  (test-case "every export of glmnet has a reference entry"
-    (define missing
-      (sort (set->list (set-subtract exported documented)) symbol<?))
-    (check-equal? missing '()
-                  (format "exported by glmnet but not documented in glmnet/scribblings: ~a"
-                          missing))))
+  (for ([mod (in-list '(glmnet glmnet/plot))])
+    (test-case (format "every export of ~a has a reference entry" mod)
+      (define missing
+        (sort (set->list (set-subtract (exported mod) documented)) symbol<?))
+      (check-equal? missing '()
+                    (format "exported by ~a but not documented in glmnet/scribblings: ~a"
+                            mod missing)))))

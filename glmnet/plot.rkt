@@ -7,8 +7,8 @@
 ;; one that returns the finished plot as a pict, with R's axis labels and top
 ;; axis, and can also write it to a file. A formula model (#26) is plotted
 ;; through the path or cross-validated path it holds, with its predictor names
-;; as the curve labels. This package is separate from `glmnet` so that
-;; plot-lib stays out of glmnet's dependencies.
+;; as the curve labels. main.rkt does not re-export this module, so that
+;; `(require glmnet)` does not load plot-lib.
 
 (require racket/class
          racket/contract

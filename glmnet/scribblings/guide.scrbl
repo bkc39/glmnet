@@ -4,8 +4,9 @@
 @title[#:tag "guide" #:style 'toc]{User guide}
 
 The guide starts with a first fit, then covers the data layout, the penalty
-and the result types that every model family shares, then fitting from named
-data with formulas, and ends with one worked example per family.
+and the result types that every model family shares, fitting from named data
+with formulas, and plotting paths and cross-validation curves, and ends with
+one worked example per family.
 
 Every snippet is evaluated when this manual is built, so the printed results
 are what the library returns. Each section in @secref["examples"] has a runnable
@@ -21,4 +22,5 @@ For the definition of every binding mentioned, see the @secref["reference"].
 @include-section["guide/getting-started.scrbl"]
 @include-section["guide/concepts.scrbl"]
 @include-section["guide/formulas.scrbl"]
+@include-section["guide/plots.scrbl"]
 @include-section["guide/examples.scrbl"]

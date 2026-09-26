@@ -7,9 +7,10 @@
 
 @declare-exporting[glmnet]
 
-Every binding below is provided by @racketmodname[glmnet]. Each model family
-has a fit procedure, a path fitter, a cross-validation procedure, a transparent
-result struct and prediction helpers. The formula front end
+Every binding below is provided by @racketmodname[glmnet], except those of
+@secref["ref-plot"], which @racketmodname[glmnet/plot] provides. Each model
+family has a fit procedure, a path fitter, a cross-validation procedure, a
+transparent result struct and prediction helpers. The formula front end
 (@secref["ref-formula"]) fits any family from a @tech{table}. Every result
 type, @racket[glmnet-path], @racket[glmnet-cv] and @racket[formula-model] also
 implement the generic interface of @secref["ref-model"]: @racket[predict],
@@ -1667,5 +1668,135 @@ checks both and raises @racket[exn:fail] if either is wrong. See
 
   @examples[#:eval ev
   (glmnet-capi-abi-version)]}
+
+@section[#:tag "ref-plot"]{Plots}
+
+@defmodule[glmnet/plot]
+
+@racketmodname[glmnet/plot] draws a @racket[glmnet-path] and a
+@racket[glmnet-cv], or a @racket[formula-model] that holds one, as R's
+@tt{plot} draws a @tt{glmnet} and a @tt{cv.glmnet} fit. The guide's
+@secref["plots"] chapter shows every plot and how to read it.
+@racketmodname[glmnet] does not re-export these bindings, so that
+@racket[(require glmnet)] does not load the plot library. Each plot is a
+@racket[pict?], drawn with @racketmodname[plot/no-gui], whose parameters apply
+to it, and each plot procedure has a companion that returns the plot's
+renderers, without the axes, to combine with other plot-lib renderers.
+
+The examples in this section plot the lasso path of the fixture of
+@secref["ref-gaussian"], a multinomial path of three separable classes, the
+cross-validated fit @racket[cv] of @secref["ref-cv"], and the formula model
+@racket[cv-model] of @racket[formula-cv]:
+
+@examples[#:eval ev #:label #f
+(require glmnet/plot)
+(define X '((1.0 2.0 1.0) (2.0 1.0 4.0) (3.0 4.0 9.0)
+            (4.0 3.0 16.0) (5.0 6.0 25.0) (6.0 5.0 36.0)))
+(define y '(1.0 4.0 3.0 6.0 5.0 8.0))
+(define path (elnet-path X y))
+(define X3 '((1.0 1.0) (2.0 1.0) (1.0 2.0) (2.0 2.0)
+             (5.0 1.0) (6.0 1.0) (5.0 2.0) (6.0 2.0)
+             (3.0 5.0) (4.0 5.0) (3.0 6.0) (4.0 6.0)))
+(define mpath (multinomial-path X3 '(0 0 0 0 1 1 1 1 2 2 2 2)))
+]
+
+@defproc[(plot-coefficient-path [model (or/c glmnet-path? glmnet-cv? formula-model?)]
+                                [#:xvar xvar (or/c 'lambda 'norm 'dev) 'lambda]
+                                [#:sign-lambda sign-lambda (or/c -1 1) -1]
+                                [#:label label
+                                         (or/c boolean? design-matrix? (listof (or/c string? symbol?)))
+                                         #f]
+                                [#:type-coef type-coef (or/c 'coef '2norm) 'coef]
+                                [#:width width exact-positive-integer? (plot-width)]
+                                [#:height height exact-positive-integer? (plot-height)]
+                                [#:title title (or/c #f string?) (plot-title)]
+                                [#:out-file out-file (or/c #f path-string?) #f])
+         pict?]{
+  Plots the coefficients of @racket[model]'s path against @racket[xvar], as R's
+  @tt{plot.glmnet} does (see @secref["plot-path"]). For a
+  @racket[glmnet-cv], it plots the path fitted to all the data. For a
+  @racket[formula-model], it plots the model's fit, which must be a path or a
+  @racket[glmnet-cv].
+
+  @itemlist[
+   @item{@racket[xvar] is @racket['lambda] for @racket[sign-lambda] times
+         @math{log λ}, @racket['norm] for the L1 norm of the coefficients, or
+         @racket['dev] for the fraction of deviance explained.}
+   @item{@racket[label] labels each curve at the end of the path: @racket[#f]
+         for no labels, @racket[#t] for the predictor's name if the model names
+         its predictors, as a @racket[formula-model] does, and otherwise its
+         position counting from 1, or the names of the predictors, as a list or
+         as the column names of a design matrix. A design matrix without column
+         names gives positions.}
+   @item{@racket[type-coef] applies to the multinomial and multi-response
+         families: @racket['coef] stacks one plot per class or response,
+         @racket['2norm] draws one plot of the 2-norms across them.}
+   @item{@racket[width] and @racket[height] are the size of each plot in
+         pixels, and @racket[title] is its title.}
+   @item{@racket[out-file], when given, names a file to which the plot is also
+         written, in the format its extension names: @filepath{png},
+         @filepath{pdf}, @filepath{svg} or @filepath{eps}.}
+  ]
+
+  An error is raised if every coefficient is zero at every @math{λ}, as there
+  is then nothing to plot.
+
+  @examples[#:eval ev
+  (plot-coefficient-path path #:xvar 'norm #:label '("x1" "x2" "x3")
+                         #:width 400 #:height 300 #:title "Lasso path")
+  (eval:error (plot-coefficient-path (elnet-path X y #:lambda '(10.0 5.0))))]}
+
+@defproc[(coefficient-path-renderers [model (or/c glmnet-path? glmnet-cv? formula-model?)]
+                                     [#:xvar xvar (or/c 'lambda 'norm 'dev) 'lambda]
+                                     [#:sign-lambda sign-lambda (or/c -1 1) -1]
+                                     [#:label label
+                                              (or/c boolean? design-matrix? (listof (or/c string? symbol?)))
+                                              #f]
+                                     [#:type-coef type-coef (or/c 'coef '2norm) 'coef]
+                                     [#:response response exact-nonnegative-integer? 0])
+         (listof renderer2d?)]{
+  The renderers of one plot of @racket[plot-coefficient-path]: a line for each
+  predictor that is nonzero at some @math{λ}, and a label for each when
+  @racket[label] asks for them. For the multinomial and multi-response
+  families with @racket[type-coef] @racket['coef], @racket[response] chooses
+  the class or response, counting from 0; for the others it must be 0. The
+  list is empty when every coefficient is zero.
+
+  The axes are not included. Labels start at the end of the path, where
+  plot-lib cuts them off unless the x axis is widened.
+
+  @examples[#:eval ev
+  (length (coefficient-path-renderers path))
+  (length (coefficient-path-renderers path #:label #t))
+  (length (coefficient-path-renderers mpath #:response 2))]}
+
+@defproc[(plot-cv [cv (or/c glmnet-cv? formula-model?)]
+                  [#:sign-lambda sign-lambda (or/c -1 1) -1]
+                  [#:width width exact-positive-integer? (plot-width)]
+                  [#:height height exact-positive-integer? (plot-height)]
+                  [#:title title (or/c #f string?) (plot-title)]
+                  [#:out-file out-file (or/c #f path-string?) #f])
+         pict?]{
+  Plots the cross-validation curve of @racket[cv] against
+  @racket[sign-lambda] times @math{log λ}, as R's @tt{plot.cv.glmnet} does (see
+  @secref["plot-cv"]), with the number of nonzero coefficients along the top.
+  A @racket[formula-model] must hold a @racket[glmnet-cv], from
+  @racket[formula-cv].
+  @racket[width], @racket[height], @racket[title] and @racket[out-file] are as
+  for @racket[plot-coefficient-path].
+
+  @examples[#:eval ev
+  (plot-cv cv #:sign-lambda 1 #:width 400 #:height 300)]}
+
+@defproc[(cv-renderers [cv (or/c glmnet-cv? formula-model?)]
+                       [#:sign-lambda sign-lambda (or/c -1 1) -1])
+         (listof renderer2d?)]{
+  The renderers of @racket[plot-cv]: the error bars, the points, and a
+  vertical line at each of @racket[glmnet-cv-lambda-min] and
+  @racket[glmnet-cv-lambda-1se]. The axes are not included.
+
+  @examples[#:eval ev
+  (length (cv-renderers cv))
+  (length (cv-renderers cv-model))]}
 
 @(close-eval ev)
