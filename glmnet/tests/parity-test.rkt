@@ -10,7 +10,10 @@
 ;; hold R's whole regularization path; predict goldens (kind "predict", #25) and
 ;; the `generic` entry of each single-fit golden hold R's coef(fit, s) and
 ;; predict(fit, newx, s, type) for the generic interface; and CV goldens (kind
-;; "cv", #27) hold R's cv.glmnet on fold ids recorded in the golden.
+;; "cv", #27) hold R's cv.glmnet on fold ids recorded in the golden. Every
+;; fixture is also fitted through the formula front end (#26), from the
+;; dataset as a table with the CSV's column names, and its name-keyed `coef`
+;; checked against R's coef, names and values.
 ;;
 ;; Goldens are generated on demand, never committed: the Nix `checks.parity` gate
 ;; regenerates them with the pinned R glmnet and points GLMNET_PARITY_GOLDENS at
@@ -41,6 +44,20 @@
       [("warpbreaks") (call-with-values load-warpbreaks list)]
       [("linnerud")   (call-with-values load-linnerud list)]
       [else (error 'parity-test "unknown dataset: ~a" name)]))
+
+  ;; The formula of each dataset: its response against every other column, in
+  ;; the order of the columns of R's X.
+  (define dataset-formulas
+    (hash "longley"    (~ Employed all)
+          "wdbc"       (~ diagnosis all)
+          "iris"       (~ class all)
+          "veteran"    (~ (surv time status) all)
+          "warpbreaks" (~ breaks all)
+          "linnerud"   (~ (weight waist pulse) all)))
+
+  (define (golden-formula g) (hash-ref dataset-formulas (hash-ref g 'dataset)))
+  (define (golden-table g) (load-table (hash-ref g 'dataset)))
+  (define (golden-family g) (string->symbol (hash-ref g 'family)))
 
   ;; absolute tolerance with a relative fallback for large magnitudes
   (define (close? a b tol)
@@ -109,6 +126,27 @@
               (check-equal? c e (format "~a[row ~a]" msg row)))
             (check-nested-close got expected ptol msg)))))
 
+  ;; A formula model's coef, one entry per s, against R's: the names R gives
+  ;; its rows and list elements (`names`, the golden's coef_names), and its
+  ;; values.
+  (define (check-named-coef got-per-s expected-per-s names tol)
+    (define rows (hash-ref names 'rows))
+    (define groups (hash-ref names 'groups #f))
+    (for ([got (in-list got-per-s)]
+          [expected (in-list expected-per-s)]
+          [i (in-naturals)])
+      (define msg (format "formula coef[s ~a]" i))
+      (cond
+        [groups
+         (check-equal? (for/list ([group (in-list got)]) (format "~a" (car group))) groups
+                       (format "~a: names of the list" msg))
+         (for ([group (in-list got)] [e (in-list expected)] [k (in-naturals)])
+           (check-equal? (map car (cdr group)) rows (format "~a[~a]: row names" msg k))
+           (check-vec-close (map cdr (cdr group)) e tol (format "~a[~a]" msg k)))]
+        [else
+         (check-equal? (map car got) rows (format "~a: row names" msg))
+         (check-vec-close (map cdr got) expected tol msg)])))
+
   ;; The path a path or predict golden describes, fitted as R fits it.
   (define (fit-golden-path g ds)
     (define family (hash-ref g 'family))
@@ -131,8 +169,15 @@
   (define (run-predict-golden g)
     (define ds (load-dataset (hash-ref g 'dataset)))
     (define p  (fit-golden-path g ds))
+    (define tols (hash-ref (hash-ref g 'meta) 'tolerances))
     (test-case (hash-ref g 'id)
-      (check-generic p (first ds) g (hash-ref (hash-ref g 'meta) 'tolerances))))
+      (check-generic p (first ds) g tols))
+    (test-case (format "~a (formula)" (hash-ref g 'id))
+      (define fp (formula-path (golden-formula g) (golden-table g)
+                               #:family (golden-family g) #:alpha (hash-ref g 'alpha)
+                               #:lambda (hash-ref g 'lambda_user #f) #:thresh (hash-ref g 'thresh)))
+      (check-named-coef (coef fp #:lambda (hash-ref g 's)) (hash-ref g 'coef_s)
+                        (hash-ref g 'coef_names) (hash-ref tols 'coef))))
 
   ;; A regularization path (#10): R's lambda sequence (or the user's), where it
   ;; stops, and the fit at every lambda.
@@ -216,7 +261,14 @@
       (check-equal? (add1 (glmnet-cv-index-1se cv)) (hash-ref g 'index_1se) "index-1se")
       (check-nested-close (coef cv #:lambda 'lambda-min) (hash-ref g 'coef_min) ctol
                           "coef at lambda-min")
-      (check-nested-close (coef cv) (hash-ref g 'coef_1se) ctol "coef, default lambda")))
+      (check-nested-close (coef cv) (hash-ref g 'coef_1se) ctol "coef, default lambda"))
+    (test-case (format "~a (formula)" id)
+      (define fcv (formula-cv (golden-formula g) (golden-table g)
+                              #:family (golden-family g) #:type-measure measure
+                              #:fold-ids fold-ids #:grouped? grouped? #:alpha alpha
+                              #:lambda lambda #:thresh thresh))
+      (check-named-coef (list (coef fcv #:lambda 'lambda-min)) (list (hash-ref g 'coef_min))
+                        (hash-ref g 'coef_names) ctol)))
 
   (define (run-golden g)
     (define id     (hash-ref g 'id))
@@ -237,6 +289,18 @@
       (check-nested-close (coef r) (first (hash-ref gen 'coef_s)) ctol "coef, default lambda")
       (check-nested-close (predict r X) (first (hash-ref (hash-ref gen 'predict_s) 'link))
                           ptol "predict, default type and lambda"))
+    ;; The same fit through the formula front end, whose predict reads the
+    ;; table by name.
+    (define (check-formula-single)
+      (define gen (hash-ref g 'generic))
+      (define table (golden-table g))
+      (define m (formula-fit (golden-formula g) table
+                             #:family (golden-family g) #:lambda lambda #:alpha alpha
+                             #:thresh thresh #:intercept? (hash-ref g 'fit_intercept #t)))
+      (check-named-coef (coef m #:lambda (hash-ref gen 's)) (hash-ref gen 'coef_s)
+                        (hash-ref gen 'coef_names) ctol)
+      (check-nested-close (predict m table #:lambda (hash-ref gen 's))
+                          (hash-ref (hash-ref gen 'predict_s) 'link) ptol "formula predict"))
     (test-case id
       (cond
         [(string=? family "gaussian")
@@ -309,7 +373,9 @@
          (check-close (mgaussian-result-r-squared r) (hash-ref g 'r_squared) dtol "r-squared")
          (check-mat-close (mgaussian-predict r X) (hash-ref g 'predictions) ptol "predictions")
          (check-generic-single r)]
-        [else (fail (format "~a: unhandled family ~a" id family))])))
+        [else (fail (format "~a: unhandled family ~a" id family))]))
+    (test-case (format "~a (formula)" id)
+      (check-formula-single)))
 
   (define explicit-goldens?
     (let ([e (getenv "GLMNET_PARITY_GOLDENS")]) (and e (positive? (string-length e)) #t)))
