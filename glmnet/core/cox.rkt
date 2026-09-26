@@ -18,7 +18,10 @@
          "../foreign/raw/coxnet.rkt"
          "path.rkt"
          (submod "path.rkt" support)
-         "../foreign/raw/path.rkt")
+         "../foreign/raw/path.rkt"
+         (only-in "../data.rkt" design-matrix-select-rows)
+         "cv.rkt"
+         (submod "cv.rkt" support))
 
 (provide
  (struct-out cox-result)
@@ -44,7 +47,21 @@
             #:standardize? boolean?
             #:thresh (>/c 0)
             #:max-iters exact-positive-integer?)
-        glmnet-path?)]))
+        glmnet-path?)]
+  [cox-cv
+   (->* (design-matrix/c cox-times/c cox-status/c)
+        (#:type-measure (or/c 'deviance 'C)
+         #:nfolds nfolds/c
+         #:fold-ids fold-ids/c
+         #:grouped? boolean?
+         #:lambda cv-lambda-sequence/c
+         #:nlambda exact-positive-integer?
+         #:lambda-min-ratio lambda-min-ratio/c
+         #:alpha (real-in 0 1)
+         #:standardize? boolean?
+         #:thresh (>/c 0)
+         #:max-iters exact-positive-integer?)
+        glmnet-cv?)]))
 
 ;; A fitted Cox model. `coefficients` is a dense vector of length ni on the
 ;; original predictor scale, on the log relative-hazard scale -- there is no
@@ -153,3 +170,36 @@
   (glmnet-path 'cox (finish-lambdas alm lmu (not lambda))
                #f coefficients (unpack-vector dev lmu)
                (count-nonzero coefficients) nlp))
+
+;; --- cross-validation (#27) ------------------------------------------------
+
+(define (cox-cv X times statuses
+                #:type-measure [measure 'deviance]
+                #:nfolds [nfolds 10]
+                #:fold-ids [fold-ids #f]
+                #:grouped? [grouped? #t]
+                #:lambda [lambda #f]
+                #:nlambda [nlambda 100]
+                #:lambda-min-ratio [lambda-min-ratio #f]
+                #:alpha [alpha 1.0]
+                #:standardize? [standardize? #t]
+                #:thresh [thresh 1e-7]
+                #:max-iters [max-iters 100000])
+  (define x (as-design-matrix X 'cox-cv "X"))
+  (define no (design-matrix-nrows x))
+  (define tv (as-response times no 'cox-cv "times"))
+  (define sv (as-response statuses no 'cox-cv "statuses"))
+  (check-events statuses 'cox-cv)
+  (define ts (list->vector (f64vector->list tv)))
+  (define ds (list->vector (f64vector->list sv)))
+  (define (fit x times statuses)
+    (cox-path x times statuses
+              #:lambda lambda #:nlambda nlambda #:lambda-min-ratio lambda-min-ratio
+              #:alpha alpha #:standardize? standardize?
+              #:thresh thresh #:max-iters max-iters))
+  (define (fit-all) (fit x times statuses))
+  (define (fit-rows rows)
+    (fit (design-matrix-select-rows x rows) (select ts rows) (select ds rows)))
+  (cross-validate 'cox-cv x (for/vector ([t (in-vector ts)] [d (in-vector ds)]) (cons t d))
+                  fit-all fit-rows
+                  #:measure measure #:nfolds nfolds #:fold-ids fold-ids #:grouped? grouped?))

@@ -304,3 +304,99 @@ for (f in path_fixtures) {
   writeLines(toJSON(golden, digits = NA, auto_unbox = TRUE, pretty = TRUE), path)
   cat("wrote", path, "  ( s =", signif(s, 4), ")\n")
 }
+
+## --- cross-validation (#27) ---------------------------------------------------
+## R's cv.glmnet with a fixed foldid, for every family and every type.measure
+## the bindings ship. The fold ids are drawn here from a seed and recorded in
+## the golden (1-based, as R numbers folds), so both sides use the same folds.
+## For the multinomial the seed is advanced until no training fold has two
+## largest classes of equal size: at the largest lambdas the folds' fits are
+## intercept-only, their class probabilities would then tie up to rounding
+## noise, and neither side's predicted class would mean anything.
+
+cv_fold_ids <- function(n, nfolds, seed, y = NULL) {
+  tied <- function(foldid)
+    any(sapply(seq_len(nfolds), function(k) {
+      counts <- table(factor(y[foldid != k], levels = sort(unique(y))))
+      sum(counts == max(counts)) > 1
+    }))
+  repeat {
+    set.seed(seed)
+    foldid <- sample(rep(seq_len(nfolds), length = n))
+    if (is.null(y) || !tied(foldid)) return(foldid)
+    seed <- seed + 1
+  }
+}
+
+## coef(cv, s) at one named s: a vector, or one vector per class or response.
+cv_coef <- function(cv, s) {
+  co <- coef(cv, s = s)
+  if (is.list(co)) unname(lapply(co, function(B) unname(as.numeric(B[, 1]))))
+  else unname(as.numeric(co[, 1]))
+}
+
+cv_fixtures <- list(
+  list(id = "cv-gaussian-longley-mse",           dataset = "longley",    family = "gaussian",    nfolds = 4,  seed = 1, type_measure = "mse"),
+  list(id = "cv-gaussian-longley-deviance",      dataset = "longley",    family = "gaussian",    nfolds = 4,  seed = 1, type_measure = "deviance"),
+  list(id = "cv-gaussian-longley-mae",           dataset = "longley",    family = "gaussian",    nfolds = 4,  seed = 1, type_measure = "mae"),
+  list(id = "cv-gaussian-longley-mse-ungrouped", dataset = "longley",    family = "gaussian",    nfolds = 4,  seed = 1, type_measure = "mse", grouped = FALSE),
+  list(id = "cv-gaussian-longley-mse-8folds",    dataset = "longley",    family = "gaussian",    nfolds = 8,  seed = 1, type_measure = "mse"),
+  list(id = "cv-gaussian-longley-enet-user",     dataset = "longley",    family = "gaussian",    nfolds = 4,  seed = 1, type_measure = "mse",
+       alpha = 0.5, lambda = c(0.05, 1, 0.5, 0.2, 0.1, 0.02, 0.01)),
+  list(id = "cv-binomial-wdbc-deviance",         dataset = "wdbc",       family = "binomial",    nfolds = 10, seed = 3, type_measure = "deviance"),
+  list(id = "cv-binomial-wdbc-class",            dataset = "wdbc",       family = "binomial",    nfolds = 10, seed = 3, type_measure = "class"),
+  list(id = "cv-binomial-wdbc-auc",              dataset = "wdbc",       family = "binomial",    nfolds = 10, seed = 3, type_measure = "auc"),
+  list(id = "cv-binomial-wdbc-mse",              dataset = "wdbc",       family = "binomial",    nfolds = 10, seed = 3, type_measure = "mse"),
+  list(id = "cv-binomial-wdbc-mae",              dataset = "wdbc",       family = "binomial",    nfolds = 10, seed = 3, type_measure = "mae"),
+  list(id = "cv-multinomial-iris-deviance",      dataset = "iris",       family = "multinomial", nfolds = 10, seed = 2, type_measure = "deviance"),
+  list(id = "cv-multinomial-iris-class",         dataset = "iris",       family = "multinomial", nfolds = 10, seed = 2, type_measure = "class"),
+  list(id = "cv-multinomial-iris-mse",           dataset = "iris",       family = "multinomial", nfolds = 10, seed = 2, type_measure = "mse"),
+  list(id = "cv-multinomial-iris-mae",           dataset = "iris",       family = "multinomial", nfolds = 10, seed = 2, type_measure = "mae"),
+  list(id = "cv-cox-veteran-deviance",           dataset = "veteran",    family = "cox",         nfolds = 5,  seed = 4, type_measure = "deviance"),
+  list(id = "cv-cox-veteran-deviance-ungrouped", dataset = "veteran",    family = "cox",         nfolds = 5,  seed = 4, type_measure = "deviance", grouped = FALSE),
+  list(id = "cv-cox-veteran-C",                  dataset = "veteran",    family = "cox",         nfolds = 5,  seed = 4, type_measure = "C"),
+  list(id = "cv-poisson-warpbreaks-deviance",    dataset = "warpbreaks", family = "poisson",     nfolds = 5,  seed = 5, type_measure = "deviance"),
+  list(id = "cv-poisson-warpbreaks-mse",         dataset = "warpbreaks", family = "poisson",     nfolds = 5,  seed = 5, type_measure = "mse"),
+  list(id = "cv-poisson-warpbreaks-mae",         dataset = "warpbreaks", family = "poisson",     nfolds = 5,  seed = 5, type_measure = "mae"),
+  list(id = "cv-mgaussian-linnerud-mse",         dataset = "linnerud",   family = "mgaussian",   nfolds = 5,  seed = 6, type_measure = "mse"),
+  list(id = "cv-mgaussian-linnerud-deviance",    dataset = "linnerud",   family = "mgaussian",   nfolds = 5,  seed = 6, type_measure = "deviance"),
+  list(id = "cv-mgaussian-linnerud-mae",         dataset = "linnerud",   family = "mgaussian",   nfolds = 5,  seed = 6, type_measure = "mae")
+)
+
+for (f in cv_fixtures) {
+  d       <- datasets[[f$dataset]]
+  alpha   <- if (is.null(f$alpha)) 1.0 else f$alpha
+  grouped <- if (is.null(f$grouped)) TRUE else f$grouped
+  foldid  <- cv_fold_ids(nrow(d$X), f$nfolds, f$seed,
+                         if (f$family == "multinomial") d$y else NULL)
+  y <- switch(f$family,
+    binomial    = factor(d$y, levels = c(0, 1)),
+    multinomial = factor(d$y),
+    cox         = Surv(d$time, d$status),
+    mgaussian   = d$Y,
+    d$y)
+  args <- list(d$X, y, family = f$family, alpha = alpha, standardize = TRUE, thresh = 1e-7,
+               foldid = foldid, type.measure = f$type_measure, grouped = grouped)
+  if (!is.null(f$lambda)) args$lambda <- f$lambda
+  if (f$family == "binomial") args$type.logistic <- "Newton"
+  if (f$family == "multinomial") args$type.multinomial <- "ungrouped"
+  if (f$family == "mgaussian") args$standardize.response <- FALSE
+  cv <- suppressWarnings(do.call(cv.glmnet, args))
+  golden <- list(id = f$id, dataset = f$dataset, family = f$family, kind = "cv",
+                 alpha = alpha, thresh = 1e-7, type_measure = f$type_measure,
+                 grouped = grouped, foldid = foldid)
+  if (!is.null(f$lambda)) golden$lambda_user <- f$lambda
+  golden <- c(golden,
+              list(measure = names(cv$name), name = unname(cv$name),
+                   lambda = cv$lambda, cvm = unname(cv$cvm), cvsd = unname(cv$cvsd),
+                   cvup = unname(cv$cvup), cvlo = unname(cv$cvlo),
+                   nzero = as.integer(cv$nzero),
+                   lambda_min = cv$lambda.min, lambda_1se = cv$lambda.1se,
+                   index_min = cv$index[1, 1], index_1se = cv$index[2, 1],
+                   coef_min = cv_coef(cv, "lambda.min"), coef_1se = cv_coef(cv, "lambda.1se"),
+                   meta = meta))
+  path <- file.path(goldens_dir, paste0(f$id, ".json"))
+  writeLines(toJSON(golden, digits = NA, auto_unbox = TRUE, pretty = TRUE), path)
+  cat("wrote", path, "  ( lambda.min", signif(cv$lambda.min, 4),
+      "lambda.1se", signif(cv$lambda.1se, 4), ")\n")
+}

@@ -34,6 +34,8 @@
   [design-matrix-column-names (-> design-matrix? column-names/c)]
   [design-matrix-ref
    (-> design-matrix? exact-nonnegative-integer? exact-nonnegative-integer? flonum?)]
+  [design-matrix-select-rows
+   (-> design-matrix? (and/c (listof exact-nonnegative-integer?) pair?) design-matrix?)]
   [design-matrix->rows (-> design-matrix? (listof (listof flonum?)))]
   [design-matrix->columns (-> design-matrix? (listof (listof flonum?)))]
   [design-matrix->f64vector (-> design-matrix? f64vector?)]
@@ -178,6 +180,24 @@
   (unless (< j ni)
     (raise-range-error 'design-matrix-ref "design matrix" "column " j dm 0 (sub1 ni)))
   (f64vector-ref (design-matrix-data dm) (+ i (* j no))))
+
+;; The rows of dm at the given indices, in that order, as a new design matrix
+;; with the same column names. The entries are already valid, so they are
+;; copied without being checked again.
+(define (design-matrix-select-rows dm rows)
+  (define v (design-matrix-data dm))
+  (define no (design-matrix-nrows dm))
+  (define ni (design-matrix-ncols dm))
+  (for ([i (in-list rows)])
+    (unless (< i no)
+      (raise-range-error 'design-matrix-select-rows "design matrix" "row " i dm 0 (sub1 no))))
+  (define m (length rows))
+  (define out (make-f64vector (* m ni)))
+  (for ([j (in-range ni)])
+    (for ([i (in-list rows)]
+          [k (in-naturals)])
+      (f64vector-set! out (+ k (* j m)) (f64vector-ref v (+ i (* j no))))))
+  (design-matrix out m ni (design-matrix-column-names dm)))
 
 (define (design-matrix->rows dm)
   (define v (design-matrix-data dm))

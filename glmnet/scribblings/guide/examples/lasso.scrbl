@@ -76,8 +76,35 @@ intercept alone, which is the mean of the response:
 (elnet-result-intercept (lasso X y #:lambda 2.5))
 ]
 
-Choosing @math{λ} well is a job for cross-validation, which the bindings do not
-provide yet (@hyperlink["https://github.com/bkc39/glmnet/issues/27"]{#27}).
+@section[#:tag "ex-lasso-cv"]{Choosing λ by cross-validation}
+
+Six observations without noise are no test of @math{λ}: with no noise to
+overfit, the smallest @math{λ} predicts best. With noisy data, cross-validation
+chooses @math{λ} by how well each fit predicts observations it did not see
+(@secref["concepts-cv"]). Here are 40 observations of the same model, with
+uniform noise on @math{[−1, 1]} added to @math{y}:
+
+@examples[#:eval ev #:label #f
+(random-seed 3)
+(define (uniform a b)
+  (+ a (* (- b a) (random))))
+(define X40
+  (for/list ([i (in-range 40)])
+    (define x1 (uniform 0 6))
+    (list x1 (uniform 0 6) (* x1 x1))))
+(define y40
+  (for/list ([row (in-list X40)])
+    (+ 1.0 (* 2 (car row)) (- (cadr row)) (uniform -1 1))))
+(define cv (elnet-cv X40 y40))
+cv
+(rounded (coef cv #:lambda 'lambda-min))
+(rounded (coef cv))
+]
+
+Both choices keep @math{x₁} and @math{x₂} and drop @math{x₃}. @racket[coef]
+defaults to @tech{lambda-1se}, the larger @math{λ}, whose coefficients are
+shrunk further from the true @math{2} and @math{−1} in exchange for a model the
+data cannot tell apart from the best one.
 
 @section[#:tag "ex-lasso-when"]{When to use it}
 

@@ -7,8 +7,10 @@
 ;; common cases. The other families add `logistic-fit` (two-class), `multinomial-fit`
 ;; (K-class), `cox-fit` (proportional-hazards survival), `poisson-fit` (counts, log
 ;; link), and `mgaussian-fit` (multi-response Gaussian), each with prediction
-;; helpers. Every result type implements `gen:glmnet-model` (core/model.rkt), so
-;; `predict`, `coef` and `deviance-ratio` work on any of them. `data.rkt` is the
+;; helpers, a regularization path (`*-path`) and cross-validation (`*-cv`, whose
+;; shared machinery is core/cv.rkt). Every result type implements
+;; `gen:glmnet-model` (core/model.rkt), so `predict`, `coef` and
+;; `deviance-ratio` work on any of them. `data.rkt` is the
 ;; design-matrix layer every fitter reads its input through, and `foreign.rkt`
 ;; also re-exports the Phase 0 connectivity checks.
 
@@ -21,6 +23,7 @@
          "core/mgaussian.rkt"
          "core/path.rkt"
          "core/model.rkt"
+         "core/cv.rkt"
          "foreign.rkt")
 
 (provide (all-from-out "data.rkt")
@@ -32,4 +35,5 @@
          (all-from-out "core/mgaussian.rkt")
          (all-from-out "core/path.rkt")
          (all-from-out "core/model.rkt")
+         (all-from-out "core/cv.rkt")
          (all-from-out "foreign.rkt"))

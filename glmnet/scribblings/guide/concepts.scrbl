@@ -187,8 +187,9 @@ linear predictor @math{η = β₀ + xβ} to the response:
 All six fit procedures take the same keywords: @racket[#:lambda],
 @racket[#:alpha], @racket[#:standardize?], @racket[#:intercept?] (not
 @racket[cox-fit]), @racket[#:thresh] and @racket[#:max-iters].
-Each also has a path counterpart that fits many values of @math{λ} at once;
-see @secref["concepts-path"]. Each prediction helper is @racket[predict] with a
+Each also has a path counterpart that fits many values of @math{λ} at once
+(see @secref["concepts-path"]), and a cross-validation counterpart that
+chooses among them (see @secref["concepts-cv"]). Each prediction helper is @racket[predict] with a
 fixed @racket[#:type]; @secref["concepts-predict"] covers @racket[predict] and
 @racket[coef], which work on every result.
 
@@ -283,8 +284,8 @@ With @racket[#:lambda], the path fits exactly those values, largest first:
 
 Each point agrees with the single fit at that @math{λ} to within the solver's
 tolerance. @racket[predict] and @racket[coef] evaluate a path at any @math{λ}
-(@secref["concepts-predict"]). Choosing among the values on a path is the job
-of cross-validation (@hyperlink["https://github.com/bkc39/glmnet/issues/27"]{#27}).
+(@secref["concepts-predict"]). Cross-validation chooses among the values on a
+path (@secref["concepts-cv"]).
 
 @section[#:tag "concepts-predict"]{Predictions and coefficients}
 
@@ -392,6 +393,185 @@ answer whatever @racket[#:lambda] says:
 @examples[#:eval ev #:label #f
 (equal? (coef fit #:lambda 0.5) (coef fit))
 ]
+
+@section[#:tag "concepts-cv"]{Choosing λ by cross-validation}
+
+A @tech{regularization path} offers a fit at every @math{λ}. Cross-validation
+chooses among them by estimating how well each fit predicts observations it
+was not fitted to. Every family has a cross-validation procedure, the
+equivalent of R's @tt{cv.glmnet}: @racket[elnet-cv], @racket[logistic-cv],
+@racket[multinomial-cv], @racket[cox-cv], @racket[poisson-cv] and
+@racket[mgaussian-cv]. Each takes the arguments of the family's path fitter
+and works as R's does:
+
+@itemlist[#:style 'ordered
+ @item{Fit the path to all the data. Its @math{λ} values are the candidates.}
+ @item{Split the observations at random into @math{K} folds, 10 by default.
+       For each fold, fit the path to the other @math{K − 1} folds, its
+       @emph{training data}.}
+ @item{Predict each observation from the path whose training data left it
+       out, at every candidate @math{λ}, and measure the error of each
+       prediction: by default the squared error for the Gaussian families and
+       the deviance for the others.}
+ @item{Average the errors within each fold. At each @math{λ}, the mean of the
+       @math{K} fold averages, weighted by the folds' sizes, is the
+       cross-validated error, and their spread gives its standard error.}
+ @item{Choose @math{λ}: @deftech{lambda-min} is the @math{λ} with the smallest
+       cross-validated error, and @deftech{lambda-1se} the largest @math{λ}
+       whose error is within one standard error of that smallest error.}
+]
+
+Unless @racket[#:lambda] fixes the sequence, each fold's path chooses its own
+@math{λ} values, as in R, and is evaluated at the candidates by the
+interpolation of @secref["concepts-predict-lambda"].
+
+Here are 60 observations of 8 predictors, of which only the first three carry
+signal, with @math{y = 1 + 3x₁ − 2x₂ + x₃} plus noise:
+
+@examples[#:eval ev #:label #f
+(random-seed 8)
+(define (noise) (- (* 2 (random)) 1))
+(define X60
+  (for/list ([i (in-range 60)])
+    (for/list ([j (in-range 8)])
+      (noise))))
+(define beta '(3.0 -2.0 1.0 0.0 0.0 0.0 0.0 0.0))
+(define y60
+  (for/list ([row (in-list X60)])
+    (+ 1.0
+       (for/sum ([b (in-list beta)] [x (in-list row)]) (* b x))
+       (noise))))
+(define cv (elnet-cv X60 y60))
+cv
+]
+
+The result is a @racket[glmnet-cv]. It prints as R prints one: the measure,
+then a row for each of the two choices, with its @math{λ}, its index among the
+candidates (counting from 0), the cross-validated error, its standard error and
+the number of nonzero coefficients.
+
+@subsection[#:tag "concepts-cv-choice"]{Reading lambda-min and lambda-1se}
+
+The smallest cross-validated error is only an estimate, and the standard
+error says how uncertain it is. @tech{lambda-min} minimizes the estimate.
+@tech{lambda-1se} takes the simplest model, the one with the most
+regularization, that the estimate cannot tell apart from the best, and it is
+what R uses by default. Here it keeps exactly the three predictors that matter,
+while @tech{lambda-min} also keeps three of the noise predictors, with small
+coefficients:
+
+@examples[#:eval ev #:label #f
+(glmnet-cv-lambda-min cv)
+(glmnet-cv-lambda-1se cv)
+(define (round3 x)
+  (/ (round (* 1000 x)) 1000))
+(define (rounded v)
+  (for/list ([b (in-vector v)])
+    (round3 b)))
+(rounded (coef cv #:lambda 'lambda-min))
+(rounded (coef cv #:lambda 'lambda-1se))
+]
+
+The whole curve is in the result: @racket[glmnet-cv-lambda] holds the
+candidates, and @racket[glmnet-cv-cvm], @racket[glmnet-cv-cvsd] and
+@racket[glmnet-cv-nzero] the error, its standard error and the number of
+nonzero coefficients at each. Every fifth candidate, from the largest:
+
+@examples[#:eval ev #:label #f
+(for ([lam (in-vector (glmnet-cv-lambda cv))]
+      [err (in-vector (glmnet-cv-cvm cv))]
+      [se (in-vector (glmnet-cv-cvsd cv))]
+      [nz (in-vector (glmnet-cv-nzero cv))]
+      [i (in-naturals)]
+      #:when (zero? (remainder i 5)))
+  (printf "~a: λ = ~a, error = ~a ± ~a, nonzero = ~a\n"
+          i (round3 lam) (round3 err) (round3 se) nz))
+]
+
+The error falls quickly as the three real predictors enter, reaches its
+minimum, and then rises slowly as the noise predictors are fitted.
+
+@subsection[#:tag "concepts-cv-predict"]{Predicting at the chosen λ}
+
+A @racket[glmnet-cv] is a @racket[glmnet-model?] whose path is the full-data
+path, so @racket[predict] and @racket[coef] work on it. As R's
+@tt{predict.cv.glmnet} does, they default to @tech{lambda-1se};
+@racket[#:lambda] also takes @racket['lambda-min], @racket['lambda-1se] or any
+number. @racket[deviance-ratio] answers at @tech{lambda-1se}:
+
+@examples[#:eval ev #:label #f
+(define new-rows '((0.5 -0.5 0.0 0.0 0.0 0.0 0.0 0.0)
+                   (0.0 0.0 1.0 0.9 -0.9 0.9 -0.9 0.9)))
+(predict cv new-rows)
+(predict cv new-rows #:lambda 'lambda-min)
+(equal? (coef cv)
+        (coef (glmnet-cv-path cv) #:lambda (glmnet-cv-lambda-1se cv)))
+(deviance-ratio cv)
+]
+
+The true means of the two rows are @math{1 + 1.5 + 1 = 3.5} and
+@math{1 + 1 = 2}. Both predictions fall short of them, those at
+@tech{lambda-1se}, with the stronger penalty, by more.
+
+@subsection[#:tag "concepts-cv-folds"]{Folds}
+
+@racket[#:nfolds] sets the number of folds, at least 3. The folds are drawn by
+@racket[random-fold-ids] from @racket[current-pseudo-random-generator], so a
+second call gives different folds and a slightly different curve. To repeat a
+result, seed the generator, or pass the folds with @racket[#:fold-ids]: one
+fold id per observation, counting from 0. A result records its folds, so they
+can be reused:
+
+@examples[#:eval ev #:label #f
+(glmnet-cv-lambda-min (elnet-cv X60 y60))
+(define (seeded seed)
+  (parameterize ([current-pseudo-random-generator
+                  (make-pseudo-random-generator)])
+    (random-seed seed)
+    (elnet-cv X60 y60 #:nfolds 5)))
+(equal? (seeded 1) (seeded 1))
+(define folds (glmnet-cv-fold-ids cv))
+(equal? (elnet-cv X60 y60 #:fold-ids folds) cv)
+]
+
+Fixed folds are also how to compare models fairly: cross-validate each value of
+@racket[#:alpha] on the same folds, and the differences in error come from the
+models rather than from the split. @secref["ex-elastic-net-cv"] does this.
+
+@subsection[#:tag "concepts-cv-measures"]{Measures of error}
+
+@racket[#:type-measure] chooses how a prediction's error is measured, with R's
+names and R's default for each family:
+
+@tabular[#:style 'boxed
+         #:sep @hspace[2]
+         #:row-properties '(bottom-border ())
+ (list (list @bold{Measure}         @bold{Error of a prediction}                          @bold{Families})
+       (list @racket['mse]          "squared error on the response scale"                 "all but Cox; the default for the Gaussian families")
+       (list @racket['deviance]     "the family's deviance"                               "all; the default for the others")
+       (list @racket['mae]          "absolute error on the response scale"                "all but Cox")
+       (list @racket['class]        "misclassification rate"                              "binomial, multinomial")
+       (list @racket['auc]          "area under the ROC curve, per fold"                  "binomial")
+       (list @racket['C]            "Harrell's concordance index, per fold"               "Cox"))]
+
+For the Gaussian families @racket['deviance] is the squared error, as in R.
+For classifiers, @racket['mse] and @racket['mae] compare the predicted
+probabilities with 0/1 indicators of the classes. @racket['auc] and
+@racket['C] are better when larger, so @tech{lambda-min} maximizes them.
+
+@examples[#:eval ev #:label #f
+(define labels (for/list ([v (in-list y60)]) (if (> v 1.0) 1 0)))
+(logistic-cv X60 labels #:type-measure 'class #:fold-ids folds)
+]
+
+By default the errors are averaged within each fold first, which R calls
+@emph{grouped}; @racket[#:grouped? #f] computes the error and its standard
+error over the individual observations instead. As in R, the folds are never
+grouped when they have fewer than 3 observations each, @racket['auc] needs 10
+observations per fold and otherwise falls back to @racket['deviance], and each
+of these changes logs a warning. For Cox models, the deviance of a fold is
+computed as R computes it: the deviance of all the data less that of the
+fold's training data, at the fold's coefficients.
 
 @section[#:tag "concepts-standardize"]{Standardization and the intercept}
 
