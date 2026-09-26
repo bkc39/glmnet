@@ -1336,7 +1336,9 @@ cross-validated fit @racket[cv] of @secref["ref-cv"]:
                                 [#:width width exact-positive-integer? (plot-width)]
                                 [#:height height exact-positive-integer? (plot-height)]
                                 [#:title title (or/c #f string?) (plot-title)]
-                                [#:out-file out-file (or/c #f path-string?) #f])
+                                [#:out-file out-file
+                                            (or/c #f (and/c path-string? has-image-extension?))
+                                            #f])
          pict?]{
   Plots the coefficients of @racket[model]'s path against @racket[xvar], as R's
   @tt{plot.glmnet} does (see @secref["plot-path"]). For a
@@ -1358,7 +1360,10 @@ cross-validated fit @racket[cv] of @secref["ref-cv"]:
          pixels, and @racket[title] is its title.}
    @item{@racket[out-file], when given, names a file to which the plot is also
          written, in the format its extension names: @filepath{png},
-         @filepath{pdf}, @filepath{svg} or @filepath{eps}.}
+         @filepath{pdf}, @filepath{svg} or @filepath{eps}, in upper or lower
+         case. @racket[has-image-extension?] in the contract holds for exactly
+         those paths, so any other extension, or none, raises
+         @racket[exn:fail:contract] before anything is drawn.}
   ]
 
   An error is raised if every coefficient is zero at every @math{λ}, as there
@@ -1400,7 +1405,9 @@ cross-validated fit @racket[cv] of @secref["ref-cv"]:
                   [#:width width exact-positive-integer? (plot-width)]
                   [#:height height exact-positive-integer? (plot-height)]
                   [#:title title (or/c #f string?) (plot-title)]
-                  [#:out-file out-file (or/c #f path-string?) #f])
+                  [#:out-file out-file
+                              (or/c #f (and/c path-string? has-image-extension?))
+                              #f])
          pict?]{
   Plots the cross-validation curve of @racket[cv] against
   @racket[sign-lambda] times @math{log λ}, as R's @tt{plot.cv.glmnet} does (see

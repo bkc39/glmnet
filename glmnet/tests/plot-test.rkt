@@ -16,6 +16,7 @@
            racket/list
            racket/logging
            racket/math
+           (only-in racket/contract exn:fail:contract:blame?)
            pict
            (only-in plot/no-gui renderer2d? plot-width plot-height ticks-format pre-tick)
            glmnet
@@ -212,8 +213,15 @@
     (define before (file-size png))
     (plot-cv cv #:out-file png #:width 200 #:height 150)
     (check-true (< (file-size png) before))
-    (check-exn #rx"extension is not" (lambda () (plot-cv cv #:out-file (build-path dir "cv.jpg"))))
-    (check-exn #rx"extension is not" (lambda () (plot-coefficient-path p #:out-file "path")))
+    ;; An extension other than those four breaks the contract, and the caller
+    ;; is blamed.
+    (define (out-file-blamed? e)
+      (and (exn:fail:contract:blame? e)
+           (regexp-match? #rx"has-image-extension[?].*the #:out-file argument" (exn-message e))))
+    (check-exn out-file-blamed? (lambda () (plot-cv cv #:out-file (build-path dir "cv.jpg"))))
+    (check-exn out-file-blamed? (lambda () (plot-coefficient-path p #:out-file "path")))
+    (check-exn out-file-blamed? (lambda () (plot-cv cv #:out-file (build-path dir ".png"))))
+    (check-exn out-file-blamed? (lambda () (plot-coefficient-path p #:out-file "path.png.bak")))
     (check-false (file-exists? (build-path dir "cv.jpg")))
     (delete-directory/files dir))
 

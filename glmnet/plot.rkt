@@ -44,7 +44,6 @@
 (define sign-lambda/c (or/c -1 1))
 (define label/c (or/c boolean? design-matrix? (listof (or/c string? symbol?))))
 (define type-coef/c (or/c 'coef '2norm))
-(define out-file/c (or/c #f path-string?))
 
 (provide
  (contract-out
@@ -364,7 +363,6 @@
                                #:title [title (plot-title)]
                                #:out-file [out-file #f])
   (define who 'plot-coefficient-path)
-  (define kind (and out-file (image-kind who out-file)))
   (define p (model-path model))
   (define xs (x-positions p xvar sign-lambda))
   (define right? (labels-right? xvar sign-lambda))
@@ -396,7 +394,7 @@
     (raise-arguments-error who "every coefficient is zero at every λ, so there is nothing to plot"
                            "λ values" (vector-length (glmnet-path-lambda p))))
   (define picture (apply vl-append pictures))
-  (when out-file (write-image picture out-file kind))
+  (when out-file (write-image picture out-file))
   picture)
 
 ;; The width in pixels of the widest curve label.
@@ -509,8 +507,6 @@
                  #:height [height (plot-height)]
                  #:title [title (plot-title)]
                  #:out-file [out-file #f])
-  (define who 'plot-cv)
-  (define kind (and out-file (image-kind who out-file)))
   (define renderers (cv-renderers cv #:sign-lambda sign-lambda))
   (define xs
     (for/list ([l (in-vector (glmnet-cv-lambda cv))])
@@ -536,7 +532,7 @@
                       (lambda (s) (text-width s (plot-font-size)))
                       (lambda (x) (vector-ref (->dc (vector x 0)) 0))
                       (text-width "m" (plot-font-size)))))
-  (when out-file (write-image picture out-file kind))
+  (when out-file (write-image picture out-file))
   picture)
 
 ;; --- files -------------------------------------------------------------------
@@ -544,18 +540,21 @@
 (define image-kinds
   '(("png" . png-bytes) ("pdf" . pdf-bytes) ("svg" . svg-bytes) ("eps" . eps-bytes)))
 
-;; The convert format for the file's extension.
-(define (image-kind who out-file)
+;; The convert format for the file's extension, or #f if there is none.
+(define (image-kind out-file)
   (define ext (path-get-extension out-file))
   (define kind
     (and ext (assoc (string-downcase (bytes->string/utf-8 (subbytes ext 1) #\?)) image-kinds)))
-  (unless kind
-    (raise-arguments-error who "the output file's extension is not .png, .pdf, .svg or .eps"
-                           "out-file" out-file))
-  (cdr kind))
+  (and kind (cdr kind)))
 
-(define (write-image picture out-file kind)
+;; Whether a path's extension, in any case, is .png, .pdf, .svg or .eps.
+(define (has-image-extension? out-file)
+  (and (image-kind out-file) #t))
+
+(define out-file/c (or/c #f (and/c path-string? has-image-extension?)))
+
+(define (write-image picture out-file)
   (call-with-output-file out-file
-    (lambda (out) (write-bytes (convert picture kind) out))
+    (lambda (out) (write-bytes (convert picture (image-kind out-file)) out))
     #:exists 'truncate/replace)
   (void))
