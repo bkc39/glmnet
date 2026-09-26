@@ -12,6 +12,7 @@
          racket/contract
          racket/format
          racket/list
+         racket/match
          racket/math
          racket/path
          file/convertible
@@ -453,11 +454,12 @@
       (list (x-of l) m up lo)))
   (append
    (list (error-bars (for/list ([row (in-list rows)])
-                       (define-values (x m up lo) (apply values row))
+                       (match-define (list x _ up lo) row)
                        (vector x (/ (+ up lo) 2) (/ (- up lo) 2)))
                      #:color cv-bar-color)
          (points (for/list ([row (in-list rows)])
-                   (vector (car row) (cadr row)))
+                   (match-define (list x m _ _) row)
+                   (vector x m))
                  #:sym 'fullcircle
                  #:color cv-point-color
                  #:fill-color cv-point-color
