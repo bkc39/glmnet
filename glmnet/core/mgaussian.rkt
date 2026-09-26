@@ -19,7 +19,10 @@
          "../foreign/raw/mgaussian.rkt"
          "path.rkt"
          (submod "path.rkt" support)
-         "../foreign/raw/path.rkt")
+         "../foreign/raw/path.rkt"
+         (only-in "../data.rkt" design-matrix-select-rows design-matrix->rows)
+         "cv.rkt"
+         (submod "cv.rkt" support))
 
 (provide
  (struct-out mgaussian-result)
@@ -47,7 +50,22 @@
             #:intercept? boolean?
             #:thresh (>/c 0)
             #:max-iters exact-positive-integer?)
-        glmnet-path?)]))
+        glmnet-path?)]
+  [mgaussian-cv
+   (->* (design-matrix/c design-matrix/c)
+        (#:type-measure (or/c 'mse 'deviance 'mae)
+         #:nfolds nfolds/c
+         #:fold-ids fold-ids/c
+         #:grouped? boolean?
+         #:lambda cv-lambda-sequence/c
+         #:nlambda exact-positive-integer?
+         #:lambda-min-ratio lambda-min-ratio/c
+         #:alpha (real-in 0 1)
+         #:standardize? boolean?
+         #:intercept? boolean?
+         #:thresh (>/c 0)
+         #:max-iters exact-positive-integer?)
+        glmnet-cv?)]))
 
 ;; A fitted multi-response Gaussian model. `intercepts` is a vector of nr reals;
 ;; `coefficients` is a vector of nr coefficient vectors (each length ni), one per
@@ -142,3 +160,33 @@
   (glmnet-path 'mgaussian (finish-lambdas alm lmu (not lambda))
                (unpack-intercept-groups a0 k lmu) coefficients (unpack-vector dev lmu)
                (count-nonzero-groups coefficients) nlp))
+
+;; --- cross-validation (#27) ------------------------------------------------
+
+(define (mgaussian-cv X Y
+                      #:type-measure [measure 'mse]
+                      #:nfolds [nfolds 10]
+                      #:fold-ids [fold-ids #f]
+                      #:grouped? [grouped? #t]
+                      #:lambda [lambda #f]
+                      #:nlambda [nlambda 100]
+                      #:lambda-min-ratio [lambda-min-ratio #f]
+                      #:alpha [alpha 1.0]
+                      #:standardize? [standardize? #t]
+                      #:intercept? [intercept? #t]
+                      #:thresh [thresh 1e-7]
+                      #:max-iters [max-iters 100000])
+  (define x (as-design-matrix X 'mgaussian-cv "X"))
+  (define y (response-matrix Y (design-matrix-nrows x) 'mgaussian-cv))
+  (define (fit x y)
+    (mgaussian-path x y
+                    #:lambda lambda #:nlambda nlambda #:lambda-min-ratio lambda-min-ratio
+                    #:alpha alpha #:standardize? standardize? #:intercept? intercept?
+                    #:thresh thresh #:max-iters max-iters))
+  (define (fit-all) (fit x y))
+  (define (fit-rows rows)
+    (fit (design-matrix-select-rows x rows) (design-matrix-select-rows y rows)))
+  (cross-validate 'mgaussian-cv x (for/vector ([row (in-list (design-matrix->rows y))])
+                                    (list->vector row))
+                  fit-all fit-rows
+                  #:measure measure #:nfolds nfolds #:fold-ids fold-ids #:grouped? grouped?))

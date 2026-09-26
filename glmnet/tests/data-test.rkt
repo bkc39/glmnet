@@ -78,6 +78,17 @@
   (test-case "a design matrix prints its dimensions"
     (check-equal? (format "~a" (rows->design-matrix X)) "#<design-matrix 3x2>"))
 
+  (test-case "design-matrix-select-rows takes rows in the order given, names and all"
+    (define dm (rows->design-matrix X #:column-names '(a b)))
+    (define sub (design-matrix-select-rows dm '(2 0)))
+    (check-equal? sub (rows->design-matrix '((3.0 6.0) (1.0 4.0)) #:column-names '(a b)))
+    (check-equal? (design-matrix->rows (design-matrix-select-rows dm '(1 1 1)))
+                  '((2.0 5.0) (2.0 5.0) (2.0 5.0)))
+    (check-equal? (design-matrix-select-rows dm '(0 1 2)) dm)
+    (check-error (lambda () (design-matrix-select-rows dm '(0 3)))
+                 #rx"^design-matrix-select-rows: row index is out of range")
+    (check-exn exn:fail:contract? (lambda () (design-matrix-select-rows dm '()))))
+
   ;; --- column names ------------------------------------------------------------
 
   (test-case "column names are carried, and default to #f"

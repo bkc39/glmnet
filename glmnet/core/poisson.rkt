@@ -17,7 +17,10 @@
          "../foreign/raw/fishnet.rkt"
          "path.rkt"
          (submod "path.rkt" support)
-         "../foreign/raw/path.rkt")
+         "../foreign/raw/path.rkt"
+         (only-in "../data.rkt" design-matrix-select-rows)
+         "cv.rkt"
+         (submod "cv.rkt" support))
 
 (provide
  (struct-out poisson-result)
@@ -45,7 +48,22 @@
             #:intercept? boolean?
             #:thresh (>/c 0)
             #:max-iters exact-positive-integer?)
-        glmnet-path?)]))
+        glmnet-path?)]
+  [poisson-cv
+   (->* (design-matrix/c count-response/c)
+        (#:type-measure (or/c 'deviance 'mse 'mae)
+         #:nfolds nfolds/c
+         #:fold-ids fold-ids/c
+         #:grouped? boolean?
+         #:lambda cv-lambda-sequence/c
+         #:nlambda exact-positive-integer?
+         #:lambda-min-ratio lambda-min-ratio/c
+         #:alpha (real-in 0 1)
+         #:standardize? boolean?
+         #:intercept? boolean?
+         #:thresh (>/c 0)
+         #:max-iters exact-positive-integer?)
+        glmnet-cv?)]))
 
 ;; A fitted Poisson model. `intercept` and `coefficients` (a dense vector of
 ;; length ni on the original predictor scale) are on the log-mean scale.
@@ -136,3 +154,31 @@
   (glmnet-path 'poisson (finish-lambdas alm lmu (not lambda))
                (unpack-vector a0 lmu) coefficients (unpack-vector dev lmu)
                (count-nonzero coefficients) nlp))
+
+;; --- cross-validation (#27) ------------------------------------------------
+
+(define (poisson-cv X y
+                    #:type-measure [measure 'deviance]
+                    #:nfolds [nfolds 10]
+                    #:fold-ids [fold-ids #f]
+                    #:grouped? [grouped? #t]
+                    #:lambda [lambda #f]
+                    #:nlambda [nlambda 100]
+                    #:lambda-min-ratio [lambda-min-ratio #f]
+                    #:alpha [alpha 1.0]
+                    #:standardize? [standardize? #t]
+                    #:intercept? [intercept? #t]
+                    #:thresh [thresh 1e-7]
+                    #:max-iters [max-iters 100000])
+  (define x (as-design-matrix X 'poisson-cv "X"))
+  (define ys
+    (list->vector (f64vector->list (as-response y (design-matrix-nrows x) 'poisson-cv "y"))))
+  (define (fit x y)
+    (poisson-path x y
+                  #:lambda lambda #:nlambda nlambda #:lambda-min-ratio lambda-min-ratio
+                  #:alpha alpha #:standardize? standardize? #:intercept? intercept?
+                  #:thresh thresh #:max-iters max-iters))
+  (define (fit-all) (fit x y))
+  (define (fit-rows rows) (fit (design-matrix-select-rows x rows) (select ys rows)))
+  (cross-validate 'poisson-cv x ys fit-all fit-rows
+                  #:measure measure #:nfolds nfolds #:fold-ids fold-ids #:grouped? grouped?))

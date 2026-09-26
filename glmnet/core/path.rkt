@@ -26,6 +26,8 @@
            count-nonzero
            count-nonzero-groups
            path-num-predictors
+           signif
+           write-table
            write-point))
 
 ;; family       : 'gaussian 'binomial 'multinomial 'cox 'poisson 'mgaussian
@@ -139,20 +141,24 @@
 
 ;; A path, as R's print.glmnet: Df, %Dev and Lambda for each fitted lambda.
 (define (write-path p port)
-  (define rows
-    (cons '("Df" "%Dev" "Lambda")
-          (for/list ([df (in-vector (glmnet-path-df p))]
-                     [dev (in-vector (glmnet-path-dev-ratio p))]
-                     [lam (in-vector (glmnet-path-lambda p))])
-            (list (number->string df) (fixed (* 100 dev) 2) (signif lam)))))
+  (fprintf port "#<glmnet-path:~a" (glmnet-path-family p))
+  (write-table (cons '("Df" "%Dev" "Lambda")
+                     (for/list ([df (in-vector (glmnet-path-df p))]
+                                [dev (in-vector (glmnet-path-dev-ratio p))]
+                                [lam (in-vector (glmnet-path-lambda p))])
+                       (list (number->string df) (fixed (* 100 dev) 2) (signif lam))))
+               port)
+  (write-string ">" port))
+
+;; Rows of strings as a table, one line each, every column right-aligned and
+;; indented by two spaces.
+(define (write-table rows port)
   (define widths
     (for/list ([column (in-list (apply map list rows))])
       (apply max (map string-length column))))
-  (fprintf port "#<glmnet-path:~a" (glmnet-path-family p))
   (for ([row (in-list rows)])
     (newline port)
     (for ([cell (in-list row)]
           [width (in-list widths)])
       (write-string "  " port)
-      (write-string (~a cell #:min-width width #:align 'right) port)))
-  (write-string ">" port))
+      (write-string (~a cell #:min-width width #:align 'right) port))))
