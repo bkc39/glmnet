@@ -13,11 +13,15 @@ penalty and one shape of result. This chapter covers those shared pieces; the
 
 @section[#:tag "concepts-data"]{Data layout}
 
-A @deftech{design matrix} is a non-empty list of rows, one per observation.
-Every row is a list of reals of the same length, one entry per predictor. Exact
-numbers are accepted and converted to flonums. The bindings pack the rows into
-the column-major, double-precision array the Fortran expects, so there is no
-matrix type to construct first.
+A @deftech{design matrix} holds the predictors: one row per observation and one
+column per predictor. Every fit and prediction procedure accepts it in either
+of two forms:
+
+@itemlist[
+ @item{a non-empty list of rows, each a list of reals of the same length; or}
+ @item{a @racket[design-matrix?] value, which holds the matrix in the layout
+       the Fortran reads.}
+]
 
 @examples[#:eval ev #:label #f
 (define X '((1.0 2.0)
@@ -28,6 +32,65 @@ matrix type to construct first.
 (define y '(1 4 3 6 5))
 (elnet-result-coefficients (ols X y))
 ]
+
+The Fortran reads a matrix as one array of doubles stored column by column:
+element @math{(i, j)} of a matrix with @math{n} rows is at index
+@math{i + jn}, counting from 0. A @racket[design-matrix?] value holds exactly
+that array, together with the numbers of rows and columns and, optionally,
+column names. @racket[rows->design-matrix] builds one from a list of rows:
+
+@examples[#:eval ev #:label #f
+(define D (rows->design-matrix X #:column-names '(x1 x2)))
+D
+(design-matrix-ref D 2 1)
+(design-matrix-column-names D)
+(require ffi/vector)
+(f64vector->list (design-matrix->f64vector D))
+]
+
+A fit on @racket[D] gives the same result as a fit on @racket[X]. The list is
+converted on every call, while @racket[D] was converted once. The solver copies
+its input before working on it, so one design matrix serves any number of
+fits:
+
+@examples[#:eval ev #:label #f
+(equal? (ols D y) (ols X y))
+(for/list ([lam (in-list '(1.0 0.1 0.01))])
+  (elnet-result-coefficients (lasso D y #:lambda lam)))
+]
+
+The column names are carried along, but the results do not use them yet.
+@racket[columns->design-matrix] builds a design matrix from columns, and
+@racket[f64vector->design-matrix] from an array that is already in the
+column-major layout. @racket[design-matrix->rows],
+@racket[design-matrix->columns] and @racket[design-matrix->f64vector] convert
+back:
+
+@examples[#:eval ev #:label #f
+(define C (columns->design-matrix '((1 2 3) (4 5 6))))
+(design-matrix->rows C)
+(define v (f64vector 1.0 2.0 3.0 4.0 5.0 6.0))
+(equal? (f64vector->design-matrix v 3 2) C)
+]
+
+Every conversion checks its input once, before any solver runs. The matrix
+must have at least one row and one column, every row must have the same length,
+and every entry must be a real, finite number. Exact numbers become flonums.
+An error names the offending row and column, counting from 0:
+
+@examples[#:eval ev #:label #f
+(design-matrix->rows (rows->design-matrix '((1 1/2) (-3 2.5))))
+(eval:error (rows->design-matrix '((1.0 2.0) (3.0))))
+(eval:error (ols '((1.0 2.0) (2.0 +nan.0) (3.0 4.0) (4.0 3.0) (5.0 6.0)) y))
+]
+
+Without the check, a @racket[+nan.0] or an infinity would reach the solver,
+which would return meaningless coefficients and no error. R's @tt{glmnet} also
+stops on a missing value in @tt{x}, but not on every non-finite value. In every
+family but Cox it fits an @tt{x} with an infinite entry, giving that column a
+zero coefficient. It fits a Poisson response with an infinite count and
+returns an empty model. Its @tt{predict} carries non-finite new data through to
+the predictions. Here each of these is an error.
 
 The @deftech{response} has one entry per row of the design matrix. Its shape
 depends on the family:
@@ -41,12 +104,14 @@ depends on the family:
        (list "Multinomial"                    @elem{a list of class labels @math{0, …, K−1}, every class present})
        (list "Cox"                            @elem{a list of positive times @emph{and} a list of @racket[0]/@racket[1] event indicators})
        (list "Poisson"                        "a list of non-negative counts")
-       (list "Multi-response Gaussian"        "a matrix: one row per observation, one column per response"))]
+       (list "Multi-response Gaussian"        @elem{a matrix with one row per observation and one column per response, in either form of a @tech{design matrix}}))]
 
-Shapes are checked before the Fortran is called:
+A response is checked in the same way as a design matrix, by
+@racket[response->f64vector]: every entry must be finite, and there must be one
+per row of the design matrix:
 
 @examples[#:eval ev #:label #f
-(eval:error (ols '((1.0 2.0) (3.0)) '(1.0 2.0)))
+(eval:error (ols X '(1.0 4.0 +inf.0 6.0 5.0)))
 (eval:error (ols X '(1.0 2.0)))
 ]
 
@@ -248,9 +313,9 @@ The pass count is recorded in every result:
 Problems are reported in three ways:
 
 @itemlist[
- @item{Before the solver runs, an argument of the wrong type raises
-       @racket[exn:fail:contract], and rows or responses of mismatched length
-       raise @racket[exn:fail].}
+ @item{Before the solver runs, an argument of the wrong type, a ragged or
+       empty matrix, a non-finite entry, or a response of the wrong length
+       raises @racket[exn:fail:contract] (see @secref["concepts-data"]).}
  @item{A fatal condition reported by glmnet raises @racket[exn:fail] with a
        readable message, for example when every predictor is constant, or when
        a class probability collapses under perfect separation (a larger

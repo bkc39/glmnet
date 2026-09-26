@@ -15,7 +15,9 @@
 ;; .zo files import scribble's lp2 runtime (scribble/lp/lang/lang2.rkt). The
 ;; catalog's `raco setup --check-pkg-deps` flags it under deps, not build-deps.
 (define deps '("base" "net-lib" "scribble-lib"))
-(define build-deps '("racket-doc" "rackunit-lib" "sandbox-lib"))
+;; at-exp-lib provides scribble/reader, which tests/docs-coverage-test.rkt uses
+;; to read the manual's sources.
+(define build-deps '("at-exp-lib" "racket-doc" "rackunit-lib" "sandbox-lib"))
 (define scribblings '(("scribblings/glmnet.scrbl" (multi-page))))
 (define pkg-desc
   (string-append

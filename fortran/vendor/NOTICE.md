@@ -28,9 +28,15 @@ The Gaussian no-intercept fix (#33) is part of upstream since R glmnet 3.0-3.
 
 ## Behaviour R adds around the Fortran
 
-R's R-level wrappers do some work before calling the Fortran. What our shim (`../glmnet_capi.f90`) reproduces:
+R's R-level wrappers do some work before calling the Fortran. What our shim (`../glmnet_capi.f90`) and the Racket layer reproduce:
 
 - **Cox ties.** R's `coxnet` wrapper (`R/coxnet.R`) nudges censored times up by `100 * .Machine$double.eps`, so that a subject censored at an event time stays in that event's risk set. `glmnet_coxnet_solo` does the same (#21). Without it, tied data gives fits that differ from R's.
+- **Missing and non-finite values.** R's `glmnet()` stops with "x has missing values" when `any(is.na(x))`, which includes `NaN`, and a non-finite Gaussian `y` or a `NaN` Poisson `y` makes it stop with "missing value where TRUE/FALSE needed". The Racket design-matrix layer (`glmnet/data.rkt`, #35) rejects a `NaN` or an infinity in `x`, in any response and in the new data of every prediction helper before the shim is called, and names its position. That is stricter than R 4.1.10 in three cases:
+  - **An infinite `x`** in the Gaussian, binomial, multinomial, Poisson and multi-response Gaussian families. R passes it to its solver without an error and returns a fit in which that column's coefficient is 0: `glmnet(x, y, lambda = 0)` with one `Inf` in `x` returns coefficients. For Cox there is no difference, because R stops with "NA/NaN/Inf in foreign function call".
+  - **An infinite Poisson count.** R warns that convergence was not reached at the first λ (error code −1) and returns an empty model, every coefficient 0. Without a `lambda`, it then stops with an internal error ("number of columns of matrices must match").
+  - **Non-finite new data in a prediction.** R's `predict()` does not check `newx`. A row with a `NaN`, `NA` or infinite value predicts `NaN`, `NA` or ±`Inf`, unless every such value falls in a column whose coefficient is 0: the sparse product skips that column, and the prediction is finite. The prediction helpers raise an error instead.
+
+  Where R also stops, only the message differs: an infinite Cox time, and a non-finite multi-response `Y`, for which R warns about convergence and then fails with "length of 'dimnames' [2] not equal to array extent".
 
 ## Build notes
 
