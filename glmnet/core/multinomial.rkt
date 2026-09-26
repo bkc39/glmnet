@@ -21,7 +21,7 @@
  (struct-out multinomial-result)
  (contract-out
   [multinomial-fit
-   (->* (matrix/c multiclass-response/c #:lambda (>=/c 0))
+   (->* (design-matrix/c multiclass-response/c #:lambda (>=/c 0))
         (#:alpha (real-in 0 1)
          #:standardize? boolean?
          #:intercept? boolean?
@@ -29,14 +29,14 @@
          #:max-iters exact-positive-integer?)
         multinomial-result?)]
   [multinomial-predict-proba
-   (-> multinomial-result? matrix/c (listof (listof (real-in 0 1))))]
+   (-> multinomial-result? design-matrix/c (listof (listof (real-in 0 1))))]
   [multinomial-predict
-   (-> multinomial-result? matrix/c (listof exact-nonnegative-integer?))]))
+   (-> multinomial-result? design-matrix/c (listof exact-nonnegative-integer?))]))
 
 (provide
  (contract-out
   [multinomial-path
-   (->* (matrix/c multiclass-response/c)
+   (->* (design-matrix/c multiclass-response/c)
            (#:lambda lambda-sequence/c
             #:nlambda exact-positive-integer?
             #:lambda-min-ratio lambda-min-ratio/c
@@ -100,14 +100,15 @@
                          #:intercept? [intercept? #t]
                          #:thresh [thresh 1e-7]
                          #:max-iters [max-iters 100000])
-  (define-values (no ni) (rows->dims X 'multinomial-fit))
+  (define x (as-design-matrix X 'multinomial-fit "X"))
+  (define no (design-matrix-nrows x))
+  (define ni (design-matrix-ncols x))
   (define nc (labels->num-classes y 'multinomial-fit))
-  (define xcol (matrix->colmajor X no ni))
-  (define yv (response->f64vector y no 'multinomial-fit))
+  (define yv (as-response y no 'multinomial-fit "y"))
   (define intercepts (make-f64vector nc 0.0))
   (define beta (make-f64vector (* ni nc) 0.0))
   (define-values (dev-ratio lam nlp jerr)
-    (glmnet-multinomial-solo/raw (exact->inexact alpha) no ni nc xcol yv
+    (glmnet-multinomial-solo/raw (exact->inexact alpha) no ni nc (design-matrix-data x) yv
                                  (exact->inexact lambda)
                                  (if standardize? 1 0)
                                  (if intercept? 1 0)
@@ -115,28 +116,17 @@
                                  max-iters
                                  intercepts beta))
   (check-multinomial-jerr jerr 'multinomial-fit)
-  (multinomial-result
-   (for/vector ([k (in-range nc)]) (f64vector-ref intercepts k))
-   ;; beta is class-major: class k's predictor j at k*ni + j.
-   (for/vector ([k (in-range nc)])
-     (for/vector ([j (in-range ni)]) (f64vector-ref beta (+ (* k ni) j))))
-   dev-ratio lam nlp))
+  ;; beta is class-major: class k's predictor j at k*ni + j.
+  (multinomial-result (unpack-vector intercepts nc) (unpack-columns beta ni nc)
+                      dev-ratio lam nlp))
 
 ;; --- prediction ------------------------------------------------------------
 
-;; The K linear predictors eta_k = a0_k + x . beta_k for one predictor row.
-(define (row-etas result row)
-  (define intercepts (multinomial-result-intercepts result))
-  (define coefs (multinomial-result-coefficients result))
-  (define ni (vector-length (vector-ref coefs 0)))
-  (unless (= (length row) ni)
-    (error 'multinomial-predict
-           "row has ~a features, expected ~a" (length row) ni))
-  (for/list ([k (in-range (vector-length intercepts))])
-    (for/fold ([acc (vector-ref intercepts k)])
-              ([b (in-vector (vector-ref coefs k))]
-               [xj (in-list row)])
-      (+ acc (* b (exact->inexact xj))))))
+;; The K linear predictors eta_k = a0_k + x . beta_k for row i of x.
+(define (row-etas result x i)
+  (for/list ([a0 (in-vector (multinomial-result-intercepts result))]
+             [beta (in-vector (multinomial-result-coefficients result))])
+    (linear-predictor x i a0 beta)))
 
 ;; Numerically-stable softmax of a list of linear predictors.
 (define (softmax etas)
@@ -145,10 +135,16 @@
   (define s (apply + exps))
   (for/list ([e (in-list exps)]) (/ e s)))
 
-;; Per-class probabilities (summing to 1) for each row of X.
+;; Per-class probabilities (summing to 1) for each row of X. `who` names the
+;; public procedure in errors.
+(define (class-probabilities result X who)
+  (define ni (vector-length (vector-ref (multinomial-result-coefficients result) 0)))
+  (define x (prediction-matrix X ni who))
+  (for/list ([i (in-range (design-matrix-nrows x))])
+    (softmax (row-etas result x i))))
+
 (define (multinomial-predict-proba result X)
-  (for/list ([row (in-list X)])
-    (softmax (row-etas result row))))
+  (class-probabilities result X 'multinomial-predict-proba))
 
 ;; Index (0-based class label) of the largest element.
 (define (argmax-index xs)
@@ -160,7 +156,7 @@
 
 ;; Predicted class label (0..K-1) for each row of X: argmax of the probabilities.
 (define (multinomial-predict result X)
-  (for/list ([ps (in-list (multinomial-predict-proba result X))])
+  (for/list ([ps (in-list (class-probabilities result X 'multinomial-predict))])
     (argmax-index ps)))
 
 ;; --- regularization path (#10) ---------------------------------------------
@@ -174,10 +170,11 @@
                           #:intercept? [intercept? #t]
                           #:thresh [thresh 1e-7]
                           #:max-iters [max-iters 100000])
-  (define-values (no ni) (rows->dims X 'multinomial-path))
+  (define x (as-design-matrix X 'multinomial-path "X"))
+  (define no (design-matrix-nrows x))
+  (define ni (design-matrix-ncols x))
   (define k (labels->num-classes y 'multinomial-path))
-  (define yv (response->f64vector y no 'multinomial-path))
-  (define xcol (matrix->colmajor X no ni))
+  (define yv (as-response y no 'multinomial-path "y"))
   (define-values (nlam flmin ulam)
     (path-lambdas lambda nlambda lambda-min-ratio no ni))
   (define a0 (make-f64vector (* k nlam) 0.0))
@@ -185,7 +182,7 @@
   (define dev (make-f64vector nlam 0.0))
   (define alm (make-f64vector nlam 0.0))
   (define-values (lmu nlp jerr)
-    (glmnet-multinomial-path/raw (exact->inexact alpha) no ni k xcol yv
+    (glmnet-multinomial-path/raw (exact->inexact alpha) no ni k (design-matrix-data x) yv
                                  nlam flmin ulam
                                  (if standardize? 1 0) (if intercept? 1 0)
                                  (exact->inexact thresh) max-iters

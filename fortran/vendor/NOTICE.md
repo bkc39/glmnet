@@ -28,9 +28,10 @@ The Gaussian no-intercept fix (#33) is part of upstream since R glmnet 3.0-3.
 
 ## Behaviour R adds around the Fortran
 
-R's R-level wrappers do some work before calling the Fortran. What our shim (`../glmnet_capi.f90`) reproduces:
+R's R-level wrappers do some work before calling the Fortran. What our shim (`../glmnet_capi.f90`) and the Racket layer reproduce:
 
 - **Cox ties.** R's `coxnet` wrapper (`R/coxnet.R`) nudges censored times up by `100 * .Machine$double.eps`, so that a subject censored at an event time stays in that event's risk set. `glmnet_coxnet_solo` does the same (#21). Without it, tied data gives fits that differ from R's.
+- **Missing and non-finite values.** R's `glmnet()` stops with "x has missing values" when `any(is.na(x))`, which includes `NaN`, and a non-finite Gaussian `y` makes it stop with "missing value where TRUE/FALSE needed". The Racket design-matrix layer (`glmnet/data.rkt`, #35) rejects a `NaN` or an infinity in `x` or in any response before the shim is called, and names its position. It is stricter than R in one case: R passes an infinite `x` to the Fortran, and `glmnet(x, y, lambda = 0)` with one `Inf` in `x` returns coefficients without an error.
 
 ## Build notes
 
