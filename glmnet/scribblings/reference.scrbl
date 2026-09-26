@@ -8,8 +8,11 @@
 @declare-exporting[glmnet]
 
 Every binding below is provided by @racketmodname[glmnet]. Each model family
-has a fit procedure, a transparent result struct and, for all but the Gaussian
-family, prediction helpers; @secref["concepts"] explains how they fit together.
+has a fit procedure, a path fitter, a transparent result struct and prediction
+helpers. Every result type, and @racket[glmnet-path], also implements the
+generic interface of @secref["ref-model"]: @racket[predict], @racket[coef] and
+@racket[deviance-ratio] work on all of them, and they print as summaries.
+@secref["concepts"] explains how the pieces fit together.
 
 @section[#:tag "ref-common"]{Common arguments}
 
@@ -210,11 +213,16 @@ fixed @racket[#:alpha]. See @secref["ex-ols"], @secref["ex-ridge"],
   fraction of variance explained; @racket[lambda] is the penalty the solver
   used; @racket[num-passes] is the number of coordinate-descent passes.
 
+  Like every result type, it prints as a summary of its family, @math{λ},
+  deviance ratio and number of nonzero coefficients (see
+  @secref["ref-model-printing"]), and it implements @racket[gen:glmnet-model].
+
   @examples[#:eval ev
   (define X '((1.0 2.0 1.0) (2.0 1.0 4.0) (3.0 4.0 9.0)
               (4.0 3.0 16.0) (5.0 6.0 25.0) (6.0 5.0 36.0)))
   (define y '(1.0 4.0 3.0 6.0 5.0 8.0))
   (define fit (lasso X y #:lambda 0.05))
+  fit
   (elnet-result-intercept fit)
   (elnet-result-coefficients fit)]}
 
@@ -295,6 +303,15 @@ fixed @racket[#:alpha]. See @secref["ex-ols"], @secref["ex-ridge"],
   @examples[#:eval ev
   (elnet-result-coefficients (elastic-net X y #:alpha 0.5 #:lambda 0.5))]}
 
+@defproc[(elnet-predict [fit elnet-result?]
+                        [X design-matrix/c])
+         (listof real?)]{
+  The fitted value @math{β₀ + xβ} for each row of @racket[X]: @racket[predict]
+  with its defaults.
+
+  @examples[#:eval ev
+  (elnet-predict fit '((7.0 6.0 49.0) (0.0 0.0 0.0)))]}
+
 @section[#:tag "ref-binomial"]{Binomial models}
 
 The @tech{binomial family}: two-class logistic regression on 0/1 labels. See
@@ -338,7 +355,7 @@ The @tech{binomial family}: two-class logistic regression on 0/1 labels. See
                                  [X design-matrix/c])
          (listof (real-in 0 1))]{
   The class-1 probability @math{1 / (1 + exp(−(β₀ + xβ)))} for each row of
-  @racket[X].
+  @racket[X]: @racket[predict] with @racket[#:type 'response].
 
   @examples[#:eval ev
   (logistic-predict-proba fit '((2.0 5.0 2.0) (5.0 2.0 2.0)))]}
@@ -348,7 +365,10 @@ The @tech{binomial family}: two-class logistic regression on 0/1 labels. See
                            [#:threshold threshold (real-in 0 1) 0.5])
          (listof (or/c 0 1))]{
   Hard labels: @racket[1] where @racket[logistic-predict-proba] is at least
-  @racket[threshold], otherwise @racket[0].
+  @racket[threshold], otherwise @racket[0]. At the default threshold this is
+  @racket[predict] with @racket[#:type 'class], except for a row whose
+  probability is exactly @racket[0.5], which R and @racket[predict] label
+  @racket[0].
 
   @examples[#:eval ev
   (logistic-predict fit '((2.0 5.0 2.0) (5.0 2.0 2.0)))]}
@@ -366,8 +386,9 @@ labels. See @secref["ex-multinomial"].
             #:transparent]{
   A fitted @math{K}-class model. @racket[intercepts] holds one real per class
   and @racket[coefficients] one coefficient vector per class, each with one
-  entry per predictor. @racket[dev-ratio] is the fraction of null deviance
-  explained.
+  entry per predictor. Adding the same constant to every intercept leaves the
+  probabilities unchanged, so, as R does, the intercepts are centred to sum to
+  zero. @racket[dev-ratio] is the fraction of null deviance explained.
 
   @examples[#:eval ev
   (define X '((1.0 1.0) (2.0 1.0) (5.0 1.0) (6.0 1.0) (3.0 5.0) (4.0 6.0)))
@@ -397,7 +418,8 @@ labels. See @secref["ex-multinomial"].
                                     [X design-matrix/c])
          (listof (listof (real-in 0 1)))]{
   The softmax class probabilities for each row of @racket[X]: one list of
-  @math{K} entries, summing to 1, per row.
+  @math{K} entries, summing to 1, per row. This is @racket[predict] with
+  @racket[#:type 'response].
 
   @examples[#:eval ev
   (multinomial-predict-proba fit '((1.5 1.0) (3.5 5.5)))]}
@@ -405,7 +427,8 @@ labels. See @secref["ex-multinomial"].
 @defproc[(multinomial-predict [fit multinomial-result?]
                               [X design-matrix/c])
          (listof exact-nonnegative-integer?)]{
-  The most probable class for each row of @racket[X].
+  The most probable class for each row of @racket[X]: @racket[predict] with
+  @racket[#:type 'class]. On a tie the lowest class wins.
 
   @examples[#:eval ev
   (multinomial-predict fit '((1.5 1.0) (5.5 1.0) (3.5 5.5)))]}
@@ -453,7 +476,8 @@ intercept, and so no @racket[#:intercept?] keyword. See @secref["ex-cox"].
 @defproc[(cox-linear-predictor [fit cox-result?]
                                [X design-matrix/c])
          (listof real?)]{
-  The log relative hazard @math{xβ} for each row of @racket[X].
+  The log relative hazard @math{xβ} for each row of @racket[X]:
+  @racket[predict] with its defaults.
 
   @examples[#:eval ev
   (cox-linear-predictor fit '((1.0 1.0) (3.0 1.0)))]}
@@ -462,7 +486,8 @@ intercept, and so no @racket[#:intercept?] keyword. See @secref["ex-cox"].
                             [X design-matrix/c])
          (listof (>/c 0))]{
   The relative risk @math{exp(xβ)} for each row of @racket[X]: the factor by
-  which the row's hazard exceeds the baseline hazard.
+  which the row's hazard exceeds the baseline hazard. This is @racket[predict]
+  with @racket[#:type 'response].
 
   @examples[#:eval ev
   (cox-relative-risk fit '((1.0 1.0) (3.0 1.0)))]}
@@ -507,7 +532,8 @@ The @tech{Poisson family}: counts with a log link. See @secref["ex-poisson"].
 @defproc[(poisson-predict-mean [fit poisson-result?]
                                [X design-matrix/c])
          (listof (>/c 0))]{
-  The fitted mean @math{exp(β₀ + xβ)} for each row of @racket[X].
+  The fitted mean @math{exp(β₀ + xβ)} for each row of @racket[X]:
+  @racket[predict] with @racket[#:type 'response].
 
   @examples[#:eval ev
   (poisson-predict-mean fit '((2.0 1.0) (9.0 1.0)))]}
@@ -556,7 +582,8 @@ jointly under a grouped penalty. See @secref["ex-mgaussian"].
                             [X design-matrix/c])
          (listof (listof real?))]{
   The predictions @math{a0_r + xβ_r} for each row of @racket[X]: one list per
-  row, with one entry per response.
+  row, with one entry per response. This is @racket[predict] with its
+  defaults.
 
   @examples[#:eval ev
   (mgaussian-predict fit '((7.0 1.0) (8.0 2.0)))]}
@@ -605,11 +632,18 @@ made optional:
 
   @racket[num-passes] counts the coordinate-descent passes over the whole path.
 
+  A path prints as R prints one: a table with, for each fitted @math{λ}, the
+  number of nonzero coefficients (@tt{Df}), the percentage of null deviance
+  explained (@tt{%Dev}) and @math{λ} itself (see
+  @secref["ref-model-printing"]). @racket[predict] and @racket[coef] evaluate
+  a path at any @math{λ}.
+
   @examples[#:eval ev
   (define X '((1.0 2.0 1.0) (2.0 1.0 4.0) (3.0 4.0 9.0)
               (4.0 3.0 16.0) (5.0 6.0 25.0) (6.0 5.0 36.0)))
   (define y '(1.0 4.0 3.0 6.0 5.0 8.0))
   (define path (elnet-path X y #:lambda '(1.0 0.1 0.01)))
+  path
   (glmnet-path-lambda path)
   (glmnet-path-coefficients path)
   (glmnet-path-df path)]}
@@ -718,6 +752,180 @@ made optional:
                                     (9.0 6.0) (11.0 5.0) (13.0 4.0))
                                 #:lambda '(1.0 0.1)))
   (glmnet-path-intercepts gpath)]}
+
+@section[#:tag "ref-model"]{Generic model interface}
+
+Every result type implements one generic interface, @racket[gen:glmnet-model]:
+the six single-@math{λ} results (@racket[elnet-result],
+@racket[logistic-result], @racket[multinomial-result], @racket[cox-result],
+@racket[poisson-result] and @racket[mgaussian-result]) and
+@racket[glmnet-path]. @racket[predict], @racket[coef] and
+@racket[deviance-ratio] follow R's @tt{predict}, @tt{coef} and
+@tt{dev.ratio} for @tt{glmnet} fits. See @secref["concepts-predict"].
+
+The interface reads every model as a @tech{regularization path}: a
+single-@math{λ} fit is a path with one @math{λ}. Where @racket[#:lambda] names
+a @math{λ} that is not on the path, @racket[predict] and @racket[coef] follow
+R's rule (its @tt{exact = FALSE}, the default):
+
+@itemlist[
+ @item{Between two fitted values @math{λ_l > s > λ_r}, the intercepts and
+       coefficients are interpolated linearly in @math{λ}:
+       @math{β(s) = w β(λ_l) + (1 − w) β(λ_r)}, with
+       @math{w = (s − λ_r) / (λ_l − λ_r)}.}
+ @item{Above the largest fitted @math{λ}, or below the smallest, @math{s} is
+       clamped to that end of the path.}
+ @item{A model with one @math{λ}, such as a single fit, gives that fit for
+       every @math{s}.}
+]
+
+The examples in this section use a single fit and a path of the Gaussian
+family:
+
+@examples[#:eval ev #:label #f
+(define X '((1.0 2.0 1.0) (2.0 1.0 4.0) (3.0 4.0 9.0)
+            (4.0 3.0 16.0) (5.0 6.0 25.0) (6.0 5.0 36.0)))
+(define y '(1.0 4.0 3.0 6.0 5.0 8.0))
+(define fit (lasso X y #:lambda 0.05))
+(define path (elnet-path X y #:lambda '(1.0 0.1 0.01)))
+]
+
+@defidform[gen:glmnet-model]{
+  A @tech[#:doc '(lib "scribblings/reference/reference.scrbl")]{generic
+  interface} for fitted models. It has three methods:
+
+  @itemlist[
+   @item{@racket[glmnet-model->path], which must be implemented;}
+   @item{@racket[glmnet-model-default-lambda], which defaults to the first
+         @math{λ} of the model's path;}
+   @item{@racket[deviance-ratio], which defaults to the first deviance ratio of
+         the model's path.}
+  ]
+
+  The defaults suit a single fit. @racket[glmnet-path] implements all three
+  itself. A new type, such as a path together with a chosen @math{λ},
+  implements the interface through the @racket[#:methods] option of
+  @racket[struct], and then works with @racket[predict] and @racket[coef]:
+
+  @examples[#:eval ev
+  (require racket/generic)
+  (struct chosen (path index)
+    #:methods gen:glmnet-model
+    [(define (glmnet-model->path m) (chosen-path m))
+     (define (glmnet-model-default-lambda m)
+       (vector-ref (glmnet-path-lambda (chosen-path m))
+                   (chosen-index m)))
+     (define (deviance-ratio m)
+       (vector-ref (glmnet-path-dev-ratio (chosen-path m))
+                   (chosen-index m)))])
+  (define best (chosen path 1))
+  (coef best)
+  (deviance-ratio best)]}
+
+@defproc[(glmnet-model? [v any/c]) boolean?]{
+  Returns @racket[#t] if @racket[v] implements @racket[gen:glmnet-model]: every
+  result type and @racket[glmnet-path] does.
+
+  @examples[#:eval ev
+  (glmnet-model? fit)
+  (glmnet-model? path)
+  (glmnet-model? X)]}
+
+@defproc[(glmnet-model->path [model glmnet-model?]) glmnet-path?]{
+  @racket[model] as a @racket[glmnet-path]. A single fit becomes a path with
+  one @math{λ}, and a path is returned as it is.
+
+  @examples[#:eval ev
+  (glmnet-model->path fit)
+  (glmnet-path-coefficients (glmnet-model->path fit))]}
+
+@defproc[(glmnet-model-default-lambda [model glmnet-model?])
+         (or/c (>=/c 0) (and/c (listof (>=/c 0)) pair?))]{
+  The @racket[#:lambda] that @racket[predict] and @racket[coef] use when none
+  is given: a single fit's @math{λ}, or the list of a path's fitted @math{λ}
+  values, which is R's default @tt{s = NULL}.
+
+  @examples[#:eval ev
+  (glmnet-model-default-lambda fit)
+  (glmnet-model-default-lambda path)]}
+
+@defproc[(deviance-ratio [model glmnet-model?]) (or/c real? (vectorof real?))]{
+  The fraction of null deviance explained, which is @math{R²} for the Gaussian
+  families: a real for a single fit, and for a path a vector with one entry per
+  fitted @math{λ}, R's @tt{dev.ratio}. It is not interpolated.
+
+  @examples[#:eval ev
+  (deviance-ratio fit)
+  (deviance-ratio path)]}
+
+@defproc[(predict [model glmnet-model?]
+                  [X design-matrix/c]
+                  [#:type type (or/c 'link 'response 'class) 'link]
+                  [#:lambda lambda (or/c (>=/c 0) (and/c (listof (>=/c 0)) pair?))
+                                   (glmnet-model-default-lambda model)])
+         list?]{
+  Predictions for each row of @racket[X], which needs one column per
+  coefficient, as R's @tt{predict(fit, newx, s, type)}. @racket[type] chooses
+  what is predicted:
+
+  @tabular[#:style 'boxed
+           #:sep @hspace[2]
+           #:row-properties '(bottom-border ())
+   (list (list @bold{Family}                       @racket['link]                    @racket['response]            @racket['class])
+         (list "Gaussian, multi-response"          @math{η = β₀ + xβ}               @math{η}                      "---")
+         (list "Binomial"                          @elem{log-odds @math{η}}          @elem{@math{P(y = 1)}}        @elem{@racket[1] if @math{η > 0}, else @racket[0]})
+         (list "Multinomial"                       @elem{@math{η_k}, one per class}  @elem{softmax of the @math{η_k}}  @elem{the class with the largest @math{η_k}})
+         (list "Cox"                               @math{xβ}                         @math{exp(xβ)}                "---")
+         (list "Poisson"                           @math{log μ = η}                  @math{μ = exp(η)}             "---"))]
+
+  @racket['class] is an error for the families without classes. For one
+  @math{λ}, the result has one entry per row of @racket[X]: a real, a class
+  label, or, for the multinomial and multi-response families, a list with one
+  entry per class or response. When @racket[lambda] is a list, the result is a
+  list of those, one per element of @racket[lambda], in the same order.
+
+  @examples[#:eval ev
+  (predict fit '((7.0 6.0 49.0) (0.0 0.0 0.0)))
+  (predict path '((7.0 6.0 49.0)) #:lambda 0.5)
+  (predict path '((7.0 6.0 49.0)) #:lambda '(2.0 0.5 0.01))
+  (define clf (logistic-fit X '(0 0 0 1 1 1) #:lambda 0.05))
+  (predict clf '((2.0 3.0 4.0) (5.0 4.0 25.0)))
+  (predict clf '((2.0 3.0 4.0) (5.0 4.0 25.0)) #:type 'response)
+  (predict clf '((2.0 3.0 4.0) (5.0 4.0 25.0)) #:type 'class)
+  (eval:error (predict fit X #:type 'class))]}
+
+@defproc[(coef [model glmnet-model?]
+               [#:lambda lambda (or/c (>=/c 0) (and/c (listof (>=/c 0)) pair?))
+                                (glmnet-model-default-lambda model)])
+         (or/c vector? (listof vector?))]{
+  The intercept and coefficients at @racket[lambda], as R's
+  @tt{coef(fit, s)}: a vector holding the intercept, then one coefficient per
+  predictor. Cox models have no intercept, so their vector holds only the
+  coefficients. For the multinomial and multi-response families the result is a
+  vector of such vectors, one per class or response. When @racket[lambda] is a
+  list, the result is a list with one entry per element of @racket[lambda].
+
+  @examples[#:eval ev
+  (coef fit)
+  (coef path #:lambda 0.1)
+  (coef path #:lambda 0.4)
+  (coef path #:lambda 5.0)]}
+
+@subsection[#:tag "ref-model-printing"]{Printing}
+
+A single fit prints on one line with its family, its @math{λ} (to four
+significant digits), its deviance ratio (to four decimal places) and the
+number of nonzero coefficients out of the number of predictors, counting a
+predictor once when it is nonzero for any class or response. A path prints as
+R's @tt{print.glmnet} table, with one row per fitted @math{λ}. Printing does not
+change @racket[equal?], which compares results field by field.
+
+@examples[#:eval ev
+(list fit clf)
+(define Xm '((1.0 1.0) (2.0 1.0) (5.0 1.0) (6.0 1.0) (3.0 5.0) (4.0 6.0)))
+(multinomial-fit Xm '(0 0 1 1 2 2) #:lambda 0.05)
+(multinomial-path Xm '(0 0 1 1 2 2) #:nlambda 4)
+(equal? fit (lasso X y #:lambda 0.05))]
 
 @section[#:tag "ref-native"]{Native library}
 

@@ -13,6 +13,8 @@
 (require racket/contract
          ffi/vector
          "marshal.rkt"
+         "model.rkt"
+         (submod "model.rkt" support)
          "../foreign/raw/coxnet.rkt"
          "path.rkt"
          (submod "path.rkt" support)
@@ -49,7 +51,12 @@
 ;; intercept. `dev-ratio` is the fraction of null (partial-likelihood) deviance
 ;; explained; `lambda` is the penalty used; `num-passes` glmnet's pass count.
 (struct cox-result (coefficients dev-ratio lambda num-passes)
-  #:transparent)
+  #:transparent
+  #:property prop:custom-write write-fit
+  #:methods gen:glmnet-model
+  [(define (glmnet-model->path r)
+     (single-fit-path 'cox (cox-result-lambda r) #f (cox-result-coefficients r)
+                      (cox-result-dev-ratio r) (cox-result-num-passes r)))])
 
 ;; --- input contracts -------------------------------------------------------
 
@@ -105,22 +112,14 @@
 
 ;; --- prediction ------------------------------------------------------------
 
-;; The log relative hazard x . beta (no intercept) for each row of X. `who`
-;; names the public procedure in errors.
-(define (log-relative-hazards result X who)
-  (define beta (cox-result-coefficients result))
-  (define x (prediction-matrix X (vector-length beta) who))
-  (for/list ([i (in-range (design-matrix-nrows x))])
-    (linear-predictor x i 0.0 beta)))
-
+;; The log relative hazard x . beta (no intercept) for each row of X.
 (define (cox-linear-predictor result X)
-  (log-relative-hazards result X 'cox-linear-predictor))
+  (predict-as 'cox-linear-predictor result X 'link))
 
 ;; The relative risk exp(x . beta) for each row of X -- the multiplicative effect
 ;; on the baseline hazard.
 (define (cox-relative-risk result X)
-  (for/list ([lp (in-list (log-relative-hazards result X 'cox-relative-risk))])
-    (exp lp)))
+  (predict-as 'cox-relative-risk result X 'response))
 
 ;; --- regularization path (#10) ---------------------------------------------
 
