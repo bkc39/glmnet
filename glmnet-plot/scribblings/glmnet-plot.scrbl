@@ -32,9 +32,10 @@
 path of a fit, as R's @tt{plot.glmnet} draws it, and the cross-validation
 curve, as @tt{plot.cv.glmnet} draws it. It plots the results of
 @racketmodname[glmnet]: a @racket[glmnet-path] from one of the path fitters
-(see @secref["concepts-path" #:doc glmnet-doc]) and a @racket[glmnet-cv] from
+(see @secref["concepts-path" #:doc glmnet-doc]), a @racket[glmnet-cv] from
 one of the cross-validation procedures (see
-@secref["concepts-cv" #:doc glmnet-doc]).
+@secref["concepts-cv" #:doc glmnet-doc]), and a @racket[formula-model] of
+either (see @secref["formulas" #:doc glmnet-doc]).
 
 It is a separate package, @tt{glmnet-plot}, so that @racketmodname[glmnet]
 does not depend on the plot library:
@@ -149,6 +150,23 @@ such as the one the path was fitted to:
 With @racket[#:sign-lambda 1], the path ends at the left, and so do the
 labels. Where R cuts off labels that run past the edge of the plot, these
 plots widen the x axis until the labels fit.
+
+A @racket[formula-model] fitted by @racket[formula-path] or
+@racket[formula-cv] knows its predictors' names, so @racket[#:label #t]
+labels its curves with them:
+
+@examples[#:eval ev #:label #f
+(define table
+  (list (cons "y" y)
+        (cons "x1" (map car X))
+        (cons "x2" (map cadr X))
+        (cons "square" (map caddr X))))
+(define named-path (formula-path (~ y all) table))
+(plot-coefficient-path named-path #:label #t)
+]
+
+For the multi-response family, each plot's y-axis label names its response,
+as R names it by the column of @tt{y}.
 
 @subsection[#:tag "plot-path-multi"]{Several classes or responses}
 
@@ -298,7 +316,7 @@ The plots follow R glmnet 4.1.10's @tt{plotCoef}, @tt{plot.multnet},
 
 @section[#:tag "plot-reference"]{Reference}
 
-@defproc[(plot-coefficient-path [model (or/c glmnet-path? glmnet-cv?)]
+@defproc[(plot-coefficient-path [model (or/c glmnet-path? glmnet-cv? formula-model?)]
                                 [#:xvar xvar (or/c 'lambda 'norm 'dev) 'lambda]
                                 [#:sign-lambda sign-lambda (or/c -1 1) -1]
                                 [#:label label
@@ -312,17 +330,20 @@ The plots follow R glmnet 4.1.10's @tt{plotCoef}, @tt{plot.multnet},
          pict?]{
   Plots the coefficients of @racket[model]'s path against @racket[xvar], as R's
   @tt{plot.glmnet} does (see @secref["plot-path"]). For a
-  @racket[glmnet-cv], it plots the path fitted to all the data.
+  @racket[glmnet-cv], it plots the path fitted to all the data. For a
+  @racket[formula-model], it plots the model's fit, which must be a path or a
+  @racket[glmnet-cv].
 
   @itemlist[
    @item{@racket[xvar] is @racket['lambda] for @racket[sign-lambda] times
          @math{log λ}, @racket['norm] for the L1 norm of the coefficients, or
          @racket['dev] for the fraction of deviance explained.}
    @item{@racket[label] labels each curve at the end of the path: @racket[#f]
-         for no labels, @racket[#t] for the predictor's position counting from
-         1, or the names of the predictors, as a list or as the column names of
-         a design matrix. A design matrix without column names gives
-         positions.}
+         for no labels, @racket[#t] for the predictor's name if the model names
+         its predictors, as a @racket[formula-model] does, and otherwise its
+         position counting from 1, or the names of the predictors, as a list or
+         as the column names of a design matrix. A design matrix without column
+         names gives positions.}
    @item{@racket[type-coef] applies to the multinomial and multi-response
          families: @racket['coef] stacks one plot per class or response,
          @racket['2norm] draws one plot of the 2-norms across them.}
@@ -341,7 +362,7 @@ The plots follow R glmnet 4.1.10's @tt{plotCoef}, @tt{plot.multnet},
                          #:width 400 #:height 300 #:title "Lasso path")
   (eval:error (plot-coefficient-path (elnet-path X y #:lambda '(10.0 5.0))))]}
 
-@defproc[(coefficient-path-renderers [model (or/c glmnet-path? glmnet-cv?)]
+@defproc[(coefficient-path-renderers [model (or/c glmnet-path? glmnet-cv? formula-model?)]
                                      [#:xvar xvar (or/c 'lambda 'norm 'dev) 'lambda]
                                      [#:sign-lambda sign-lambda (or/c -1 1) -1]
                                      [#:label label
@@ -365,7 +386,7 @@ The plots follow R glmnet 4.1.10's @tt{plotCoef}, @tt{plot.multnet},
   (length (coefficient-path-renderers path #:label #t))
   (length (coefficient-path-renderers mpath #:response 2))]}
 
-@defproc[(plot-cv [cv glmnet-cv?]
+@defproc[(plot-cv [cv (or/c glmnet-cv? formula-model?)]
                   [#:sign-lambda sign-lambda (or/c -1 1) -1]
                   [#:width width exact-positive-integer? (plot-width)]
                   [#:height height exact-positive-integer? (plot-height)]
@@ -375,13 +396,15 @@ The plots follow R glmnet 4.1.10's @tt{plotCoef}, @tt{plot.multnet},
   Plots the cross-validation curve of @racket[cv] against
   @racket[sign-lambda] times @math{log λ}, as R's @tt{plot.cv.glmnet} does (see
   @secref["plot-cv"]), with the number of nonzero coefficients along the top.
+  A @racket[formula-model] must hold a @racket[glmnet-cv], from
+  @racket[formula-cv].
   @racket[width], @racket[height], @racket[title] and @racket[out-file] are as
   for @racket[plot-coefficient-path].
 
   @examples[#:eval ev
   (plot-cv cv #:sign-lambda 1 #:width 400 #:height 300)]}
 
-@defproc[(cv-renderers [cv glmnet-cv?]
+@defproc[(cv-renderers [cv (or/c glmnet-cv? formula-model?)]
                        [#:sign-lambda sign-lambda (or/c -1 1) -1])
          (listof renderer2d?)]{
   The renderers of @racket[plot-cv]: the error bars, the points, and a
@@ -389,6 +412,9 @@ The plots follow R glmnet 4.1.10's @tt{plotCoef}, @tt{plot.multnet},
   @racket[glmnet-cv-lambda-1se]. The axes are not included.
 
   @examples[#:eval ev
-  (length (cv-renderers cv))]}
+  (length (cv-renderers cv))
+  (define table40
+    (list (cons "y" y40) (cons "x1" (map car X40)) (cons "x2" (map cadr X40))))
+  (length (cv-renderers (formula-cv (~ y all) table40)))]}
 
 @(close-eval ev)
