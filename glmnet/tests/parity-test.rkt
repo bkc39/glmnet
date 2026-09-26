@@ -9,7 +9,8 @@
 ;; tolerances recorded in the golden's `meta`. Path goldens (kind "path", #10)
 ;; hold R's whole regularization path; predict goldens (kind "predict", #25) and
 ;; the `generic` entry of each single-fit golden hold R's coef(fit, s) and
-;; predict(fit, newx, s, type) for the generic interface.
+;; predict(fit, newx, s, type) for the generic interface; and CV goldens (kind
+;; "cv", #27) hold R's cv.glmnet on fold ids recorded in the golden.
 ;;
 ;; Goldens are generated on demand, never committed: the Nix `checks.parity` gate
 ;; regenerates them with the pinned R glmnet and points GLMNET_PARITY_GOLDENS at
@@ -165,6 +166,58 @@
               (check-vec-close (vector->list a0) expected itol (format "intercepts[lambda ~a]" m))
               (check-close a0 expected itol (format "intercept[lambda ~a]" m)))))))
 
+  ;; Cross-validation (#27): R's cv.glmnet on the golden's folds (numbered from
+  ;; 1 there, from 0 here), for one type measure.
+  (define (run-cv-golden g)
+    (define id       (hash-ref g 'id))
+    (define tols     (hash-ref (hash-ref g 'meta) 'tolerances))
+    (define ptol     (hash-ref tols 'pred))
+    (define ctol     (hash-ref tols 'coef))
+    (define ds       (load-dataset (hash-ref g 'dataset)))
+    (define X        (first ds))
+    (define fold-ids (for/list ([f (in-list (hash-ref g 'foldid))]) (sub1 f)))
+    (define measure  (string->symbol (hash-ref g 'type_measure)))
+    (define grouped? (hash-ref g 'grouped))
+    (define alpha    (hash-ref g 'alpha))
+    (define thresh   (hash-ref g 'thresh))
+    (define lambda   (hash-ref g 'lambda_user #f))
+    (define cv
+      (case (hash-ref g 'family)
+        [("gaussian")
+         (elnet-cv X (second ds) #:type-measure measure #:fold-ids fold-ids #:grouped? grouped?
+                   #:alpha alpha #:lambda lambda #:thresh thresh)]
+        [("binomial")
+         (logistic-cv X (second ds) #:type-measure measure #:fold-ids fold-ids
+                      #:grouped? grouped? #:alpha alpha #:lambda lambda #:thresh thresh)]
+        [("multinomial")
+         (multinomial-cv X (second ds) #:type-measure measure #:fold-ids fold-ids
+                         #:grouped? grouped? #:alpha alpha #:lambda lambda #:thresh thresh)]
+        [("poisson")
+         (poisson-cv X (second ds) #:type-measure measure #:fold-ids fold-ids
+                     #:grouped? grouped? #:alpha alpha #:lambda lambda #:thresh thresh)]
+        [("cox")
+         (cox-cv X (second ds) (third ds) #:type-measure measure #:fold-ids fold-ids
+                 #:grouped? grouped? #:alpha alpha #:lambda lambda #:thresh thresh)]
+        [("mgaussian")
+         (mgaussian-cv X (second ds) #:type-measure measure #:fold-ids fold-ids
+                       #:grouped? grouped? #:alpha alpha #:lambda lambda #:thresh thresh)]))
+    (test-case id
+      (check-equal? (symbol->string (glmnet-cv-measure cv)) (hash-ref g 'measure) "measure")
+      (check-equal? (glmnet-cv-name cv) (hash-ref g 'name) "name")
+      (check-equal? (glmnet-cv-fold-ids cv) fold-ids "fold ids")
+      (check-vec-close (vector->list (glmnet-cv-lambda cv)) (hash-ref g 'lambda) 1e-8 "lambda")
+      (for ([field (list glmnet-cv-cvm glmnet-cv-cvsd glmnet-cv-cvup glmnet-cv-cvlo)]
+            [key '(cvm cvsd cvup cvlo)])
+        (check-vec-close (vector->list (field cv)) (hash-ref g key) ptol (symbol->string key)))
+      (check-equal? (vector->list (glmnet-cv-nzero cv)) (hash-ref g 'nzero) "nzero")
+      (check-close (glmnet-cv-lambda-min cv) (hash-ref g 'lambda_min) 1e-8 "lambda-min")
+      (check-close (glmnet-cv-lambda-1se cv) (hash-ref g 'lambda_1se) 1e-8 "lambda-1se")
+      (check-equal? (add1 (glmnet-cv-index-min cv)) (hash-ref g 'index_min) "index-min")
+      (check-equal? (add1 (glmnet-cv-index-1se cv)) (hash-ref g 'index_1se) "index-1se")
+      (check-nested-close (coef cv #:lambda 'lambda-min) (hash-ref g 'coef_min) ctol
+                          "coef at lambda-min")
+      (check-nested-close (coef cv) (hash-ref g 'coef_1se) ctol "coef, default lambda")))
+
   (define (run-golden g)
     (define id     (hash-ref g 'id))
     (define family (hash-ref g 'family))
@@ -276,6 +329,7 @@
        (case (hash-ref g 'kind #f)
          [("path")    (run-path-golden g)]
          [("predict") (run-predict-golden g)]
+         [("cv")      (run-cv-golden g)]
          [else        (run-golden g)]))]
     [explicit-goldens?
      ;; The CI gate sets GLMNET_PARITY_GOLDENS; an empty dir there means R
