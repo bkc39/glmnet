@@ -89,7 +89,8 @@
            panel-y-label
            x-positions
            approx-f
-           count-ticks))
+           count-ticks
+           label-positions))
 
 ;; --- R's conventions ---------------------------------------------------------
 
@@ -245,6 +246,20 @@
   (lambda (j)
     (if names (~a (list-ref names j)) (number->string (add1 j)))))
 
+;; The predictors, counting from 0, that are nonzero at some lambda.
+(define (ever-nonzero betas)
+  (for/list ([j (in-range (vector-length (vector-ref betas 0)))]
+             #:when (for/or ([beta (in-vector betas)]) (not (zero? (vector-ref beta j)))))
+    j))
+
+;; The (x . coefficients) pairs of the lambdas whose x is finite, in path
+;; order: those a log axis can show.
+(define (finite-points xs betas)
+  (for/list ([x (in-list xs)]
+             [beta (in-vector betas)]
+             #:when (finite? x))
+    (cons x beta)))
+
 (define (model-path model)
   (if (glmnet-cv? model) (glmnet-cv-path model) model))
 
@@ -255,17 +270,10 @@
 (define (panel-renderers who pnl xs label labels-right?)
   (define betas (panel-coefficients pnl))
   (define n (vector-length (vector-ref betas 0)))
-  (define which
-    (for/list ([j (in-range n)]
-               #:when (for/or ([beta (in-vector betas)]) (not (zero? (vector-ref beta j)))))
-      j))
+  (define which (ever-nonzero betas))
   (when (and (pair? which) (null? (cdr which)))
     (log-warning "~a: 1 or less nonzero coefficients; the plot is not meaningful" who))
-  (define points
-    (for/list ([x (in-list xs)]
-               [beta (in-vector betas)]
-               #:when (finite? x))
-      (cons x beta)))
+  (define points (finite-points xs betas))
   (define curves
     (for/list ([j (in-list which)]
                [i (in-naturals)])
@@ -274,19 +282,31 @@
              #:color (list-ref curve-colors (modulo i (length curve-colors))))))
   (define labels
     (cond
-      [(and label (pair? points))
+      [label
        (define name (label-names who label n))
-       (define end
-         (apply (if labels-right? max min) (map car points)))
-       (define last-beta (vector-ref betas (sub1 (vector-length betas))))
-       (for/list ([j (in-list which)])
-         (point-label (vector end (vector-ref last-beta j))
-                      (name j)
+       (for/list ([j+position (in-list (label-positions pnl xs labels-right?))])
+         (point-label (cdr j+position)
+                      (name (car j+position))
                       #:anchor (if labels-right? 'left 'right)
                       #:size (curve-label-size)
                       #:point-size 0))]
       [else '()]))
   (append curves labels))
+
+;; Where plotCoef puts the label of each predictor that is nonzero at some
+;; lambda, as (j . #(x y)) pairs: at the right-hand end of the x axis, or the
+;; left for log lambda, level with the predictor's coefficient at the last
+;; lambda drawn.
+(define (label-positions pnl xs labels-right?)
+  (define betas (panel-coefficients pnl))
+  (define points (finite-points xs betas))
+  (cond
+    [(null? points) '()]
+    [else
+     (define end (apply (if labels-right? max min) (map car points)))
+     (define last-beta (cdr (last points)))
+     (for/list ([j (in-list (ever-nonzero betas))])
+       (cons j (vector end (vector-ref last-beta j))))]))
 
 (define (curve-label-size) (* 3/4 (plot-font-size)))
 

@@ -6,8 +6,9 @@
 ;; follow R, checked against R glmnet 4.1.10's values: the x positions, the
 ;; counts along the top and the panel labels of a coefficient plot, for a
 ;; single response and for each class or response of the multinomial and
-;; multi-response paths; approx with method "constant"; and the labels along
-;; the top of a CV plot. The images themselves are not compared.
+;; multi-response paths; where the curve labels go; approx with method
+;; "constant"; and the labels along the top of a CV plot. The images
+;; themselves are not compared.
 
 (module+ test
   (require rackunit
@@ -334,6 +335,35 @@
       (check-equal? (runs (panel-df pnl)) '((0 . 1) (1 . 10) (2 . 8) (3 . 81))))
     ;; plot.mrelnet's 2-norm panel counts the first response's coefficients.
     (check-equal? (panel-df (car (path-panels p '2norm))) (panel-df (car panels))))
+
+  (test-case "the curve labels go at the end of the x axis, level with the last drawn λ"
+    ;; R's plotCoef: xpos = max(index), or min(index) for log lambda, and
+    ;; ypos = beta[, ncol(beta)], the coefficients at the last lambda.
+    (define p (elnet-path Xr yr))
+    (define pnl (car (path-panels p 'coef)))
+    (define at-right (label-positions pnl (x-positions p 'lambda -1) #t))
+    (check-equal? (map car at-right) '(0 1 2))
+    (for ([position (in-list (map cdr at-right))]
+          [y (in-list '(1.93121767336867 -0.934669738099164 0.000442021746287323))])
+      (check-= (vector-ref position 0) 3.95824234548802600 1e-9)
+      (check-= (vector-ref position 1) y 1e-9))
+    (for ([position (in-list (map cdr (label-positions pnl (x-positions p 'lambda 1) #f)))])
+      (check-= (vector-ref position 0) -3.95824234548802600 1e-9))
+    ;; A lambda of 0 is not drawn on a log axis, so the labels are level with
+    ;; the curves' ends at the last lambda that is drawn. On the L1-norm axis,
+    ;; where lambda 0 is drawn, they are level with it.
+    (define p0 (elnet-path Xr yr #:lambda '(1.0 0.5 0.1 0.0)))
+    (define pnl0 (car (path-panels p0 'coef)))
+    (define betas0 (glmnet-path-coefficients p0))
+    (define on-log-axis (label-positions pnl0 (x-positions p0 'lambda -1) #t))
+    (check-equal? (map car on-log-axis) '(0 1 2))
+    (for ([j+position (in-list on-log-axis)])
+      (check-equal? (cdr j+position)
+                    (vector (- (log 0.1)) (vector-ref (vector-ref betas0 2) (car j+position)))))
+    (define norms0 (x-positions p0 'norm -1))
+    (for ([j+position (in-list (label-positions pnl0 norms0 #t))])
+      (check-equal? (cdr j+position)
+                    (vector (apply max norms0) (vector-ref (vector-ref betas0 3) (car j+position))))))
 
   (test-case "the CV counts get one label per run, and overlapping labels are left out"
     (check-equal? (label-runs '((0.0 . "0") (1.0 . "1") (2.0 . "1") (3.0 . "1") (4.0 . "2")))

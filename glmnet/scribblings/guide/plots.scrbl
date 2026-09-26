@@ -265,6 +265,11 @@ The plots follow R glmnet 4.1.10's @tt{plotCoef}, @tt{plot.multnet},
        When no coefficient of a class is nonzero, R draws no plot for it, and
        neither does @racket[plot-coefficient-path]. When exactly one is, both
        warn that the plot is not meaningful; here the warning is logged.}
+ @item{A @math{λ} of @racket[0] has no place on a log @math{λ} axis, and
+       neither R nor @racket[plot-coefficient-path] draws it. R still puts the
+       curve labels level with the coefficients at that @math{λ}, at an
+       infinite position, so that it draws none; here they are level with the
+       ends of the curves as drawn.}
  @item{The ticks are plot-lib's, not R's @tt{pretty} values, and the error
        bars' caps are a fixed number of pixels wide rather than 2% of the x
        axis.}

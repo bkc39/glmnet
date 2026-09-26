@@ -1362,7 +1362,9 @@ cross-validated fit @racket[cv] of @secref["ref-cv"]:
   ]
 
   An error is raised if every coefficient is zero at every @math{λ}, as there
-  is then nothing to plot.
+  is then nothing to plot. A @math{λ} of @racket[0] has no position on a
+  log @math{λ} axis and is left out: the curves, and their labels, end at the
+  smallest positive @math{λ}.
 
   @examples[#:eval ev
   (plot-coefficient-path path #:xvar 'norm #:label '("x1" "x2" "x3")
