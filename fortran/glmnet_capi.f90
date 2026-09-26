@@ -31,8 +31,9 @@
 ! pointers, every stack argument is 8 bytes under both conventions.
 !
 ! A path returns lmu, the number of lambdas actually fitted: glmnet stops early
-! once the deviance ratio stops improving, so lmu <= nlam and only the first lmu
-! entries of each per-lambda output are meaningful. In automatic mode glmnet
+! once the deviance ratio stops improving, or at a lambda where it fails (jerr < 0),
+! so lmu <= nlam and only the first lmu entries of each per-lambda output are
+! meaningful. lmu is 0 when the first lambda fails. In automatic mode glmnet
 ! reports the first lambda as `big`; R replaces it (fix.lam), and so does the
 ! Racket side. Coefficients come back DENSE, one column per lambda.
 
@@ -126,6 +127,8 @@ contains
     cl(2,:) =  big               ! no upper bound
     jd(1)   = 0                  ! use all variables
     ulamw   = ulam
+    lmu     = 0                  ! as R: a solver that fails at the first lambda
+    nlp     = 0                  ! returns without setting lmu
 
     ! ka = 1: covariance updating (good for ni not huge). ne = ni + 1 lets every
     ! variable enter (dfmax); nx = ni leaves room for all of them (pmax).
@@ -230,6 +233,8 @@ contains
     cl(2,:) =  big                ! no upper bound
     jd(1)   = 0                   ! use all variables
     ulamw   = ulam
+    lmu     = 0                   ! as R: a solver that fails at the first lambda
+    nlp     = 0                   ! returns without setting lmu
 
     ! nc = 1 (two classes); kopt = 0 is the exact Newton-Raphson Hessian.
     call lognet(alpha, no, ni, 1, xw, yw, gw, jd, vp, cl, ni + 1, ni, nlam, &
@@ -334,6 +339,8 @@ contains
     cl(2,:) =  big                  ! no upper bound
     jd(1)   = 0                     ! use all variables
     ulamw   = ulam
+    lmu     = 0                     ! as R: a solver that fails at the first lambda
+    nlp     = 0                     ! returns without setting lmu
 
     ! kopt = 0: exact Newton, ungrouped (R type.multinomial = "ungrouped").
     call lognet(alpha, no, ni, nc, xw, yw, gw, jd, vp, cl, ni + 1, ni, nlam, &
@@ -441,6 +448,8 @@ contains
     cl(2,:) =  big               ! no upper bound
     jd(1)   = 0                  ! use all variables
     ulamw   = ulam
+    lmu     = 0                  ! as R: a solver that fails at the first lambda
+    nlp     = 0                  ! returns without setting lmu
 
     ! NOTE coxnet's argument order is thr, maxit, isd (no intercept argument).
     call coxnet(alpha, no, ni, xw, yw, dw, gw, ww, jd, vp, cl, ni + 1, ni, nlam, &
@@ -533,6 +542,8 @@ contains
     cl(2,:) =  big               ! no upper bound
     jd(1)   = 0                  ! use all variables
     ulamw   = ulam
+    lmu     = 0                  ! as R: a solver that fails at the first lambda
+    nlp     = 0                  ! returns without setting lmu
 
     call fishnet(alpha, no, ni, xw, yw, gw, ww, jd, vp, cl, ni + 1, ni, nlam, &
          flmin, ulamw, thresh, standardize, intercept, maxit, &
@@ -631,6 +642,8 @@ contains
     cl(2,:) =  big               ! no upper bound
     jd(1)   = 0                  ! use all variables
     ulamw   = ulam
+    lmu     = 0                  ! as R: a solver that fails at the first lambda
+    nlp     = 0                  ! returns without setting lmu
 
     ! jsd = 0: do NOT standardize the responses (R standardize.response = FALSE).
     call multelnet(alpha, no, ni, nr, xw, yw, ww, jd, vp, cl, ni + 1, ni, nlam, &
