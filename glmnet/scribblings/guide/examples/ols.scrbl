@@ -29,11 +29,14 @@ intercept @racket[1.0] and the coefficients @racket[2.0] and @racket[-1.0]:
 
 @section[#:tag "ex-ols-fit"]{Fitting}
 
-@racket[ols] is @racket[elnet-fit] with @racket[#:lambda 0.0]:
+@racket[ols] is @racket[elnet-fit] with @racket[#:lambda 0.0]. The fit prints
+as a summary; @racket[coef] lists the intercept and then the coefficients:
 
 @examples[#:eval ev #:label #f
 (define fit (ols X y))
 fit
+(coef fit)
+(elnet-result-r-squared fit)
 ]
 
 The intercept and coefficients match the generating equation to about five
@@ -42,23 +45,27 @@ because coordinate descent stops once a pass changes the objective by less than
 @racket[#:thresh]. A tighter threshold costs more passes and gets closer:
 
 @examples[#:eval ev #:label #f
-(ols X y #:thresh 1e-14)
+(define tight (ols X y #:thresh 1e-14))
+(coef tight)
+(list (elnet-result-num-passes fit) (elnet-result-num-passes tight))
 ]
 
 @section[#:tag "ex-ols-fitted"]{Fitted values}
 
-The Gaussian family has no prediction helper yet
-(@hyperlink["https://github.com/bkc39/glmnet/issues/25"]{#25}); a fitted value
-is the intercept plus the dot product of a row with the coefficients:
+A fitted value is the intercept plus the dot product of a row with the
+coefficients. @racket[predict] computes it for each row, here the training
+rows, whose fitted values reproduce @racket[y] to the same five decimal
+places:
 
 @examples[#:eval ev #:label #f
-(define (fitted fit row)
-  (for/fold ([acc (elnet-result-intercept fit)])
-            ([b (in-vector (elnet-result-coefficients fit))]
-             [x (in-list row)])
-    (+ acc (* b x))))
-(for/list ([row (in-list X)])
-  (fitted fit row))
+(predict fit X)
+]
+
+@racket[elnet-predict] is the same computation under the Gaussian family's own
+name. On new rows the fit extrapolates the plane it found:
+
+@examples[#:eval ev #:label #f
+(elnet-predict fit '((6.0 5.0) (0.0 0.0)))
 ]
 
 @section[#:tag "ex-ols-when"]{When to use it}

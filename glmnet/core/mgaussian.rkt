@@ -14,6 +14,8 @@
 (require racket/contract
          ffi/vector
          "marshal.rkt"
+         "model.rkt"
+         (submod "model.rkt" support)
          "../foreign/raw/mgaussian.rkt"
          "path.rkt"
          (submod "path.rkt" support)
@@ -53,7 +55,13 @@
 ;; (multi-response) variance explained; `lambda` the penalty used; `num-passes`
 ;; glmnet's pass count.
 (struct mgaussian-result (intercepts coefficients r-squared lambda num-passes)
-  #:transparent)
+  #:transparent
+  #:property prop:custom-write write-fit
+  #:methods gen:glmnet-model
+  [(define (glmnet-model->path r)
+     (single-fit-path 'mgaussian (mgaussian-result-lambda r)
+                      (mgaussian-result-intercepts r) (mgaussian-result-coefficients r)
+                      (mgaussian-result-r-squared r) (mgaussian-result-num-passes r)))])
 
 ;; The response matrix Y as a design matrix with one row per observation.
 (define (response-matrix Y no who)
@@ -98,13 +106,7 @@
 ;; The per-response predictions a0_r + x . beta_r for each row of X (one inner
 ;; list per row, nr entries each).
 (define (mgaussian-predict result X)
-  (define intercepts (mgaussian-result-intercepts result))
-  (define coefs (mgaussian-result-coefficients result))
-  (define x (prediction-matrix X (vector-length (vector-ref coefs 0)) 'mgaussian-predict))
-  (for/list ([i (in-range (design-matrix-nrows x))])
-    (for/list ([a0 (in-vector intercepts)]
-               [beta (in-vector coefs)])
-      (linear-predictor x i a0 beta))))
+  (predict-as 'mgaussian-predict result X 'link))
 
 ;; --- regularization path (#10) ---------------------------------------------
 

@@ -12,6 +12,8 @@
 (require racket/contract
          ffi/vector
          "marshal.rkt"
+         "model.rkt"
+         (submod "model.rkt" support)
          "../foreign/raw/multinomial.rkt"
          "path.rkt"
          (submod "path.rkt" support)
@@ -47,13 +49,20 @@
             #:max-iters exact-positive-integer?)
         glmnet-path?)]))
 
-;; A fitted K-class multinomial model. `intercepts` is a vector of K reals;
-;; `coefficients` is a vector of K coefficient vectors (each length ni), one per
-;; class, on the original predictor scale. Both are on the log-odds scale of the
-;; symmetric multinomial parameterization. `dev-ratio` is the fraction of null
-;; deviance explained; `lambda` the penalty used; `num-passes` glmnet's pass count.
+;; A fitted K-class multinomial model. `intercepts` is a vector of K reals,
+;; centred to sum to zero; `coefficients` is a vector of K coefficient vectors
+;; (each length ni), one per class, on the original predictor scale. Both are on
+;; the log-odds scale of the symmetric multinomial parameterization. `dev-ratio`
+;; is the fraction of null deviance explained; `lambda` the penalty used;
+;; `num-passes` glmnet's pass count.
 (struct multinomial-result (intercepts coefficients dev-ratio lambda num-passes)
-  #:transparent)
+  #:transparent
+  #:property prop:custom-write write-fit
+  #:methods gen:glmnet-model
+  [(define (glmnet-model->path r)
+     (single-fit-path 'multinomial (multinomial-result-lambda r)
+                      (multinomial-result-intercepts r) (multinomial-result-coefficients r)
+                      (multinomial-result-dev-ratio r) (multinomial-result-num-passes r)))])
 
 ;; --- input contract --------------------------------------------------------
 
@@ -73,6 +82,14 @@
              "class ~a has no observations; labels must cover 0..~a contiguously"
              c (sub1 k))))
   k)
+
+;; The softmax is unchanged by adding a constant to every class's intercept, and
+;; the Fortran leaves that constant free. R's getcoef.multinomial centres the
+;; intercepts at every lambda; so do we.
+(define (center-intercepts a0)
+  (define mean (/ (for/sum ([a (in-vector a0)]) a) (vector-length a0)))
+  (for/vector #:length (vector-length a0) ([a (in-vector a0)])
+    (- a mean)))
 
 ;; Multinomial shares the binomial (lognet) jerr codes: 8000/9000 (a class
 ;; probability collapsed -- e.g. perfect separation) and 90000 (coefficient-bound
@@ -117,47 +134,21 @@
                                  intercepts beta))
   (check-multinomial-jerr jerr 'multinomial-fit)
   ;; beta is class-major: class k's predictor j at k*ni + j.
-  (multinomial-result (unpack-vector intercepts nc) (unpack-columns beta ni nc)
+  (multinomial-result (center-intercepts (unpack-vector intercepts nc))
+                      (unpack-columns beta ni nc)
                       dev-ratio lam nlp))
 
 ;; --- prediction ------------------------------------------------------------
 
-;; The K linear predictors eta_k = a0_k + x . beta_k for row i of x.
-(define (row-etas result x i)
-  (for/list ([a0 (in-vector (multinomial-result-intercepts result))]
-             [beta (in-vector (multinomial-result-coefficients result))])
-    (linear-predictor x i a0 beta)))
-
-;; Numerically-stable softmax of a list of linear predictors.
-(define (softmax etas)
-  (define m (apply max etas))
-  (define exps (for/list ([e (in-list etas)]) (exp (- e m))))
-  (define s (apply + exps))
-  (for/list ([e (in-list exps)]) (/ e s)))
-
-;; Per-class probabilities (summing to 1) for each row of X. `who` names the
-;; public procedure in errors.
-(define (class-probabilities result X who)
-  (define ni (vector-length (vector-ref (multinomial-result-coefficients result) 0)))
-  (define x (prediction-matrix X ni who))
-  (for/list ([i (in-range (design-matrix-nrows x))])
-    (softmax (row-etas result x i))))
-
+;; Per-class probabilities (summing to 1) for each row of X: the softmax of the
+;; K linear predictors.
 (define (multinomial-predict-proba result X)
-  (class-probabilities result X 'multinomial-predict-proba))
+  (predict-as 'multinomial-predict-proba result X 'response))
 
-;; Index (0-based class label) of the largest element.
-(define (argmax-index xs)
-  (let loop ([rest (cdr xs)] [i 1] [best (car xs)] [best-i 0])
-    (cond
-      [(null? rest) best-i]
-      [(> (car rest) best) (loop (cdr rest) (add1 i) (car rest) i)]
-      [else (loop (cdr rest) (add1 i) best best-i)])))
-
-;; Predicted class label (0..K-1) for each row of X: argmax of the probabilities.
+;; Predicted class label (0..K-1) for each row of X: the class with the largest
+;; linear predictor, and so the largest probability.
 (define (multinomial-predict result X)
-  (for/list ([ps (in-list (class-probabilities result X 'multinomial-predict))])
-    (argmax-index ps)))
+  (predict-as 'multinomial-predict result X 'class))
 
 ;; --- regularization path (#10) ---------------------------------------------
 
@@ -190,5 +181,7 @@
   (check-multinomial-jerr jerr 'multinomial-path)
   (define coefficients (unpack-column-groups beta ni k lmu))
   (glmnet-path 'multinomial (finish-lambdas alm lmu (not lambda))
-               (unpack-intercept-groups a0 k lmu) coefficients (unpack-vector dev lmu)
+               (for/vector #:length lmu ([a (in-vector (unpack-intercept-groups a0 k lmu))])
+                 (center-intercepts a))
+               coefficients (unpack-vector dev lmu)
                (count-nonzero-groups coefficients) nlp))

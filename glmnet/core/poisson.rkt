@@ -12,6 +12,8 @@
 (require racket/contract
          ffi/vector
          "marshal.rkt"
+         "model.rkt"
+         (submod "model.rkt" support)
          "../foreign/raw/fishnet.rkt"
          "path.rkt"
          (submod "path.rkt" support)
@@ -50,7 +52,13 @@
 ;; `dev-ratio` is the fraction of null deviance explained; `lambda` the penalty
 ;; used; `num-passes` glmnet's coordinate-descent pass count.
 (struct poisson-result (intercept coefficients dev-ratio lambda num-passes)
-  #:transparent)
+  #:transparent
+  #:property prop:custom-write write-fit
+  #:methods gen:glmnet-model
+  [(define (glmnet-model->path r)
+     (single-fit-path 'poisson (poisson-result-lambda r) (poisson-result-intercept r)
+                      (poisson-result-coefficients r) (poisson-result-dev-ratio r)
+                      (poisson-result-num-passes r)))])
 
 ;; --- input contract --------------------------------------------------------
 
@@ -94,10 +102,7 @@
 
 ;; The fitted Poisson mean exp(intercept + x . beta) for each row of X.
 (define (poisson-predict-mean result X)
-  (define beta (poisson-result-coefficients result))
-  (define x (prediction-matrix X (vector-length beta) 'poisson-predict-mean))
-  (for/list ([i (in-range (design-matrix-nrows x))])
-    (exp (linear-predictor x i (poisson-result-intercept result) beta))))
+  (predict-as 'poisson-predict-mean result X 'response))
 
 ;; --- regularization path (#10) ---------------------------------------------
 

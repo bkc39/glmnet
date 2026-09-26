@@ -13,6 +13,8 @@
 (require racket/contract
          ffi/vector
          "marshal.rkt"
+         "model.rkt"
+         (submod "model.rkt" support)
          "../foreign/raw/lognet.rkt"
          "path.rkt"
          (submod "path.rkt" support)
@@ -55,7 +57,13 @@
 ;; `dev-ratio` is the fraction of null deviance explained (the logistic analogue
 ;; of R^2); `num-passes` is glmnet's coordinate-descent pass count.
 (struct logistic-result (intercept coefficients dev-ratio lambda num-passes)
-  #:transparent)
+  #:transparent
+  #:property prop:custom-write write-fit
+  #:methods gen:glmnet-model
+  [(define (glmnet-model->path r)
+     (single-fit-path 'binomial (logistic-result-lambda r) (logistic-result-intercept r)
+                      (logistic-result-coefficients r) (logistic-result-dev-ratio r)
+                      (logistic-result-num-passes r)))])
 
 ;; --- input contract --------------------------------------------------------
 
@@ -107,21 +115,13 @@
 
 ;; --- prediction ------------------------------------------------------------
 
-(define (sigmoid z) (/ 1.0 (+ 1.0 (exp (- z)))))
-
-;; P(y = 1 | x) for each row of X. `who` names the public procedure in errors.
-(define (class-1-probabilities result X who)
-  (define beta (logistic-result-coefficients result))
-  (define x (prediction-matrix X (vector-length beta) who))
-  (for/list ([i (in-range (design-matrix-nrows x))])
-    (sigmoid (linear-predictor x i (logistic-result-intercept result) beta))))
-
+;; P(y = 1 | x) for each row of X.
 (define (logistic-predict-proba result X)
-  (class-1-probabilities result X 'logistic-predict-proba))
+  (predict-as 'logistic-predict-proba result X 'response))
 
 ;; Hard 0/1 prediction: class 1 when P(y=1) >= threshold (default 0.5).
 (define (logistic-predict result X #:threshold [threshold 0.5])
-  (for/list ([p (in-list (class-1-probabilities result X 'logistic-predict))])
+  (for/list ([p (in-list (predict-as 'logistic-predict result X 'response))])
     (if (>= p threshold) 1 0)))
 
 ;; --- regularization path (#10) ---------------------------------------------

@@ -4,11 +4,14 @@
 ;;
 ;; OLS, ridge, lasso, and elastic net are all `elnet-fit` with different #:alpha
 ;; and #:lambda; thin convenience wrappers name the common cases. The result is
-;; an `elnet-result` carrying a dense coefficient vector.
+;; an `elnet-result` carrying a dense coefficient vector; `elnet-predict` gives
+;; the fitted values for new predictors.
 
 (require racket/contract
          ffi/vector
          "marshal.rkt"
+         "model.rkt"
+         (submod "model.rkt" support)
          "../foreign/raw/elnet.rkt"
          "path.rkt"
          (submod "path.rkt" support)
@@ -52,7 +55,9 @@
          #:intercept? boolean?
          #:thresh (>/c 0)
          #:max-iters exact-positive-integer?)
-        elnet-result?)]))
+        elnet-result?)]
+  [elnet-predict
+   (-> elnet-result? design-matrix/c (listof real?))]))
 
 (provide
  (contract-out
@@ -72,7 +77,13 @@
 ;; predictor scale; `lambda` is the penalty actually used; `r-squared` is the
 ;; fraction of null deviance explained; `num-passes` is glmnet's pass count.
 (struct elnet-result (intercept coefficients r-squared lambda num-passes)
-  #:transparent)
+  #:transparent
+  #:property prop:custom-write write-fit
+  #:methods gen:glmnet-model
+  [(define (glmnet-model->path r)
+     (single-fit-path 'gaussian (elnet-result-lambda r) (elnet-result-intercept r)
+                      (elnet-result-coefficients r) (elnet-result-r-squared r)
+                      (elnet-result-num-passes r)))])
 
 ;; --- public API ------------------------------------------------------------
 
@@ -182,6 +193,12 @@
              #:intercept? intercept?
              #:thresh thresh
              #:max-iters max-iters))
+
+;; --- prediction ------------------------------------------------------------
+
+;; The fitted value intercept + x . beta for each row of X.
+(define (elnet-predict result X)
+  (predict-as 'elnet-predict result X 'link))
 
 ;; --- regularization path (#10) ---------------------------------------------
 

@@ -65,6 +65,36 @@ datasets <- list(longley = load_longley(), wdbc = load_wdbc(),
                  iris = load_iris(), veteran = load_veteran(),
                  warpbreaks = load_warpbreaks(), linnerud = load_linnerud())
 
+## --- the generic interface (#25) ---------------------------------------------
+## R's coef(fit, s) and predict(fit, newx, s, type) with the default
+## exact = FALSE, for every type the family has, as one entry per s. newx is
+## the training X. Class labels become integers (the factor levels are 0..K-1).
+
+predict_types <- function(family)
+  switch(family, binomial = , multinomial = c("link", "response", "class"),
+         c("link", "response"))
+
+generic_outputs <- function(fit, family, X, s) {
+  per_s <- function(P)               # n x |s|, or n x K x |s| (multinomial, mgaussian)
+    lapply(seq_along(s), function(i)
+      if (length(dim(P)) == 3) unname(P[, , i]) else unname(P[, i]))
+  preds <- list()
+  for (type in predict_types(family)) {
+    P <- predict(fit, newx = X, s = s, type = type)
+    if (type == "class") P <- array(as.integer(P), dim(P))
+    preds[[type]] <- per_s(P)
+  }
+  co <- coef(fit, s = s)
+  coefs <- if (is.list(co))          # one matrix per class or response
+    lapply(seq_along(s), function(i) unname(lapply(co, function(B) unname(as.numeric(B[, i])))))
+  else
+    lapply(seq_along(s), function(i) unname(as.numeric(co[, i])))
+  list(s = s, coef_s = coefs, predict_s = preds)
+}
+
+## A single-lambda fit is a one-lambda path: lambda.interp returns it for any s.
+single_s <- function(lambda) c(lambda, 3 * lambda, lambda / 3)
+
 fit_gaussian <- function(X, y, alpha, lambda, intercept = TRUE, thresh = 1e-7) {
   fit <- suppressWarnings(glmnet(X, y, family = "gaussian", alpha = alpha,
                                  lambda = lambda, standardize = TRUE,
@@ -75,7 +105,8 @@ fit_gaussian <- function(X, y, alpha, lambda, intercept = TRUE, thresh = 1e-7) {
        dev_ratio    = fit$dev.ratio[1],
        lambda_used  = fit$lambda[1],
        predictions  = as.numeric(predict(fit, newx = X, s = lambda,
-                                          exact = TRUE, x = X, y = y)))
+                                          exact = TRUE, x = X, y = y)),
+       generic      = generic_outputs(fit, "gaussian", X, single_s(lambda)))
 }
 
 fit_binomial <- function(X, y, alpha, lambda, thresh = 1e-7) {
@@ -91,7 +122,8 @@ fit_binomial <- function(X, y, alpha, lambda, thresh = 1e-7) {
        lambda_used  = fit$lambda[1],
        predictions  = as.numeric(predict(fit, newx = X, s = lambda,
                                           type = "response", exact = TRUE,
-                                          x = X, y = yf)))   # P(y==1)
+                                          x = X, y = yf)),   # P(y==1)
+       generic      = generic_outputs(fit, "binomial", X, single_s(lambda)))
 }
 
 fit_multinomial <- function(X, y, alpha, lambda, thresh = 1e-7) {
@@ -105,7 +137,8 @@ fit_multinomial <- function(X, y, alpha, lambda, thresh = 1e-7) {
        coefficients  = unname(lapply(co, function(m) as.numeric(m)[-1])),   # K vectors
        dev_ratio     = fit$dev.ratio[1],
        lambda_used   = fit$lambda[1],
-       probabilities = probs[, , 1])                 # n x K
+       probabilities = probs[, , 1],                 # n x K
+       generic       = generic_outputs(fit, "multinomial", X, single_s(lambda)))
 }
 
 fit_cox <- function(X, time, status, alpha, lambda, thresh = 1e-7) {
@@ -116,7 +149,8 @@ fit_cox <- function(X, time, status, alpha, lambda, thresh = 1e-7) {
        dev_ratio        = fit$dev.ratio[1],
        lambda_used      = fit$lambda[1],
        linear_predictor = as.numeric(predict(fit, newx = X, s = lambda, type = "link",
-                                             exact = TRUE, x = X, y = sy)))
+                                             exact = TRUE, x = X, y = sy)),
+       generic          = generic_outputs(fit, "cox", X, single_s(lambda)))
 }
 
 fit_poisson <- function(X, y, alpha, lambda, thresh = 1e-7) {
@@ -126,7 +160,8 @@ fit_poisson <- function(X, y, alpha, lambda, thresh = 1e-7) {
   list(intercept    = b[1], coefficients = b[-1],
        dev_ratio    = fit$dev.ratio[1], lambda_used = fit$lambda[1],
        predictions  = as.numeric(predict(fit, newx = X, s = lambda, type = "response",
-                                          exact = TRUE, x = X, y = y)))   # fitted means
+                                          exact = TRUE, x = X, y = y)),   # fitted means
+       generic      = generic_outputs(fit, "poisson", X, single_s(lambda)))
 }
 
 fit_mgaussian <- function(X, Y, alpha, lambda, thresh = 1e-7) {
@@ -139,7 +174,8 @@ fit_mgaussian <- function(X, Y, alpha, lambda, thresh = 1e-7) {
        coefficients = unname(lapply(co, function(m) as.numeric(m)[-1])),  # nr vectors
        r_squared    = fit$dev.ratio[1],
        lambda_used  = fit$lambda[1],
-       predictions  = preds[, , 1])                 # n x nr
+       predictions  = preds[, , 1],                 # n x nr
+       generic      = generic_outputs(fit, "mgaussian", X, single_s(lambda)))
 }
 
 fixtures <- list(
@@ -188,7 +224,7 @@ for (f in fixtures) {
 ## every fitted lambda (after R's fix.lam) and, per lambda, the intercepts,
 ## coefficients, deviance ratio and df.
 
-fit_path <- function(family, d, alpha, lambda = NULL, thresh = 1e-7) {
+path_fit <- function(family, d, alpha, lambda = NULL, thresh = 1e-7) {
   y <- switch(family,
     binomial    = factor(d$y, levels = c(0, 1)),
     multinomial = factor(d$y),
@@ -201,7 +237,11 @@ fit_path <- function(family, d, alpha, lambda = NULL, thresh = 1e-7) {
   if (family == "binomial") args$type.logistic <- "Newton"
   if (family == "multinomial") args$type.multinomial <- "ungrouped"
   if (family == "mgaussian") args$standardize.response <- FALSE
-  fit <- suppressWarnings(do.call(glmnet, args))
+  suppressWarnings(do.call(glmnet, args))
+}
+
+fit_path <- function(family, d, alpha, lambda = NULL, thresh = 1e-7) {
+  fit <- path_fit(family, d, alpha, lambda, thresh)
   L  <- length(fit$lambda)
   co <- coef(fit)
   if (is.list(co)) {                 # multinomial, mgaussian: one matrix per class/response
@@ -241,4 +281,26 @@ for (f in path_fixtures) {
   path <- file.path(goldens_dir, paste0(f$id, ".json"))
   writeLines(toJSON(golden, digits = NA, auto_unbox = TRUE, pretty = TRUE), path)
   cat("wrote", path, "  (", length(res$lambda_path), "lambdas )\n")
+}
+
+## --- predict and coef along a path (#25) --------------------------------------
+## The generic interface on each path fixture above, at four s given in this
+## (unsorted) order: a fitted lambda, a point 30% of the way from one fitted
+## lambda to the next, and points above the largest and below the smallest
+## fitted lambda, which lambda.interp clamps to the ends of the path.
+
+for (f in path_fixtures) {
+  d   <- datasets[[f$dataset]]
+  fit <- path_fit(f$family, d, f$alpha, f$lambda)
+  lam <- fit$lambda
+  L   <- length(lam)
+  i   <- ceiling(L / 2)
+  s   <- c(lam[i], 0.7 * lam[i] + 0.3 * lam[i + 1], 2 * lam[1], lam[L] / 2)
+  golden <- list(id = sub("^path-", "predict-", f$id), dataset = f$dataset,
+                 family = f$family, kind = "predict", alpha = f$alpha, thresh = 1e-7)
+  if (!is.null(f$lambda)) golden$lambda_user <- f$lambda
+  golden <- c(golden, generic_outputs(fit, f$family, d$X, s), list(meta = meta))
+  path <- file.path(goldens_dir, paste0(golden$id, ".json"))
+  writeLines(toJSON(golden, digits = NA, auto_unbox = TRUE, pretty = TRUE), path)
+  cat("wrote", path, "  ( s =", signif(s, 4), ")\n")
 }

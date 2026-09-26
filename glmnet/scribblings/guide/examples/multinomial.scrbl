@@ -42,13 +42,16 @@ Only differences between the classes' linear predictors matter: adding the same
 vector to every class's coefficients leaves the softmax unchanged. glmnet
 resolves that ambiguity with the penalty, which prefers the smallest
 coefficients, so the class-0 and class-1 weights on @math{x₁} come out
-nearly equal and opposite rather than, say, zero and twice as large.
+nearly equal and opposite rather than, say, zero and twice as large. The
+penalty does not touch the intercepts, which have the same freedom; as R does,
+the bindings centre them to sum to zero.
 
 @section[#:tag "ex-multinomial-predict"]{Predicting}
 
 @racket[multinomial-predict-proba] returns one probability per class for each
 row, summing to 1, and @racket[multinomial-predict] returns the most probable
-class:
+class. They are @racket[predict] with @racket[#:type 'response] and
+@racket[#:type 'class]:
 
 @examples[#:eval ev #:label #f
 (define new-points '((1.5 1.5) (5.5 1.5) (3.5 5.5) (3.5 1.5)))
