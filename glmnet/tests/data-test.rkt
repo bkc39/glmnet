@@ -6,6 +6,7 @@
 
 (module+ test
   (require rackunit
+           racket/contract
            racket/list
            ffi/vector
            glmnet/data)
@@ -19,6 +20,15 @@
      (lambda (e)
        (and (exn:fail:contract? e)
             (for/and ([p (in-list patterns)])
+              (regexp-match? p (exn-message e)))))
+     thunk))
+
+  ;; A contract violation that blames this module, the caller.
+  (define (check-blame thunk . patterns)
+    (check-exn
+     (lambda (e)
+       (and (exn:fail:contract:blame? e)
+            (for/and ([p (in-list (cons #rx"blaming: [^\n]*data-test[.]rkt" patterns))])
               (regexp-match? p (exn-message e)))))
      thunk))
 
@@ -148,14 +158,20 @@
     (check-error (lambda () (rows->design-matrix (list (list 1 (expt 10 400)))))
                  #rx"not finite" #rx"column: 1"))
 
-  (test-case "the f64vector length must be nrows * ncols"
-    (check-error (lambda () (f64vector->design-matrix (f64vector 1.0 2.0 3.0) 2 2))
-                 #rx"length: 3" #rx"nrows: 2" #rx"ncols: 2"))
+  (test-case "the f64vector length must be nrows * ncols, and the caller is blamed"
+    (check-blame (lambda () (f64vector->design-matrix (f64vector 1.0 2.0 3.0) 2 2))
+                 #rx"expected: an f64vector of length nrows \\* ncols = 4"
+                 #rx"given: an f64vector of length 3"
+                 #rx"the v argument")
+    (check-blame (lambda () (f64vector->design-matrix '(1.0 2.0) 1 2))
+                 #rx"given: '\\(1.0 2.0\\)" #rx"the v argument"))
 
-  (test-case "design-matrix-ref checks its indices"
+  (test-case "design-matrix-ref checks its indices, and the caller is blamed"
     (define dm (rows->design-matrix X))
-    (check-error (lambda () (design-matrix-ref dm 3 0)) #rx"row index is out of range")
-    (check-error (lambda () (design-matrix-ref dm 0 2)) #rx"column index is out of range"))
+    (check-blame (lambda () (design-matrix-ref dm 3 0))
+                 #rx"expected: \\(integer-in 0 2\\)" #rx"given: 3" #rx"the i argument")
+    (check-blame (lambda () (design-matrix-ref dm 0 2))
+                 #rx"expected: \\(integer-in 0 1\\)" #rx"given: 2" #rx"the j argument"))
 
   (test-case "response->f64vector converts exact numbers"
     (check-equal? (f64vector->list (response->f64vector '(1 1/4 2.5))) '(1.0 0.25 2.5)))

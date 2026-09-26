@@ -26,14 +26,19 @@
   [columns->design-matrix
    (->* ((listof list?)) (#:column-names column-names/c) design-matrix?)]
   [f64vector->design-matrix
-   (->* (f64vector? exact-positive-integer? exact-positive-integer?)
-        (#:column-names column-names/c)
-        design-matrix?)]
+   (->i ([v (nrows ncols) (f64vector-length/c nrows ncols)]
+         [nrows exact-positive-integer?]
+         [ncols exact-positive-integer?])
+        (#:column-names [column-names column-names/c])
+        [result design-matrix?])]
   [design-matrix-nrows (-> design-matrix? exact-positive-integer?)]
   [design-matrix-ncols (-> design-matrix? exact-positive-integer?)]
   [design-matrix-column-names (-> design-matrix? column-names/c)]
   [design-matrix-ref
-   (-> design-matrix? exact-nonnegative-integer? exact-nonnegative-integer? flonum?)]
+   (->i ([dm design-matrix?]
+         [i (dm) (integer-in 0 (sub1 (design-matrix-nrows dm)))]
+         [j (dm) (integer-in 0 (sub1 (design-matrix-ncols dm)))])
+        [result flonum?])]
   [design-matrix->rows (-> design-matrix? (listof (listof flonum?)))]
   [design-matrix->columns (-> design-matrix? (listof (listof flonum?)))]
   [design-matrix->f64vector (-> design-matrix? f64vector?)]
@@ -89,6 +94,22 @@
   (unless (fl< (flabs v) +inf.0)
     (element-error who what "not finite" x "row" i "column" j))
   v)
+
+;; An f64vector with nrows * ncols entries: the v argument of
+;; f64vector->design-matrix.
+(define (f64vector-length/c nrows ncols)
+  (define n (* nrows ncols))
+  (flat-contract-with-explanation
+   (lambda (v)
+     (or (and (f64vector? v) (= (f64vector-length v) n))
+         (lambda (blame)
+           (raise-blame-error blame v
+                              '(expected: "an f64vector of length nrows * ncols = ~a" given: "~a")
+                              n
+                              (if (f64vector? v)
+                                  (format "an f64vector of length ~a" (f64vector-length v))
+                                  (format "~e" v))))))
+   #:name `(f64vector-length/c ,nrows ,ncols)))
 
 (define (check-column-names names ncols who)
   (when names
@@ -161,9 +182,6 @@
 (define (f64vector->design-matrix v nrows ncols #:column-names [names #f])
   (define who 'f64vector->design-matrix)
   (define n (f64vector-length v))
-  (unless (= n (* nrows ncols))
-    (raise-arguments-error who "the vector length is not nrows * ncols"
-                           "length" n "nrows" nrows "ncols" ncols))
   (define out (make-f64vector n))
   (for ([k (in-range n)])
     (f64vector-set! out k (->finite-flonum (f64vector-ref v k) who "the vector"
@@ -173,13 +191,7 @@
 ;; --- conversions out -------------------------------------------------------
 
 (define (design-matrix-ref dm i j)
-  (define no (design-matrix-nrows dm))
-  (define ni (design-matrix-ncols dm))
-  (unless (< i no)
-    (raise-range-error 'design-matrix-ref "design matrix" "row " i dm 0 (sub1 no)))
-  (unless (< j ni)
-    (raise-range-error 'design-matrix-ref "design matrix" "column " j dm 0 (sub1 ni)))
-  (f64vector-ref (design-matrix-data dm) (+ i (* j no))))
+  (f64vector-ref (design-matrix-data dm) (+ i (* j (design-matrix-nrows dm)))))
 
 (define (design-matrix->rows dm)
   (define v (design-matrix-data dm))

@@ -128,10 +128,10 @@ matrix can be passed to any number of fits.
                                                    #f])
          design-matrix?]{
   Builds a design matrix from @racket[v], an array already in the column-major
-  layout: element @math{(i, j)} is at index @math{i + j · nrows}. The length of
-  @racket[v] must be @racket[(* nrows ncols)] and every entry must be finite.
-  The design matrix holds a copy, so later changes to @racket[v] do not
-  affect it.
+  layout: element @math{(i, j)} is at index @math{i + j · nrows}. The contract
+  requires the length of @racket[v] to be @racket[(* nrows ncols)], and every
+  entry must be finite. The design matrix holds a copy, so later changes to
+  @racket[v] do not affect it.
 
   @examples[#:eval ev
   (require ffi/vector)
@@ -164,7 +164,9 @@ matrix can be passed to any number of fits.
                             [j exact-nonnegative-integer?])
          flonum?]{
   The entry in row @racket[i] and column @racket[j] of @racket[dm], counting
-  from 0.
+  from 0. The contract requires @racket[i] to be less than
+  @racket[(design-matrix-nrows dm)] and @racket[j] less than
+  @racket[(design-matrix-ncols dm)].
 
   @examples[#:eval ev
   (design-matrix-ref D 2 1)
