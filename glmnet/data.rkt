@@ -3,7 +3,8 @@
 ;; The input-data layer (#35): `design-matrix`, the one representation of a
 ;; predictor matrix that the Fortran solvers read, and the standalone
 ;; conversions into and out of it. `glmnet` re-exports this module; it does not
-;; load the native library, so adapters can build on it alone.
+;; load the native library, so adapters can build on it alone. Tables (#26),
+;; the named data that formulas read, convert into it here too.
 ;;
 ;; Invariant: `data` is a column-major f64vector of nrows * ncols finite
 ;; flonums, element (i, j) at index i + j*nrows. Every constructor validates
@@ -16,6 +17,7 @@
          ffi/vector)
 
 (define column-names/c (or/c #f (listof (or/c string? symbol?))))
+(define column-list/c (and/c (listof (or/c string? symbol?)) pair?))
 
 (provide
  design-matrix?
@@ -39,7 +41,10 @@
   [design-matrix->rows (-> design-matrix? (listof (listof flonum?)))]
   [design-matrix->columns (-> design-matrix? (listof (listof flonum?)))]
   [design-matrix->f64vector (-> design-matrix? f64vector?)]
-  [response->f64vector (-> list? f64vector?)]))
+  [response->f64vector (-> list? f64vector?)]
+  [table? (-> any/c boolean?)]
+  [table-column-names (-> table? (listof string?))]
+  [table->design-matrix (->* (table?) (column-list/c) design-matrix?)]))
 
 ;; For the family modules only; not part of the public API.
 (module* support #f
@@ -47,7 +52,10 @@
            design-matrix-nrows
            design-matrix-ncols
            as-design-matrix
-           as-response))
+           as-response
+           column-name->string
+           table-names
+           select-table-columns))
 
 (struct design-matrix (data nrows ncols column-names)
   #:property prop:custom-write
@@ -255,3 +263,118 @@
     (raise-arguments-error who (format "~a does not have one entry per row of X" what)
                            (format "length of ~a" what) (length y) "rows of X" no))
   (list->response y who what))
+
+;; --- tables (#26) ------------------------------------------------------------
+
+;; A table supplies named columns: a design matrix with column names, a hash
+;; from name to column, or an association list of (name . column) pairs, where
+;; a name is a string or a symbol and a column a list or vector. Names are
+;; compared as strings. Only the columns a caller selects are checked for
+;; numbers, so a table can carry columns that no model reads.
+(define (table? v)
+  (cond
+    [(design-matrix? v) (and (design-matrix-column-names v) #t)]
+    [(hash? v)
+     (and (positive? (hash-count v))
+          (for/and ([(name column) (in-hash v)])
+            (and (column-name? name) (column? column))))]
+    [(pair? v)
+     (and (list? v)
+          (for/and ([entry (in-list v)])
+            (and (pair? entry) (column-name? (car entry)) (column? (cdr entry)))))]
+    [else #f]))
+
+(define (column-name? v) (or (string? v) (symbol? v)))
+(define (column? v) (or (list? v) (vector? v)))
+
+(define (column-name->string name)
+  (string->immutable-string (if (symbol? name) (symbol->string name) name)))
+
+;; The table's column names as strings, in its order; a hash has none, so its
+;; names are sorted.
+(define (table-names t who)
+  (define names
+    (cond
+      [(design-matrix? t) (map column-name->string (design-matrix-column-names t))]
+      [(hash? t) (sort (map column-name->string (hash-keys t)) string<?)]
+      [else (for/list ([entry (in-list t)]) (column-name->string (car entry)))]))
+  (define dup (check-duplicates names))
+  (when dup
+    (raise-arguments-error who "the table has two columns with the same name" "name" dup))
+  names)
+
+(define (table-column-names t)
+  (table-names t 'table-column-names))
+
+;; The columns of table t with the given names, in that order, as a design
+;; matrix with those column names.
+(define (select-table-columns t names* who)
+  (define names (map column-name->string names*))
+  (define available (table-names t who))
+  (define position
+    (for/hash ([name (in-list available)] [j (in-naturals)])
+      (values name j)))
+  (for ([name (in-list names)])
+    (unless (hash-ref position name #f)
+      (raise-arguments-error who "the table has no column with this name"
+                             "column" name "columns of the table" available)))
+  (cond
+    [(design-matrix? t)
+     (define v (design-matrix-data t))
+     (define no (design-matrix-nrows t))
+     (define ni (length names))
+     (define out (make-f64vector (* no ni)))
+     (for ([name (in-list names)]
+           [j (in-naturals)])
+       (define from (* no (hash-ref position name)))
+       (for ([i (in-range no)])
+         (f64vector-set! out (+ i (* j no)) (f64vector-ref v (+ from i)))))
+     (design-matrix out no ni names)]
+    [else
+     (define by-name
+       (if (hash? t)
+           (for/hash ([(name column) (in-hash t)])
+             (values (column-name->string name) column))
+           (for/hash ([entry (in-list t)])
+             (values (column-name->string (car entry)) (cdr entry)))))
+     (named-columns->dm (for/list ([name (in-list names)]) (hash-ref by-name name))
+                        names who)]))
+
+;; Columns (lists or vectors) with the given names as a design matrix; errors
+;; name the column by its name.
+(define (named-columns->dm columns names who)
+  (define no (column-length (car columns)))
+  (when (zero? no)
+    (raise-arguments-error who "the table has a column with no rows" "column" (car names)))
+  (define ni (length columns))
+  (define v (make-f64vector (* no ni)))
+  (for ([column (in-list columns)]
+        [name (in-list names)]
+        [j (in-naturals)])
+    (unless (= (column-length column) no)
+      (raise-arguments-error who "the table's columns have different lengths"
+                             "column" name "length" (column-length column)
+                             (format "length of column ~s" (car names)) no))
+    (define (store! x i)
+      (define fx
+        (if (real? x)
+            (real->double-flonum x)
+            (raise-arguments-error who "the table has an element that is not a real number"
+                                   "column" name "row" i "element" x)))
+      (unless (fl< (flabs fx) +inf.0)
+        (raise-arguments-error who "the table has an element that is not finite"
+                               "column" name "row" i "element" x))
+      (f64vector-set! v (+ i (* j no)) fx))
+    (if (vector? column)
+        (for ([x (in-vector column)] [i (in-naturals)]) (store! x i))
+        (for ([x (in-list column)] [i (in-naturals)]) (store! x i))))
+  (design-matrix v no ni names))
+
+(define (column-length column)
+  (if (vector? column) (vector-length column) (length column)))
+
+(define (table->design-matrix t [names (table-names t 'table->design-matrix)])
+  (define dup (check-duplicates (map column-name->string names)))
+  (when dup
+    (raise-arguments-error 'table->design-matrix "a column is named twice" "name" dup))
+  (select-table-columns t names 'table->design-matrix))

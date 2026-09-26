@@ -19,10 +19,13 @@ glmnet/                        Racket collection
   foreign/raw/library.rkt      ffi-lib loader + define-glmnet definer
   foreign/raw/*.rkt            raw FFI bindings (capi.rkt, elnet.rkt, ...)
   foreign.rkt                  contracted wrappers + load-time precision guard
-  data.rkt                     design-matrix layer (glmnet/data): the one input layout
+  data.rkt                     design-matrix layer (glmnet/data): the one input layout,
+                               and tables (named columns) that convert into it
   core/*.rkt                   one module per family; marshal.rkt, path.rkt shared
   core/model.rkt               gen:glmnet-model: predict / coef / deviance-ratio on any result
   core/cv.rkt                  cross-validation (R's cv.glmnet) behind every family's *-cv
+  core/formula.rkt             formula front end: (~ y all) on a table -> any family,
+                               a formula-model with name-keyed coef and predict
   main.rkt                     public API (require glmnet)
   examples/NN-*.rkt            #lang scribble/lp2 literate examples (run-example)
   examples/test/NN-*.rkt       companion runners + rackunit harnesses

@@ -9,11 +9,12 @@
 
 Every binding below is provided by @racketmodname[glmnet]. Each model family
 has a fit procedure, a path fitter, a cross-validation procedure, a transparent
-result struct and prediction helpers. Every result type, @racket[glmnet-path]
-and @racket[glmnet-cv] also implement the generic interface of
-@secref["ref-model"]: @racket[predict], @racket[coef] and
-@racket[deviance-ratio] work on all of them, and they print as summaries.
-@secref["concepts"] explains how the pieces fit together.
+result struct and prediction helpers. The formula front end
+(@secref["ref-formula"]) fits any family from a @tech{table}. Every result
+type, @racket[glmnet-path], @racket[glmnet-cv] and @racket[formula-model] also
+implement the generic interface of @secref["ref-model"]: @racket[predict],
+@racket[coef] and @racket[deviance-ratio] work on all of them, and they print
+as summaries. @secref["concepts"] explains how the pieces fit together.
 
 @section[#:tag "ref-common"]{Common arguments}
 
@@ -153,7 +154,8 @@ matrix can be passed to any number of fits.
 @defproc[(design-matrix-column-names [dm design-matrix?])
          (or/c #f (listof (or/c string? symbol?)))]{
   The column names @racket[dm] was built with, or @racket[#f] if it has none.
-  The fit results do not use them yet.
+  A design matrix with column names is a @tech{table}, from which the formula
+  front end fits by name; the fits from a matrix do not use the names.
 
   @examples[#:eval ev
   (design-matrix-column-names D)
@@ -210,6 +212,68 @@ matrix can be passed to any number of fits.
   @examples[#:eval ev
   (f64vector->list (response->f64vector '(1 1/2 2.5)))
   (eval:error (response->f64vector '(1.0 +nan.0 2.0)))]}
+
+@subsection[#:tag "ref-tables"]{Tables}
+
+A @tech{table} holds named columns, and is what the formula front end
+(@secref["ref-formula"]) fits from. A column name is a string or a symbol, and
+names are compared as strings; a column is a list or vector of reals. A table
+is one of:
+
+@itemlist[
+ @item{a non-empty association list of @racket[(name . column)] pairs, whose
+       columns are in the list's order;}
+ @item{a non-empty hash from name to column, whose columns are in the order of
+       their names, sorted with @racket[string<?];}
+ @item{a @racket[design-matrix?] with column names, in the order of its
+       columns.}
+]
+
+Only the columns that are selected are checked: every entry of a selected
+column must be a real, finite number, and the selected columns must have the
+same length, at least 1. An error names the column, and the row of an entry
+that is wrong. The guide's @secref["formulas"] chapter shows tables in use.
+
+@defproc[(table? [v any/c]) boolean?]{
+  Returns @racket[#t] if @racket[v] is a @tech{table}: an association list or
+  hash whose names are strings or symbols and whose columns are lists or
+  vectors, or a design matrix with column names. The entries of the columns are
+  not checked.
+
+  @examples[#:eval ev
+  (define patients
+    (list (cons "age" '(34 51 67))
+          (cons 'dose #(2.0 5.5 1.0))
+          (cons "id" '("a" "b" "c"))))
+  (table? patients)
+  (table? (hash "x" '(1 2)))
+  (table? named)
+  (table? D)
+  (table? '((1 2) (3 4)))]}
+
+@defproc[(table-column-names [table table?]) (listof string?)]{
+  The names of @racket[table]'s columns, as strings, in the table's order. Two
+  columns whose names are the same string are an error.
+
+  @examples[#:eval ev
+  (table-column-names patients)
+  (table-column-names (hash 'b '(1) "a" '(2)))
+  (eval:error (table-column-names (hash "a" '(1) 'a '(2))))]}
+
+@defproc[(table->design-matrix [table table?]
+                               [names (and/c (listof (or/c string? symbol?)) pair?)
+                                      (table-column-names table)])
+         design-matrix?]{
+  A design matrix of the columns of @racket[table] named by @racket[names], in
+  that order, with those names, as strings, as its column names. Each name must
+  be a column of the table, and must appear once.
+
+  @examples[#:eval ev
+  (define P (table->design-matrix patients '(dose "age")))
+  (design-matrix->rows P)
+  (design-matrix-column-names P)
+  (eval:error (table->design-matrix patients))
+  (eval:error (table->design-matrix patients '("age" "weight")))]}
 
 @section[#:tag "ref-gaussian"]{Gaussian models}
 
@@ -1067,13 +1131,261 @@ carry the signal:
   (equal? (draw) (draw))
   (eval:error (random-fold-ids 3 5))]}
 
+@section[#:tag "ref-formula"]{Formulas}
+
+The formula front end fits any family from a @tech{table} (see
+@secref["ref-tables"]). A @tech{formula} names the response and selects the
+predictors among the table's columns; @racket[formula-fit],
+@racket[formula-path] and @racket[formula-cv] then call the fit procedure,
+path fitter or cross-validation procedure of the family that
+@racket[#:family] names, on those columns, and return a
+@racket[formula-model]. The model keeps the formula and the names of the
+predictors, so that @racket[coef] keys the coefficients by name and
+@racket[predict] reads a table by name (see @secref["ref-model"]).
+@secref["formulas"] works through examples.
+
+A formula selects its columns from a table as follows:
+
+@itemlist[
+ @item{The response columns must be columns of the table, and distinct.}
+ @item{A column name adds that column. It must be a column of the table, and
+       must not be a response column.}
+ @item{@racket[all] adds every column of the table that is not a response
+       column, in the table's order.}
+ @item{@racket[(+ term ...)] adds the columns of each term in turn, and several
+       terms after the response are joined in the same way.}
+ @item{@racket[(- term excluded ...)] adds the columns of @racket[term] that
+       are not columns of the @racket[excluded] terms. An excluded term may name
+       a response column.}
+ @item{A column added twice counts once, where it was first added. At least
+       one column must be selected.}
+]
+
+Names are compared as strings. A column whose name is @racket[all],
+@racket[surv], @racket[+] or @racket[-] is written as a string, such as
+@racket["all"].
+
+The examples in this section use the 60 observations of
+@secref["ref-cv"] as a table, with the response @racket["y"] and the
+predictors @racket["x1"] to @racket["x8"]:
+
+@examples[#:eval ev #:label #f
+(define T60
+  (cons (cons "y" y60)
+        (for/list ([j (in-range 8)])
+          (cons (format "x~a" (add1 j))
+                (for/list ([row (in-list X60)]) (list-ref row j))))))
+(table-column-names T60)
+]
+
+@defform[#:literals (all surv + -)
+         (~ response term ...+)
+         #:grammar
+         [(response column
+                    (surv time-column status-column)
+                    (column ...+))
+          (term column
+                all
+                (+ term ...+)
+                (- term excluded-term ...+))
+          (column identifier
+                  string)]]{
+  A @tech{formula}: the @racket[response], then the predictor terms. The body is
+  quoted, as by @racket[quote], and its shape is checked when the form is
+  expanded; the result is @racket[(make-formula 'response 'term ...)]. A
+  column is written as an identifier or a string.
+
+  The response is one column, @racket[(surv time-column status-column)] for
+  the Cox family, or a list of columns for the multi-response Gaussian family.
+
+  @examples[#:eval ev
+  (~ y all)
+  (~ y (- all x7 x8))
+  (~ (surv time status) age "blood pressure")
+  (formula? (~ y x1 x2))
+  (eval:error (~ y))
+  (eval:error (~ y (* x1 x2)))]}
+
+@defthing[formula-term/c flat-contract?]{
+  Accepts a predictor term as data, as @racket[~] quotes it: a column name
+  (a string, or a symbol other than @racket['all], @racket['surv], @racket['+]
+  and @racket['-]), @racket['all], a list of @racket['+] and one or more terms,
+  or a list of @racket['-] and two or more terms.
+
+  @examples[#:eval ev
+  (formula-term/c '(- all x7))
+  (formula-term/c '(* x1 x2))]}
+
+@defthing[formula-response/c flat-contract?]{
+  Accepts a response as data: a column name, a list of @racket['surv] and two
+  column names, or a non-empty list of column names.
+
+  @examples[#:eval ev
+  (formula-response/c '(surv time status))
+  (formula-response/c '(surv time))]}
+
+@defproc[(make-formula [response formula-response/c] [term formula-term/c] ...+)
+         formula?]{
+  The formula with @racket[response] and the @racket[term]s, which is what
+  @racket[~] expands to. It builds a formula from names computed at run time.
+
+  @examples[#:eval ev
+  (define chosen '("x1" "x2" "x3"))
+  (apply make-formula "y" chosen)
+  (equal? (make-formula 'y '(- all x8)) (~ y (- all x8)))]}
+
+@defproc[(formula? [v any/c]) boolean?]{
+  Returns @racket[#t] if @racket[v] is a formula. Two formulas are
+  @racket[equal?] when their responses and terms are, and a formula prints as
+  the @racket[~] form that makes it.
+
+  @examples[#:eval ev
+  (formula? (~ y all))
+  (formula? '(~ y all))]}
+
+@deftogether[(@defproc[(formula-response [f formula?]) formula-response/c]
+              @defproc[(formula-terms [f formula?]) (listof formula-term/c)])]{
+  The response and the predictor terms of @racket[f], as written.
+
+  @examples[#:eval ev
+  (formula-response (~ (surv time status) age))
+  (formula-terms (~ y x1 (- all x1 x2)))]}
+
+@defproc[(formula-predictor-names [f formula?] [table table?]) (listof string?)]{
+  The names of the predictor columns that @racket[f] selects from
+  @racket[table], in the order of the model's coefficients.
+
+  @examples[#:eval ev
+  (formula-predictor-names (~ y all) T60)
+  (formula-predictor-names (~ y (- all x2 x4) x2) T60)
+  (eval:error (formula-predictor-names (~ y x1 x9) T60))
+  (eval:error (formula-predictor-names (~ y x1 y) T60))]}
+
+@defstruct*[formula-model ([formula formula?]
+                           [predictor-names (listof string?)]
+                           [fit glmnet-model?])
+            #:transparent]{
+  A model fitted from a formula. @racket[fit] is the result of the family's
+  procedure: a single fit, a @racket[glmnet-path] or a @racket[glmnet-cv].
+  @racket[predictor-names] names its predictors, in the order of its
+  coefficients.
+
+  A formula model implements @racket[gen:glmnet-model] through @racket[fit]:
+  @racket[predict], @racket[coef] and @racket[deviance-ratio] give what they
+  give for @racket[fit], except that @racket[coef] keys the coefficients by
+  name and @racket[predict] reads the predictors from a table by name.
+  @racket[glmnet-model-predictor-names] returns @racket[predictor-names], and
+  @racket[glmnet-model-response-names] the formula's response columns. A
+  formula model prints as @racket[fit] does, with the formula after the
+  family.
+
+  @examples[#:eval ev
+  (define m (formula-fit (~ y all) T60 #:lambda 0.2))
+  m
+  (formula-model-predictor-names m)
+  (formula-model-fit m)]}
+
+@defproc[(formula-fit [f formula?]
+                      [table table?]
+                      [#:lambda lambda (>=/c 0)]
+                      [#:family family
+                                (or/c 'gaussian 'binomial 'multinomial 'poisson 'cox 'mgaussian)
+                                'gaussian]
+                      [#:alpha alpha (real-in 0 1) 1.0]
+                      [#:standardize? standardize? boolean? #t]
+                      [#:intercept? intercept? boolean? #t]
+                      [#:thresh thresh (>/c 0) 1e-7]
+                      [#:max-iters max-iters exact-positive-integer? 100000])
+         formula-model?]{
+  Fits @racket[f] to @racket[table] at a single @math{λ}, with the fit
+  procedure of @racket[family]: @racket[elnet-fit], @racket[logistic-fit],
+  @racket[multinomial-fit], @racket[poisson-fit], @racket[cox-fit] or
+  @racket[mgaussian-fit]. The keywords are passed on to it; the Cox family has
+  no intercept, so @racket[intercept?] does not apply to it.
+
+  The response must suit the family: @racket[(surv time status)] for the Cox
+  family, one or more columns for the multi-response family, and one column
+  otherwise. Its values must be ones the family models: 0 or 1 for the
+  binomial family, a class label @math{0, 1, …} for the multinomial family,
+  non-negative for the Poisson family, and for the Cox family positive times
+  and 0/1 statuses. An error names the column and row of a value that is not.
+
+  @examples[#:eval ev
+  (define fit (formula-fit (~ y all) T60 #:lambda 0.2 #:alpha 0.5))
+  (coef fit)
+  (define new-row
+    (for/list ([j (in-range 1 9)])
+      (cons (format "x~a" j) '(0.5))))
+  (predict fit new-row)
+  (define T60b
+    (cons (cons "positive" (for/list ([v (in-list y60)]) (if (> v 1) 1 0)))
+          T60))
+  (formula-fit (~ positive (- all y)) T60b
+               #:family 'binomial #:lambda 0.05)
+  (eval:error (formula-fit (~ y all) T60 #:family 'binomial #:lambda 0.05))
+  (eval:error (formula-fit (~ y all) T60 #:family 'cox #:lambda 0.05))]}
+
+@defproc[(formula-path [f formula?]
+                       [table table?]
+                       [#:family family
+                                 (or/c 'gaussian 'binomial 'multinomial 'poisson 'cox 'mgaussian)
+                                 'gaussian]
+                       [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) pair?)) #f]
+                       [#:nlambda nlambda exact-positive-integer? 100]
+                       [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>/c 0) (</c 1))) #f]
+                       [#:alpha alpha (real-in 0 1) 1.0]
+                       [#:standardize? standardize? boolean? #t]
+                       [#:intercept? intercept? boolean? #t]
+                       [#:thresh thresh (>/c 0) 1e-7]
+                       [#:max-iters max-iters exact-positive-integer? 100000])
+         formula-model?]{
+  Fits the @tech{regularization path} of @racket[f] on @racket[table], with the
+  path fitter of @racket[family], such as @racket[elnet-path], to which the
+  keywords are passed. The response is as for @racket[formula-fit].
+
+  @examples[#:eval ev
+  (define path
+    (formula-path (~ y x1 x2 x3) T60 #:lambda '(1.0 0.1 0.01)))
+  path
+  (coef path #:lambda 0.1)]}
+
+@defproc[(formula-cv [f formula?]
+                     [table table?]
+                     [#:family family
+                               (or/c 'gaussian 'binomial 'multinomial 'poisson 'cox 'mgaussian)
+                               'gaussian]
+                     [#:type-measure type-measure (or/c #f 'mse 'deviance 'mae 'class 'auc 'C) #f]
+                     [#:nfolds nfolds (and/c exact-integer? (>=/c 3)) 10]
+                     [#:fold-ids fold-ids (or/c #f (and/c (listof exact-nonnegative-integer?) pair?)) #f]
+                     [#:grouped? grouped? boolean? #t]
+                     [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) (property/c length (>=/c 2)))) #f]
+                     [#:nlambda nlambda exact-positive-integer? 100]
+                     [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>/c 0) (</c 1))) #f]
+                     [#:alpha alpha (real-in 0 1) 1.0]
+                     [#:standardize? standardize? boolean? #t]
+                     [#:intercept? intercept? boolean? #t]
+                     [#:thresh thresh (>/c 0) 1e-7]
+                     [#:max-iters max-iters exact-positive-integer? 100000])
+         formula-model?]{
+  Cross-validates the path of @racket[f] on @racket[table] with the
+  cross-validation procedure of @racket[family], such as @racket[elnet-cv], to
+  which the keywords are passed. @racket[type-measure] must be one of the
+  family's measures (see @secref["ref-cv"]); @racket[#f], the default, is the
+  family's default. The response is as for @racket[formula-fit].
+
+  @examples[#:eval ev
+  (define cv-model (formula-cv (~ y all) T60 #:nfolds 5))
+  cv-model
+  (coef cv-model)
+  (eval:error (formula-cv (~ y all) T60 #:type-measure 'auc))]}
+
 @section[#:tag "ref-model"]{Generic model interface}
 
 Every result type implements one generic interface, @racket[gen:glmnet-model]:
 the six single-@math{λ} results (@racket[elnet-result],
 @racket[logistic-result], @racket[multinomial-result], @racket[cox-result],
-@racket[poisson-result] and @racket[mgaussian-result]), @racket[glmnet-path]
-and @racket[glmnet-cv]. @racket[predict], @racket[coef] and
+@racket[poisson-result] and @racket[mgaussian-result]), @racket[glmnet-path],
+@racket[glmnet-cv] and @racket[formula-model]. @racket[predict], @racket[coef] and
 @racket[deviance-ratio] follow R's @tt{predict}, @tt{coef} and
 @tt{dev.ratio} for @tt{glmnet} and @tt{cv.glmnet} fits. See
 @secref["concepts-predict"].
@@ -1098,6 +1410,11 @@ A cross-validated model also names two λ values, @racket['lambda-min] and
 @racket['lambda-1se], which @racket[#:lambda] accepts in place of a number,
 as R's @tt{s} accepts @tt{"lambda.min"} and @tt{"lambda.1se"}.
 
+A model can also name its predictors, as a @racket[formula-model] does. Then
+@racket[coef] keys its coefficients by name, as R's @tt{coef} names its rows,
+and @racket[predict] takes a @tech{table} and reads the predictors from it by
+name.
+
 The examples in this section use a single fit and a path of the Gaussian
 family:
 
@@ -1111,7 +1428,7 @@ family:
 
 @defidform[gen:glmnet-model]{
   A @tech[#:doc '(lib "scribblings/reference/reference.scrbl")]{generic
-  interface} for fitted models. It has four methods:
+  interface} for fitted models. It has six methods:
 
   @itemlist[
    @item{@racket[glmnet-model->path], which must be implemented;}
@@ -1119,12 +1436,16 @@ family:
          @math{λ} of the model's path;}
    @item{@racket[glmnet-model-named-lambda], which defaults to naming no
          @math{λ};}
+   @item{@racket[glmnet-model-predictor-names] and
+         @racket[glmnet-model-response-names], which default to naming no
+         predictors and no responses;}
    @item{@racket[deviance-ratio], which defaults to the first deviance ratio of
          the model's path.}
   ]
 
   The defaults suit a single fit. @racket[glmnet-path] and
-  @racket[glmnet-cv] implement all four themselves. A new type, such as a path
+  @racket[glmnet-cv] implement the ones that differ for them, and
+  @racket[formula-model] implements all six. A new type, such as a path
   together with a chosen @math{λ},
   implements the interface through the @racket[#:methods] option of
   @racket[struct], and then works with @racket[predict] and @racket[coef]:
@@ -1146,7 +1467,8 @@ family:
 
 @defproc[(glmnet-model? [v any/c]) boolean?]{
   Returns @racket[#t] if @racket[v] implements @racket[gen:glmnet-model]: every
-  result type, @racket[glmnet-path] and @racket[glmnet-cv] do.
+  result type, @racket[glmnet-path], @racket[glmnet-cv] and
+  @racket[formula-model] do.
 
   @examples[#:eval ev
   (glmnet-model? fit)
@@ -1185,6 +1507,35 @@ family:
   (glmnet-model-named-lambda path 'lambda-min)
   (eval:error (coef path #:lambda 'lambda-min))]}
 
+@defproc[(glmnet-model-predictor-names [model glmnet-model?])
+         (or/c #f (listof string?))]{
+  The names of @racket[model]'s predictors, in the order of its coefficients,
+  or @racket[#f] if it does not name them. A @racket[formula-model] names them;
+  the results of the family procedures do not. When a model names its
+  predictors, @racket[coef] keys its coefficients by these names and
+  @racket[predict] reads the columns with these names from a table.
+
+  @examples[#:eval ev
+  (define named-model
+    (formula-fit (~ y all)
+                 (list (cons "y" y) (cons "a" (map car X))
+                       (cons "b" (map cadr X)) (cons "c" (map caddr X)))
+                 #:lambda 0.05))
+  (glmnet-model-predictor-names named-model)
+  (glmnet-model-predictor-names fit)]}
+
+@defproc[(glmnet-model-response-names [model glmnet-model?])
+         (or/c #f (listof string?))]{
+  The names of @racket[model]'s response columns, or @racket[#f] if it does not
+  name them. For a @racket[formula-model], they are the columns of its
+  formula's response: for the Cox family the time and status columns. For the
+  multi-response family, @racket[coef] keys the coefficients of each response
+  by its name.
+
+  @examples[#:eval ev
+  (glmnet-model-response-names named-model)
+  (glmnet-model-response-names path)]}
+
 @defproc[(deviance-ratio [model glmnet-model?]) (or/c real? (vectorof real?))]{
   The fraction of null deviance explained, which is @math{R²} for the Gaussian
   families: a real for a single fit, and for a path a vector with one entry per
@@ -1195,15 +1546,21 @@ family:
   (deviance-ratio path)]}
 
 @defproc[(predict [model glmnet-model?]
-                  [X design-matrix/c]
+                  [X (or/c design-matrix/c table?)]
                   [#:type type (or/c 'link 'response 'class) 'link]
                   [#:lambda lambda (or/c (>=/c 0) (and/c (listof (>=/c 0)) pair?)
                                          'lambda-min 'lambda-1se)
                                    (glmnet-model-default-lambda model)])
          list?]{
-  Predictions for each row of @racket[X], which needs one column per
-  coefficient, as R's @tt{predict(fit, newx, s, type)}. @racket[type] chooses
-  what is predicted:
+  Predictions for each row of @racket[X], as R's
+  @tt{predict(fit, newx, s, type)}. @racket[X] needs one column per
+  coefficient, in the order of the coefficients. For a model that names its
+  predictors (see @racket[glmnet-model-predictor-names]), @racket[X] is instead
+  a @tech{table} with a column of each of those names, in any order; its other
+  columns are ignored, and a missing one is an error that names it. A model
+  that does not name its predictors reads @racket[X] by position, and so does
+  not take an association list or a hash. @racket[type] chooses what is
+  predicted:
 
   @tabular[#:style 'boxed
            #:sep @hspace[2]
@@ -1231,13 +1588,17 @@ family:
   (predict clf '((2.0 3.0 4.0) (5.0 4.0 25.0)))
   (predict clf '((2.0 3.0 4.0) (5.0 4.0 25.0)) #:type 'response)
   (predict clf '((2.0 3.0 4.0) (5.0 4.0 25.0)) #:type 'class)
-  (eval:error (predict fit X #:type 'class))]}
+  (eval:error (predict fit X #:type 'class))
+  (define new-table
+    (list (cons "c" '(49.0)) (cons "b" '(6.0)) (cons "a" '(7.0))))
+  (predict named-model new-table)
+  (eval:error (predict named-model (cdr new-table)))]}
 
 @defproc[(coef [model glmnet-model?]
                [#:lambda lambda (or/c (>=/c 0) (and/c (listof (>=/c 0)) pair?)
                                       'lambda-min 'lambda-1se)
                                 (glmnet-model-default-lambda model)])
-         (or/c vector? (listof vector?))]{
+         (or/c vector? list?)]{
   The intercept and coefficients at @racket[lambda], as R's
   @tt{coef(fit, s)}: a vector holding the intercept, then one coefficient per
   predictor. Cox models have no intercept, so their vector holds only the
@@ -1247,11 +1608,20 @@ family:
   for @racket[predict], @racket[lambda] can name a λ that a @racket[glmnet-cv]
   chose.
 
+  For a model that names its predictors, each vector is an association list
+  instead, keyed as R's @tt{coef} names its rows: @racket["(Intercept)"] (not
+  for Cox), then the predictor names. For the multinomial family, the
+  association lists are in turn keyed by class label, and for the
+  multi-response family by response name (see
+  @racket[glmnet-model-response-names]; @racket["y1"], @racket["y2"], … when
+  the model names no responses), as R names the elements of its lists.
+
   @examples[#:eval ev
   (coef fit)
   (coef path #:lambda 0.1)
   (coef path #:lambda 0.4)
-  (coef path #:lambda 5.0)]}
+  (coef path #:lambda 5.0)
+  (coef named-model)]}
 
 @subsection[#:tag "ref-model-printing"]{Printing}
 
@@ -1264,8 +1634,9 @@ R's @tt{print.glmnet} table, with one row per fitted @math{λ}. A
 then a row for each of @racket[glmnet-cv-lambda-min] and
 @racket[glmnet-cv-lambda-1se] with that @math{λ}, its index, the
 cross-validated error, its standard error and the number of nonzero
-coefficients, the reals to four significant digits. Printing does not change
-@racket[equal?], which compares results field by field.
+coefficients, the reals to four significant digits. A @racket[formula-model]
+prints as the result it holds, with its formula after the family. Printing
+does not change @racket[equal?], which compares results field by field.
 
 @examples[#:eval ev
 (list fit clf)
@@ -1273,6 +1644,7 @@ coefficients, the reals to four significant digits. Printing does not change
 (multinomial-fit Xm '(0 0 1 1 2 2) #:lambda 0.05)
 (multinomial-path Xm '(0 0 1 1 2 2) #:nlambda 4)
 cv
+named-model
 (equal? fit (lasso X y #:lambda 0.05))]
 
 @section[#:tag "ref-native"]{Native library}
