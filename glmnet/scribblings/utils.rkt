@@ -35,7 +35,8 @@
                                   ffi/vector))
          make-glmnet-eval
          see-reference
-         exnraise)
+         exnraise
+         plot-manual)
 
 (define (make-glmnet-eval)
   (parameterize ([sandbox-output 'string]
@@ -61,3 +62,10 @@
          (decode-content (append (list "See " (secref tag) " for ")
                                  what
                                  (list ".")))))
+
+;; "the glmnet-plot documentation", linking to the manual of the separate
+;; glmnet-plot package. The link is indirect, resolved when it is followed, so
+;; that this manual neither depends on that package nor warns when it is not
+;; installed.
+(define plot-manual
+  (other-doc '(lib "glmnet/scribblings/glmnet-plot.scrbl") #:indirect "glmnet-plot"))

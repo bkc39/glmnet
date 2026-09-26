@@ -287,6 +287,10 @@ tolerance. @racket[predict] and @racket[coef] evaluate a path at any @math{λ}
 (@secref["concepts-predict"]). Cross-validation chooses among the values on a
 path (@secref["concepts-cv"]).
 
+To plot a path's coefficients against @math{λ}, as R's @tt{plot} does, install
+the separate @tt{glmnet-plot} package and use its @tt{plot-coefficient-path};
+see @|plot-manual|.
+
 @section[#:tag "concepts-predict"]{Predictions and coefficients}
 
 Every result, whether a single fit or a @tech{regularization path}, is a
@@ -489,7 +493,9 @@ nonzero coefficients at each. Every fifth candidate, from the largest:
 ]
 
 The error falls quickly as the three real predictors enter, reaches its
-minimum, and then rises slowly as the noise predictors are fitted.
+minimum, and then rises slowly as the noise predictors are fitted. The
+@tt{glmnet-plot} package draws this curve as R's @tt{plot} draws a
+@tt{cv.glmnet} result, with @tt{plot-cv}; see @|plot-manual|.
 
 @subsection[#:tag "concepts-cv-predict"]{Predicting at the chosen λ}
 
