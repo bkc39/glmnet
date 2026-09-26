@@ -97,6 +97,38 @@ prediction error at each @math{λ} on held-out data and picks R's
 @tt{glmnet-plot} package plots paths and cross-validation curves as R does;
 see @|plot-manual|.
 
+@section[#:tag "gs-formulas"]{Fitting from named columns}
+
+Data often comes as named columns rather than as a matrix. Put the same data
+in a @tech{table}, here an association list from column names to columns, and
+name the response and the predictors with a @tech{formula}, as R's
+@tt{y ~ .} does:
+
+@examples[#:eval ev #:label #f
+(define data
+  (list (cons "y" y)
+        (cons "x1" '(1.0 2.0 3.0 4.0 5.0 6.0))
+        (cons "x2" '(2.0 1.0 4.0 3.0 6.0 5.0))
+        (cons "x3" '(1.0 4.0 9.0 16.0 25.0 36.0))))
+(define named-fit (formula-fit (~ y all) data #:lambda 0.05))
+named-fit
+(coef named-fit)
+]
+
+@racket[all] stands for every column except the response. The coefficients
+are those of @racket[fit], keyed by name, with the intercept under R's name
+for it. @racket[predict] reads the predictors of a new table by name, so their
+order does not matter:
+
+@examples[#:eval ev #:label #f
+(predict named-fit
+         (list (cons "x3" '(49.0)) (cons "x2" '(6.0)) (cons "x1" '(7.0))))
+]
+
+@racket[#:family] chooses among the six families, and @racket[formula-path]
+and @racket[formula-cv] fit a path and cross-validate one;
+@secref["formulas"] covers them.
+
 @section[#:tag "gs-models"]{Choosing a model}
 
 @racket[ols], @racket[ridge], @racket[lasso] and @racket[elastic-net] are the

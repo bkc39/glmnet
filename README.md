@@ -30,6 +30,23 @@ package installed, build it with
 A prebuilt native library is staged at install time; no Fortran toolchain is
 needed to use the package.
 
+## Formulas and named data
+
+Any family can be fitted from a table of named columns (an association list,
+a hash, or a design matrix with column names) with an R-style formula. The
+model keys its coefficients by name, and `predict` reads a new table by name:
+
+```racket
+(define data
+  (list (cons "y"  '(1.0 4.0 3.0 6.0 5.0 8.0))
+        (cons "x1" '(1.0 2.0 3.0 4.0 5.0 6.0))
+        (cons "x2" '(2.0 1.0 4.0 3.0 6.0 5.0))))
+(define m (formula-fit (~ y all) data #:lambda 0.05))   ; also formula-path, formula-cv
+(coef m)                                  ; => '(("(Intercept)" . ...) ("x1" . ...) ("x2" . ...))
+(predict m (list (cons "x2" '(6.0)) (cons "x1" '(7.0))))
+(formula-cv (~ (surv time status) (- all id)) patients #:family 'cox)
+```
+
 ## Plots (`glmnet-plot`)
 
 The coefficient-path and cross-validation plots of R's `plot.glmnet` and

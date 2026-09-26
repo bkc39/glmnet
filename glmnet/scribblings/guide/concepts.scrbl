@@ -59,7 +59,8 @@ fits:
   (elnet-result-coefficients (lasso D y #:lambda lam)))
 ]
 
-The column names are carried along, but the results do not use them yet.
+A fit from a matrix carries the column names along but does not use them; to
+fit from named columns, see @secref["concepts-named"].
 @racket[columns->design-matrix] builds a design matrix from columns, and
 @racket[f64vector->design-matrix] from an array that is already in the
 column-major layout. @racket[design-matrix->rows],
@@ -109,6 +110,24 @@ per row of the design matrix:
 (eval:error (ols X '(1.0 4.0 +inf.0 6.0 5.0)))
 (eval:error (ols X '(1.0 2.0)))
 ]
+
+@subsection[#:tag "concepts-named"]{Named data}
+
+Data often comes as a @deftech{table}: named columns, one of which is the
+response. A table can be an association list or a hash from names to columns,
+or a design matrix with column names. A @deftech{formula}, written with
+@racket[~], names the response and the predictors:
+
+@examples[#:eval ev #:label #f
+(define table
+  (list (cons "y" y) (cons "x1" '(1 2 3 4 5)) (cons "x2" '(2 1 4 3 6))))
+(define model (formula-fit (~ y x1 x2) table #:lambda 0))
+(coef model)
+]
+
+The model keys its coefficients by name, and predicts from a table by
+matching its columns by name. @secref["formulas"] covers tables, formulas and
+the models fitted from them.
 
 @section[#:tag "concepts-penalty"]{The penalty: @math{α} and @math{λ}}
 
@@ -299,9 +318,10 @@ of the same names do:
 
 @itemlist[
  @item{@racket[predict] evaluates the model on new rows, given as a
-       @tech{design matrix} with one column per predictor;}
+       @tech{design matrix} with one column per predictor, or as a
+       @tech{table} for a model fitted from a @tech{formula};}
  @item{@racket[coef] returns the intercept, then one coefficient per
-       predictor;}
+       predictor, keyed by name for a model fitted from a formula;}
  @item{@racket[deviance-ratio] returns the fraction of null deviance
        explained.}
 ]
