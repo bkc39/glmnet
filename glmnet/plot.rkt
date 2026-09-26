@@ -82,7 +82,14 @@
 (module* support #f
   (provide constant-approx
            label-runs
-           keep-apart))
+           keep-apart
+           path-panels
+           panel-coefficients
+           panel-df
+           panel-y-label
+           x-positions
+           approx-f
+           count-ticks))
 
 ;; --- R's conventions ---------------------------------------------------------
 
@@ -299,10 +306,15 @@
   (panel-renderers who (list-ref panels response) (x-positions p xvar sign-lambda)
                    label (labels-right? xvar sign-lambda)))
 
+;; plotCoef's approx.f: the counts along the top are read off the path from
+;; the lambda to the right of a position (f = 1), except for log lambda, whose
+;; count is read from the left (f = 0).
+(define (approx-f xvar sign-lambda)
+  (if (and (eq? xvar 'lambda) (= sign-lambda 1)) 0 1))
+
 ;; The top axis of a coefficient plot, as plotCoef draws it: at the positions
 ;; of the bottom axis's ticks, the count read off the path by R's approx with
-;; method "constant", taking the count of the lambda to the right of a
-;; position except for log lambda, whose count is read to the left.
+;; method "constant" and `f`.
 (define (count-ticks xs counts f)
   (define finite-points
     (for/list ([x (in-list xs)] [c (in-vector counts)] #:when (finite? x))
@@ -336,7 +348,7 @@
   (define p (model-path model))
   (define xs (x-positions p xvar sign-lambda))
   (define right? (labels-right? xvar sign-lambda))
-  (define f (if (and (eq? xvar 'lambda) (= sign-lambda 1)) 0 1))
+  (define f (approx-f xvar sign-lambda))
   (define-values (x-min x-max) (padded-range xs))
   (define pictures
     (for*/list ([pnl (in-list (path-panels p type-coef))]
