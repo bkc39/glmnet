@@ -98,6 +98,15 @@
                  #rx"not distinct" #rx"duplicate: 'a")
     (check-exn exn:fail:contract? (lambda () (rows->design-matrix X #:column-names '(1 2)))))
 
+  (test-case "column names are compared as strings"
+    (check-error (lambda () (rows->design-matrix X #:column-names '("x" x)))
+                 #rx"not distinct" #rx"duplicate: 'x" #rx"column names: '\\(\"x\" x\\)")
+    (check-error (lambda () (columns->design-matrix '((1.0) (2.0)) #:column-names '(b "b")))
+                 #rx"not distinct" #rx"duplicate: \"b\"")
+    (check-error (lambda () (f64vector->design-matrix (f64vector 1.0 2.0) 1 2
+                                                      #:column-names '("u" u)))
+                 #rx"not distinct"))
+
   ;; --- validation, with positions ----------------------------------------------
 
   (test-case "empty input is rejected"

@@ -96,7 +96,8 @@ matrix can be passed to any number of fits.
   Builds a design matrix from a list of rows, one per observation. Every row
   must have the same length, and every entry must be a real, finite number.
   @racket[column-names], when given, names the columns: one distinct string or
-  symbol per column.
+  symbol per column. Names are compared as strings, so @racket["x"] and
+  @racket['x] are the same name.
 
   @examples[#:eval ev
   (define named (rows->design-matrix '((1 2) (3 4)) #:column-names '(age dose)))
@@ -104,7 +105,8 @@ matrix can be passed to any number of fits.
   (design-matrix-column-names named)
   (eval:error (rows->design-matrix '((1.0 2.0) (3.0 4.0) (5.0))))
   (eval:error (rows->design-matrix '((1.0 2.0) (3.0 +inf.0))))
-  (eval:error (rows->design-matrix '((1.0 2.0)) #:column-names '(a)))]}
+  (eval:error (rows->design-matrix '((1.0 2.0)) #:column-names '(a)))
+  (eval:error (rows->design-matrix '((1.0 2.0)) #:column-names '("x" x)))]}
 
 @defproc[(columns->design-matrix [columns (listof list?)]
                                  [#:column-names column-names

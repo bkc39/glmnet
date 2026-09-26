@@ -95,9 +95,11 @@
     (unless (= (length names) ncols)
       (raise-arguments-error who "the number of column names does not match the columns"
                              "column names" (length names) "columns" ncols))
-    (define dup (check-duplicates names))
+    (define dup
+      (check-duplicates names #:key (lambda (name) (if (symbol? name) (symbol->string name) name))))
     (when dup
-      (raise-arguments-error who "the column names are not distinct" "duplicate" dup)))
+      (raise-arguments-error who "the column names are not distinct"
+                             "duplicate" dup "column names" names)))
   (and names
        (for/list ([name (in-list names)])
          (if (string? name) (string->immutable-string name) name))))
