@@ -9,7 +9,10 @@
 (require racket/contract
          ffi/vector
          "marshal.rkt"
-         "../foreign/raw/elnet.rkt")
+         "../foreign/raw/elnet.rkt"
+         "path.rkt"
+         (submod "path.rkt" support)
+         "../foreign/raw/path.rkt")
 
 (provide
  (struct-out elnet-result)
@@ -50,6 +53,20 @@
          #:thresh (>/c 0)
          #:max-iters exact-positive-integer?)
         elnet-result?)]))
+
+(provide
+ (contract-out
+  [elnet-path
+   (->* (matrix/c response/c)
+           (#:lambda lambda-sequence/c
+            #:nlambda exact-positive-integer?
+            #:lambda-min-ratio lambda-min-ratio/c
+            #:alpha (real-in 0 1)
+            #:standardize? boolean?
+            #:intercept? boolean?
+            #:thresh (>/c 0)
+            #:max-iters exact-positive-integer?)
+        glmnet-path?)]))
 
 ;; A fitted model. `coefficients` is a vector of length ni on the original
 ;; predictor scale; `lambda` is the penalty actually used; `r-squared` is the
@@ -149,3 +166,35 @@
              #:intercept? intercept?
              #:thresh thresh
              #:max-iters max-iters))
+
+;; --- regularization path (#10) ---------------------------------------------
+
+(define (elnet-path X y
+                    #:lambda [lambda #f]
+                    #:nlambda [nlambda 100]
+                    #:lambda-min-ratio [lambda-min-ratio #f]
+                    #:alpha [alpha 1.0]
+                    #:standardize? [standardize? #t]
+                    #:intercept? [intercept? #t]
+                    #:thresh [thresh 1e-7]
+                    #:max-iters [max-iters 100000])
+  (define-values (no ni) (rows->dims X 'elnet-path))
+  (define yv (response->f64vector y no 'elnet-path))
+  (define xcol (matrix->colmajor X no ni))
+  (define-values (nlam flmin ulam)
+    (path-lambdas lambda nlambda lambda-min-ratio no ni))
+  (define a0 (make-f64vector nlam 0.0))
+  (define beta (make-f64vector (* ni nlam) 0.0))
+  (define dev (make-f64vector nlam 0.0))
+  (define alm (make-f64vector nlam 0.0))
+  (define-values (lmu nlp jerr)
+    (glmnet-elnet-path/raw (exact->inexact alpha) no ni xcol yv
+                           nlam flmin ulam
+                           (if standardize? 1 0) (if intercept? 1 0)
+                           (exact->inexact thresh) max-iters
+                           a0 beta dev alm))
+  (check-jerr jerr 'elnet-path)
+  (define coefficients (unpack-columns beta ni lmu))
+  (glmnet-path 'gaussian (finish-lambdas alm lmu (not lambda))
+               (unpack-vector a0 lmu) coefficients (unpack-vector dev lmu)
+               (count-nonzero coefficients) nlp))

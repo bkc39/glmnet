@@ -181,3 +181,64 @@ for (f in fixtures) {
   dr <- if (!is.null(res$dev_ratio)) res$dev_ratio else res$r_squared
   cat("wrote", path, "  (fit", round(dr, 4), ")\n")
 }
+
+## --- regularization paths (#10) ---------------------------------------------
+## R's automatic path (nlambda = 100; lambda.min.ratio 0.01 when n < p, else
+## 1e-4), or a user sequence when a fixture sets `lambda`. The golden records
+## every fitted lambda (after R's fix.lam) and, per lambda, the intercepts,
+## coefficients, deviance ratio and df.
+
+fit_path <- function(family, d, alpha, lambda = NULL, thresh = 1e-7) {
+  y <- switch(family,
+    binomial    = factor(d$y, levels = c(0, 1)),
+    multinomial = factor(d$y),
+    cox         = Surv(d$time, d$status),
+    mgaussian   = d$Y,
+    d$y)
+  args <- list(d$X, y, family = family, alpha = alpha, standardize = TRUE,
+               thresh = thresh)
+  if (!is.null(lambda)) args$lambda <- lambda
+  if (family == "binomial") args$type.logistic <- "Newton"
+  if (family == "multinomial") args$type.multinomial <- "ungrouped"
+  if (family == "mgaussian") args$standardize.response <- FALSE
+  fit <- suppressWarnings(do.call(glmnet, args))
+  L  <- length(fit$lambda)
+  co <- coef(fit)
+  if (is.list(co)) {                 # multinomial, mgaussian: one matrix per class/response
+    coefficients <- lapply(seq_len(L), function(m)
+      unname(lapply(co, function(B) unname(as.numeric(B[-1, m])))))
+    intercepts <- lapply(seq_len(L), function(m) unname(sapply(co, function(B) B[1, m])))
+  } else if (family == "cox") {      # no intercept row
+    coefficients <- lapply(seq_len(L), function(m) unname(as.numeric(co[, m])))
+    intercepts <- NULL
+  } else {
+    coefficients <- lapply(seq_len(L), function(m) unname(as.numeric(co[-1, m])))
+    intercepts <- unname(as.numeric(co[1, ]))
+  }
+  res <- list(lambda_path = fit$lambda, dev_ratio_path = fit$dev.ratio,
+              df_path = as.integer(fit$df), coefficients_path = coefficients)
+  if (!is.null(intercepts)) res$intercepts_path <- intercepts
+  res
+}
+
+path_fixtures <- list(
+  list(id = "path-gaussian-longley-lasso",      dataset = "longley",    family = "gaussian",    alpha = 1.0),
+  list(id = "path-gaussian-longley-enet-user",  dataset = "longley",    family = "gaussian",    alpha = 0.5,
+       lambda = c(0.1, 1, 0.05, 0.5)),
+  list(id = "path-binomial-wdbc-lasso",         dataset = "wdbc",       family = "binomial",    alpha = 1.0),
+  list(id = "path-multinomial-iris-lasso",      dataset = "iris",       family = "multinomial", alpha = 1.0),
+  list(id = "path-cox-veteran-lasso",           dataset = "veteran",    family = "cox",         alpha = 1.0),
+  list(id = "path-poisson-warpbreaks-lasso",    dataset = "warpbreaks", family = "poisson",     alpha = 1.0),
+  list(id = "path-mgaussian-linnerud-lasso",    dataset = "linnerud",   family = "mgaussian",   alpha = 1.0)
+)
+
+for (f in path_fixtures) {
+  res <- fit_path(f$family, datasets[[f$dataset]], f$alpha, f$lambda)
+  golden <- list(id = f$id, dataset = f$dataset, family = f$family, kind = "path",
+                 alpha = f$alpha, thresh = 1e-7)
+  if (!is.null(f$lambda)) golden$lambda_user <- f$lambda
+  golden <- c(golden, res, list(meta = meta))
+  path <- file.path(goldens_dir, paste0(f$id, ".json"))
+  writeLines(toJSON(golden, digits = NA, auto_unbox = TRUE, pretty = TRUE), path)
+  cat("wrote", path, "  (", length(res$lambda_path), "lambdas )\n")
+}

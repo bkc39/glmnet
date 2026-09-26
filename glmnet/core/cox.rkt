@@ -13,7 +13,10 @@
 (require racket/contract
          ffi/vector
          "marshal.rkt"
-         "../foreign/raw/coxnet.rkt")
+         "../foreign/raw/coxnet.rkt"
+         "path.rkt"
+         (submod "path.rkt" support)
+         "../foreign/raw/path.rkt")
 
 (provide
  (struct-out cox-result)
@@ -27,6 +30,19 @@
         cox-result?)]
   [cox-linear-predictor (-> cox-result? matrix/c (listof real?))]
   [cox-relative-risk    (-> cox-result? matrix/c (listof (>/c 0)))]))
+
+(provide
+ (contract-out
+  [cox-path
+   (->* (matrix/c cox-times/c cox-status/c)
+           (#:lambda lambda-sequence/c
+            #:nlambda exact-positive-integer?
+            #:lambda-min-ratio lambda-min-ratio/c
+            #:alpha (real-in 0 1)
+            #:standardize? boolean?
+            #:thresh (>/c 0)
+            #:max-iters exact-positive-integer?)
+        glmnet-path?)]))
 
 ;; A fitted Cox model. `coefficients` is a dense vector of length ni on the
 ;; original predictor scale, on the log relative-hazard scale -- there is no
@@ -58,6 +74,15 @@
                     jerr))]
     [else (check-jerr jerr who)]))
 
+(define (check-survival times statuses no who)
+  (unless (= (length times) no)
+    (error who "times length ~a does not match ~a observations" (length times) no))
+  (unless (= (length statuses) no)
+    (error who "statuses length ~a does not match ~a observations"
+           (length statuses) no))
+  (unless (for/or ([s (in-list statuses)]) (= s 1))
+    (error who "at least one observation must be an event (status = 1)")))
+
 ;; --- public API ------------------------------------------------------------
 
 (define (cox-fit X times statuses
@@ -67,13 +92,7 @@
                  #:thresh [thresh 1e-7]
                  #:max-iters [max-iters 100000])
   (define-values (no ni) (rows->dims X 'cox-fit))
-  (unless (= (length times) no)
-    (error 'cox-fit "times length ~a does not match ~a observations" (length times) no))
-  (unless (= (length statuses) no)
-    (error 'cox-fit "statuses length ~a does not match ~a observations"
-           (length statuses) no))
-  (unless (for/or ([s (in-list statuses)]) (= s 1))
-    (error 'cox-fit "at least one observation must be an event (status = 1)"))
+  (check-survival times statuses no 'cox-fit)
   (define xcol (matrix->colmajor X no ni))
   (define tv (response->f64vector times no 'cox-fit))
   (define sv (response->f64vector statuses no 'cox-fit))
@@ -111,3 +130,35 @@
 ;; on the baseline hazard.
 (define (cox-relative-risk result X)
   (for/list ([row (in-list X)]) (exp (lp-row result row))))
+
+;; --- regularization path (#10) ---------------------------------------------
+
+(define (cox-path X times statuses
+                  #:lambda [lambda #f]
+                  #:nlambda [nlambda 100]
+                  #:lambda-min-ratio [lambda-min-ratio #f]
+                  #:alpha [alpha 1.0]
+                  #:standardize? [standardize? #t]
+                  #:thresh [thresh 1e-7]
+                  #:max-iters [max-iters 100000])
+  (define-values (no ni) (rows->dims X 'cox-path))
+  (check-survival times statuses no 'cox-path)
+  (define tv (response->f64vector times no 'cox-path))
+  (define sv (response->f64vector statuses no 'cox-path))
+  (define xcol (matrix->colmajor X no ni))
+  (define-values (nlam flmin ulam)
+    (path-lambdas lambda nlambda lambda-min-ratio no ni))
+  (define beta (make-f64vector (* ni nlam) 0.0))
+  (define dev (make-f64vector nlam 0.0))
+  (define alm (make-f64vector nlam 0.0))
+  (define-values (lmu nlp jerr)
+    (glmnet-coxnet-path/raw (exact->inexact alpha) no ni xcol tv sv
+                            nlam flmin ulam
+                            (if standardize? 1 0)
+                            (exact->inexact thresh) max-iters
+                            beta dev alm))
+  (check-cox-jerr jerr 'cox-path)
+  (define coefficients (unpack-columns beta ni lmu))
+  (glmnet-path 'cox (finish-lambdas alm lmu (not lambda))
+               #f coefficients (unpack-vector dev lmu)
+               (count-nonzero coefficients) nlp))

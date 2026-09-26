@@ -408,6 +408,164 @@ jointly under a grouped penalty. See @secref["ex-mgaussian"].
   @examples[#:eval ev
   (mgaussian-predict fit '((7.0 1.0) (8.0 2.0)))]}
 
+@section[#:tag "ref-path"]{Regularization paths}
+
+A @tech{regularization path} fits a decreasing sequence of @math{λ} in one call.
+Every family has a path fitter, and they all return a @racket[glmnet-path]. Each
+fitter takes its family's data arguments and keywords, with @racket[#:lambda]
+made optional:
+
+@itemlist[
+ @item{@racket[#:lambda] is a list of penalties, fitted largest first. When it
+       is @racket[#f] (the default), glmnet chooses the sequence as R does:
+       @racket[#:nlambda] values from @math{λ_max}, where every coefficient is
+       zero, down to @racket[#:lambda-min-ratio] times @math{λ_max}. The
+       ratio defaults to @racket[0.01] when there are fewer observations than
+       predictors, and to @racket[1e-4] otherwise.}
+ @item{Like R, the path stops early once the deviance ratio improves by less
+       than @racket[1e-5] or passes @racket[0.999], so it can hold fewer than
+       @racket[#:nlambda] values. The first value of an automatic sequence is
+       the extrapolation R's @tt{glmnet} reports.}
+]
+
+@defstruct*[glmnet-path ([family (or/c 'gaussian 'binomial 'multinomial 'cox 'poisson 'mgaussian)]
+                         [lambda (vectorof real?)]
+                         [intercepts (or/c #f vector?)]
+                         [coefficients vector?]
+                         [dev-ratio (vectorof real?)]
+                         [df (vectorof exact-nonnegative-integer?)]
+                         [num-passes exact-nonnegative-integer?])
+            #:transparent]{
+  A fitted path. @racket[lambda] holds the fitted penalties, decreasing, and
+  every other per-@math{λ} field has one entry for each of them:
+
+  @itemlist[
+   @item{@racket[intercepts] holds a real per @math{λ}, or a vector of one real
+         per class or response for the multinomial and multi-response families.
+         It is @racket[#f] for Cox, which has no intercept.}
+   @item{@racket[coefficients] holds a dense vector per @math{λ} with one entry
+         per predictor, or a vector of such vectors (one per class or response).}
+   @item{@racket[dev-ratio] is the fraction of null deviance explained.}
+   @item{@racket[df] counts the predictors with a nonzero coefficient, in any
+         class or response.}
+  ]
+
+  @racket[num-passes] counts the coordinate-descent passes over the whole path.
+
+  @examples[#:eval ev
+  (define X '((1.0 2.0 1.0) (2.0 1.0 4.0) (3.0 4.0 9.0)
+              (4.0 3.0 16.0) (5.0 6.0 25.0) (6.0 5.0 36.0)))
+  (define y '(1.0 4.0 3.0 6.0 5.0 8.0))
+  (define path (elnet-path X y #:lambda '(1.0 0.1 0.01)))
+  (glmnet-path-lambda path)
+  (glmnet-path-coefficients path)
+  (glmnet-path-df path)]}
+
+@defproc[(elnet-path [X (and/c (listof (listof real?)) pair?)]
+                     [y (and/c (listof real?) pair?)]
+                     [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) pair?)) #f]
+                     [#:nlambda nlambda exact-positive-integer? 100]
+                     [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>/c 0) (</c 1))) #f]
+                     [#:alpha alpha (real-in 0 1) 1.0]
+                     [#:standardize? standardize? boolean? #t]
+                     [#:intercept? intercept? boolean? #t]
+                     [#:thresh thresh (>/c 0) 1e-7]
+                     [#:max-iters max-iters exact-positive-integer? 100000])
+         glmnet-path?]{
+  The Gaussian path, as @racket[elnet-fit] fits one point of it.
+
+  @examples[#:eval ev
+  (vector-length (glmnet-path-lambda (elnet-path X y)))
+  (glmnet-path-df (elnet-path X y #:alpha 0.0 #:nlambda 5))]}
+
+@defproc[(logistic-path [X (and/c (listof (listof real?)) pair?)]
+                        [y (and/c (listof (or/c 0 1)) pair?)]
+                        [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) pair?)) #f]
+                        [#:nlambda nlambda exact-positive-integer? 100]
+                        [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>/c 0) (</c 1))) #f]
+                        [#:alpha alpha (real-in 0 1) 1.0]
+                        [#:standardize? standardize? boolean? #t]
+                        [#:intercept? intercept? boolean? #t]
+                        [#:thresh thresh (>/c 0) 1e-7]
+                        [#:max-iters max-iters exact-positive-integer? 100000])
+         glmnet-path?]{
+  The binomial path, as @racket[logistic-fit] fits one point of it.
+
+  @examples[#:eval ev
+  (glmnet-path-df (logistic-path X '(0 0 0 1 1 1) #:lambda '(0.3 0.1 0.03)))]}
+
+@defproc[(multinomial-path [X (and/c (listof (listof real?)) pair?)]
+                           [y (and/c (listof exact-nonnegative-integer?) pair?)]
+                           [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) pair?)) #f]
+                           [#:nlambda nlambda exact-positive-integer? 100]
+                           [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>/c 0) (</c 1))) #f]
+                           [#:alpha alpha (real-in 0 1) 1.0]
+                           [#:standardize? standardize? boolean? #t]
+                           [#:intercept? intercept? boolean? #t]
+                           [#:thresh thresh (>/c 0) 1e-7]
+                           [#:max-iters max-iters exact-positive-integer? 100000])
+         glmnet-path?]{
+  The multinomial path, as @racket[multinomial-fit] fits one point of it.
+
+  @examples[#:eval ev
+  (define mpath (multinomial-path X '(0 0 1 1 2 2) #:lambda '(0.3 0.03)))
+  (vector-ref (glmnet-path-coefficients mpath) 1)]}
+
+@defproc[(cox-path [X (and/c (listof (listof real?)) pair?)]
+                   [times (and/c (listof (>/c 0)) pair?)]
+                   [statuses (and/c (listof (or/c 0 1)) pair?)]
+                   [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) pair?)) #f]
+                   [#:nlambda nlambda exact-positive-integer? 100]
+                   [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>/c 0) (</c 1))) #f]
+                   [#:alpha alpha (real-in 0 1) 1.0]
+                   [#:standardize? standardize? boolean? #t]
+                   [#:thresh thresh (>/c 0) 1e-7]
+                   [#:max-iters max-iters exact-positive-integer? 100000])
+         glmnet-path?]{
+  The Cox path, as @racket[cox-fit] fits one point of it. There is no
+  intercept, so @racket[glmnet-path-intercepts] is @racket[#f].
+
+  @examples[#:eval ev
+  (define cpath (cox-path X '(12.0 10.0 8.0 6.0 4.0 3.0) '(0 1 1 1 1 1)
+                          #:lambda '(0.5 0.05)))
+  (glmnet-path-coefficients cpath)]}
+
+@defproc[(poisson-path [X (and/c (listof (listof real?)) pair?)]
+                       [y (and/c (listof (>=/c 0)) pair?)]
+                       [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) pair?)) #f]
+                       [#:nlambda nlambda exact-positive-integer? 100]
+                       [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>/c 0) (</c 1))) #f]
+                       [#:alpha alpha (real-in 0 1) 1.0]
+                       [#:standardize? standardize? boolean? #t]
+                       [#:intercept? intercept? boolean? #t]
+                       [#:thresh thresh (>/c 0) 1e-7]
+                       [#:max-iters max-iters exact-positive-integer? 100000])
+         glmnet-path?]{
+  The Poisson path, as @racket[poisson-fit] fits one point of it.
+
+  @examples[#:eval ev
+  (glmnet-path-df (poisson-path X '(1 2 2 3 5 8) #:lambda '(0.5 0.05)))]}
+
+@defproc[(mgaussian-path [X (and/c (listof (listof real?)) pair?)]
+                         [Y (and/c (listof (listof real?)) pair?)]
+                         [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) pair?)) #f]
+                         [#:nlambda nlambda exact-positive-integer? 100]
+                         [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>/c 0) (</c 1))) #f]
+                         [#:alpha alpha (real-in 0 1) 1.0]
+                         [#:standardize? standardize? boolean? #t]
+                         [#:intercept? intercept? boolean? #t]
+                         [#:thresh thresh (>/c 0) 1e-7]
+                         [#:max-iters max-iters exact-positive-integer? 100000])
+         glmnet-path?]{
+  The multi-response Gaussian path, as @racket[mgaussian-fit] fits one point of
+  it.
+
+  @examples[#:eval ev
+  (define gpath (mgaussian-path X '((3.0 9.0) (5.0 8.0) (7.0 7.0)
+                                    (9.0 6.0) (11.0 5.0) (13.0 4.0))
+                                #:lambda '(1.0 0.1)))
+  (glmnet-path-intercepts gpath)]}
+
 @section[#:tag "ref-native"]{Native library}
 
 These call straight into @tt{libglmnetcompat}. Loading @racketmodname[glmnet]

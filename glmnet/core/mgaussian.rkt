@@ -14,7 +14,10 @@
 (require racket/contract
          ffi/vector
          "marshal.rkt"
-         "../foreign/raw/mgaussian.rkt")
+         "../foreign/raw/mgaussian.rkt"
+         "path.rkt"
+         (submod "path.rkt" support)
+         "../foreign/raw/path.rkt")
 
 (provide
  (struct-out mgaussian-result)
@@ -29,6 +32,20 @@
         mgaussian-result?)]
   [mgaussian-predict
    (-> mgaussian-result? matrix/c (listof (listof real?)))]))
+
+(provide
+ (contract-out
+  [mgaussian-path
+   (->* (matrix/c matrix/c)
+           (#:lambda lambda-sequence/c
+            #:nlambda exact-positive-integer?
+            #:lambda-min-ratio lambda-min-ratio/c
+            #:alpha (real-in 0 1)
+            #:standardize? boolean?
+            #:intercept? boolean?
+            #:thresh (>/c 0)
+            #:max-iters exact-positive-integer?)
+        glmnet-path?)]))
 
 ;; A fitted multi-response Gaussian model. `intercepts` is a vector of nr reals;
 ;; `coefficients` is a vector of nr coefficient vectors (each length ni), one per
@@ -100,3 +117,36 @@
 ;; entries each).
 (define (mgaussian-predict result X)
   (for/list ([row (in-list X)]) (predict-row result row)))
+
+;; --- regularization path (#10) ---------------------------------------------
+
+(define (mgaussian-path X Y
+                        #:lambda [lambda #f]
+                        #:nlambda [nlambda 100]
+                        #:lambda-min-ratio [lambda-min-ratio #f]
+                        #:alpha [alpha 1.0]
+                        #:standardize? [standardize? #t]
+                        #:intercept? [intercept? #t]
+                        #:thresh [thresh 1e-7]
+                        #:max-iters [max-iters 100000])
+  (define-values (no ni) (rows->dims X 'mgaussian-path))
+  (define k (response-dims Y no 'mgaussian-path))
+  (define yv (matrix->colmajor Y no k))
+  (define xcol (matrix->colmajor X no ni))
+  (define-values (nlam flmin ulam)
+    (path-lambdas lambda nlambda lambda-min-ratio no ni))
+  (define a0 (make-f64vector (* k nlam) 0.0))
+  (define beta (make-f64vector (* ni k nlam) 0.0))
+  (define dev (make-f64vector nlam 0.0))
+  (define alm (make-f64vector nlam 0.0))
+  (define-values (lmu nlp jerr)
+    (glmnet-mgaussian-path/raw (exact->inexact alpha) no ni k xcol yv
+                               nlam flmin ulam
+                               (if standardize? 1 0) (if intercept? 1 0)
+                               (exact->inexact thresh) max-iters
+                               a0 beta dev alm))
+  (check-jerr jerr 'mgaussian-path)
+  (define coefficients (unpack-column-groups beta ni k lmu))
+  (glmnet-path 'mgaussian (finish-lambdas alm lmu (not lambda))
+               (unpack-intercept-groups a0 k lmu) coefficients (unpack-vector dev lmu)
+               (count-nonzero-groups coefficients) nlp))

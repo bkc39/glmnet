@@ -13,7 +13,10 @@
 (require racket/contract
          ffi/vector
          "marshal.rkt"
-         "../foreign/raw/lognet.rkt")
+         "../foreign/raw/lognet.rkt"
+         "path.rkt"
+         (submod "path.rkt" support)
+         "../foreign/raw/path.rkt")
 
 (provide
  (struct-out logistic-result)
@@ -31,6 +34,20 @@
   [logistic-predict
    (->* (logistic-result? matrix/c) (#:threshold (real-in 0 1))
         (listof (or/c 0 1)))]))
+
+(provide
+ (contract-out
+  [logistic-path
+   (->* (matrix/c binary-response/c)
+           (#:lambda lambda-sequence/c
+            #:nlambda exact-positive-integer?
+            #:lambda-min-ratio lambda-min-ratio/c
+            #:alpha (real-in 0 1)
+            #:standardize? boolean?
+            #:intercept? boolean?
+            #:thresh (>/c 0)
+            #:max-iters exact-positive-integer?)
+        glmnet-path?)]))
 
 ;; A fitted two-class logistic model. `coefficients` is a vector of length ni on
 ;; the original predictor scale; `intercept` and the coefficients are on the
@@ -113,3 +130,35 @@
 (define (logistic-predict result X #:threshold [threshold 0.5])
   (for/list ([p (in-list (logistic-predict-proba result X))])
     (if (>= p threshold) 1 0)))
+
+;; --- regularization path (#10) ---------------------------------------------
+
+(define (logistic-path X y
+                       #:lambda [lambda #f]
+                       #:nlambda [nlambda 100]
+                       #:lambda-min-ratio [lambda-min-ratio #f]
+                       #:alpha [alpha 1.0]
+                       #:standardize? [standardize? #t]
+                       #:intercept? [intercept? #t]
+                       #:thresh [thresh 1e-7]
+                       #:max-iters [max-iters 100000])
+  (define-values (no ni) (rows->dims X 'logistic-path))
+  (define yv (response->f64vector y no 'logistic-path))
+  (define xcol (matrix->colmajor X no ni))
+  (define-values (nlam flmin ulam)
+    (path-lambdas lambda nlambda lambda-min-ratio no ni))
+  (define a0 (make-f64vector nlam 0.0))
+  (define beta (make-f64vector (* ni nlam) 0.0))
+  (define dev (make-f64vector nlam 0.0))
+  (define alm (make-f64vector nlam 0.0))
+  (define-values (lmu nlp jerr)
+    (glmnet-lognet-path/raw (exact->inexact alpha) no ni xcol yv
+                            nlam flmin ulam
+                            (if standardize? 1 0) (if intercept? 1 0)
+                            (exact->inexact thresh) max-iters
+                            a0 beta dev alm))
+  (check-logistic-jerr jerr 'logistic-path)
+  (define coefficients (unpack-columns beta ni lmu))
+  (glmnet-path 'binomial (finish-lambdas alm lmu (not lambda))
+               (unpack-vector a0 lmu) coefficients (unpack-vector dev lmu)
+               (count-nonzero coefficients) nlp))

@@ -50,7 +50,9 @@ To list the predictors a fit kept:
 
 @section[#:tag "ex-lasso-path"]{The selection path}
 
-Raising @math{λ} removes predictors one at a time:
+@racket[elnet-path] fits a list of @math{λ} in one call, largest first
+(@secref["concepts-path"]). Read upward, each larger @math{λ} removes
+another predictor:
 
 @examples[#:eval ev #:label #f
 (define (round3 x)
@@ -58,12 +60,11 @@ Raising @math{λ} removes predictors one at a time:
 (define (rounded v)
   (for/list ([b (in-vector v)])
     (round3 b)))
-(for ([lam (in-list '(0.01 0.05 0.2 0.5 1.0 2.5))])
-  (define fit (lasso X y #:lambda lam))
-  (printf "λ = ~a: β = ~a, R² = ~a\n"
-          lam
-          (rounded (elnet-result-coefficients fit))
-          (round3 (elnet-result-r-squared fit))))
+(define path (elnet-path X y #:lambda '(0.01 0.05 0.2 0.5 1.0 2.5)))
+(for ([lam (in-vector (glmnet-path-lambda path))]
+      [beta (in-vector (glmnet-path-coefficients path))]
+      [r2 (in-vector (glmnet-path-dev-ratio path))])
+  (printf "λ = ~a: β = ~a, R² = ~a\n" lam (rounded beta) (round3 r2)))
 ]
 
 At @math{λ = 0.01} all three predictors are in (the noise just barely);

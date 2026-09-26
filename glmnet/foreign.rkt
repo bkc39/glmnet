@@ -31,11 +31,11 @@
 ;; fail loudly here instead. Bump in lockstep with glmnet_capi_abi_version
 ;; (fortran/glmnet_capi.f90).
 (let ([abi (glmnet-capi-abi-version)])
-  (unless (= abi 2)
+  (unless (= abi 3)
     (error 'glmnet
            (string-append
             "native library libglmnetcompat is ABI version ~a, but this package "
-            "expects 2 -- the loaded shared object is stale (likely a committed "
+            "expects 3 -- the loaded shared object is stale (likely a committed "
             "platform candidate that predates the current families). Rebuild it "
             "with scripts/build-so.sh <platform> or `nix run .#copy-native-libs`.")
            abi)))

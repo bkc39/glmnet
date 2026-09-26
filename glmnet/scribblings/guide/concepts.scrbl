@@ -67,8 +67,9 @@ is the same for all of them. It has two knobs:
        coefficients exactly to zero; values in between are the elastic net.
        Every fit procedure defaults to @racket[1.0].}
  @item{@bold{@racket[#:lambda], @math{λ ≥ 0}}, sets the penalty's strength.
-       It is required: there is no default and, for now, no automatic path of
-       values. @math{λ = 0} is the unpenalized fit.}
+       A single fit requires it; to fit a whole sequence of values at once, use
+       a @tech{regularization path} (@secref["concepts-path"]). @math{λ = 0} is
+       the unpenalized fit.}
 ]
 
 The four Gaussian models are one routine, @racket[elnet-fit], with different
@@ -126,6 +127,8 @@ linear predictor @math{η = β₀ + xβ} to the response:
 All six fit procedures take the same keywords: @racket[#:lambda],
 @racket[#:alpha], @racket[#:standardize?], @racket[#:intercept?] (not
 @racket[cox-fit]), @racket[#:thresh] and @racket[#:max-iters].
+Each also has a path counterpart that fits many values of @math{λ} at once;
+see @secref["concepts-path"].
 
 @section[#:tag "concepts-results"]{Results}
 
@@ -160,6 +163,51 @@ field and @racket[match] destructures them:
 (match-define (elnet-result a0 beta _ _ _) fit)
 (list a0 beta)
 ]
+
+@section[#:tag "concepts-path"]{Regularization paths}
+
+The right @math{λ} is rarely known in advance. A @deftech{regularization path}
+fits a whole decreasing sequence of @math{λ} in one call, starting each fit
+from the solution before it, which is much cheaper than fitting each value
+separately. It is how R's @tt{glmnet(x, y)} is normally used. Every family has
+a path fitter: @racket[elnet-path], @racket[logistic-path],
+@racket[multinomial-path], @racket[cox-path], @racket[poisson-path] and
+@racket[mgaussian-path]. They take the same keywords as the single fits,
+except that @racket[#:lambda] is optional and, when given, a list.
+
+Without @racket[#:lambda], glmnet chooses the sequence the way R does:
+@racket[#:nlambda] values (default @racket[100]) from @math{λ_max}, the
+smallest @math{λ} at which every coefficient is zero, down to
+@racket[#:lambda-min-ratio] times @math{λ_max} (default @racket[0.01] when there
+are fewer observations than predictors, otherwise @racket[1e-4]):
+
+@examples[#:eval ev #:label #f
+(vector-length (glmnet-path-lambda (elnet-path X y)))
+(define path (elnet-path X y #:nlambda 12))
+(vector-ref (glmnet-path-coefficients path) 0)
+(glmnet-path-df path)
+]
+
+A @racket[glmnet-path] holds one entry per fitted @math{λ} in each of its
+@racket[lambda], @racket[intercepts], @racket[coefficients],
+@racket[dev-ratio] and @racket[df] fields. At the first @math{λ} every
+coefficient is zero; @racket[df] counts the predictors in the model as the
+penalty relaxes, here @math{x₁} first and then @math{x₂}. The default path has
+50 values, not 100, because glmnet, like R, stops once another @math{λ} would
+barely change the fit: when the deviance ratio improves by less than
+@racket[1e-5] or passes @racket[0.999].
+
+With @racket[#:lambda], the path fits exactly those values, largest first:
+
+@examples[#:eval ev #:label #f
+(define user-path (elnet-path X y #:lambda '(0.01 0.5 0.1)))
+(glmnet-path-lambda user-path)
+(glmnet-path-coefficients user-path)
+]
+
+Each point agrees with the single fit at that @math{λ} to within the solver's
+tolerance. Choosing among the values on a path is the job of cross-validation
+(@hyperlink["https://github.com/bkc39/glmnet/issues/27"]{#27}).
 
 @section[#:tag "concepts-standardize"]{Standardization and the intercept}
 
