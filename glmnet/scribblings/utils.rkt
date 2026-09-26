@@ -21,22 +21,32 @@
          (for-syntax racket/base))
 
 (require (for-label glmnet
+                    glmnet/plot
                     racket/base
                     racket/contract
+                    racket/file
                     racket/match
-                    ffi/vector))
+                    ffi/vector
+                    (only-in pict pict?)
+                    (only-in plot
+                             plot-pict plot-width plot-height plot-title plot-font-size vrule)
+                    (only-in plot/utils renderer2d?)))
 
 (provide (all-from-out scribble/manual)
          (all-from-out scribble/example)
          (for-label (all-from-out glmnet
+                                  glmnet/plot
                                   racket/base
                                   racket/contract
+                                  racket/file
                                   racket/match
-                                  ffi/vector))
+                                  ffi/vector
+                                  pict
+                                  plot
+                                  plot/utils))
          make-glmnet-eval
          see-reference
-         exnraise
-         plot-manual)
+         exnraise)
 
 (define (make-glmnet-eval)
   (parameterize ([sandbox-output 'string]
@@ -62,10 +72,3 @@
          (decode-content (append (list "See " (secref tag) " for ")
                                  what
                                  (list ".")))))
-
-;; "the glmnet-plot documentation", linking to the manual of the separate
-;; glmnet-plot package. The link is indirect, resolved when it is followed, so
-;; that this manual neither depends on that package nor warns when it is not
-;; installed.
-(define plot-manual
-  (other-doc '(lib "glmnet/scribblings/glmnet-plot.scrbl") #:indirect "glmnet-plot"))

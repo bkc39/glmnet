@@ -3,9 +3,9 @@ set -euo pipefail
 
 # End-to-end test using the system Racket install (no Nix, no
 # GLMNET_NATIVE_LIB_PATH). Installs the glmnet package from
-# native-libs/candidates/ via the pre-install hook, and the glmnet-plot package
-# on top of it, then runs the unit tests of both and all example companions.
-# This reproduces what pkg-build.racket-lang.org does.
+# native-libs/candidates/ via the pre-install hook, then runs the unit tests
+# (glmnet/plot's among them) and all example companions. This reproduces what
+# pkg-build.racket-lang.org does.
 
 RACKET=$(command -v racket 2>/dev/null || true)
 RACO=$(command -v raco 2>/dev/null || true)
@@ -22,10 +22,9 @@ cd "$(dirname "$0")/.."
 unset GLMNET_NATIVE_LIB_PATH
 
 echo "--- cleaning compiled bytecode ---"
-find glmnet glmnet-plot -name "compiled" -type d -exec rm -rf {} + 2>/dev/null || true
+find glmnet -name "compiled" -type d -exec rm -rf {} + 2>/dev/null || true
 
-echo "--- removing previous glmnet-plot and glmnet installs ---"
-"$RACO" pkg remove glmnet-plot 2>/dev/null || true
+echo "--- removing previous glmnet install ---"
 "$RACO" pkg remove glmnet 2>/dev/null || true
 
 echo "--- clearing staged native libs (keep candidates/) ---"
@@ -34,13 +33,10 @@ find glmnet/native-libs -maxdepth 1 -type f -name 'lib*' -delete 2>/dev/null || 
 echo "--- installing from candidates ---"
 "$RACO" pkg install --batch --auto --name glmnet ./glmnet
 
-echo "--- installing glmnet-plot ---"
-"$RACO" pkg install --batch --auto --name glmnet-plot ./glmnet-plot
+echo "--- raco setup --check-pkg-deps glmnet (mirrors catalog dependency check) ---"
+"$RACO" setup --check-pkg-deps --pkgs glmnet
 
-echo "--- raco setup --check-pkg-deps (mirrors catalog dependency check) ---"
-"$RACO" setup --check-pkg-deps --pkgs glmnet glmnet-plot
-
-echo "--- raco test glmnet/ glmnet-plot/ (packages + example companions) ---"
-"$RACO" test glmnet/ glmnet-plot/
+echo "--- raco test glmnet/ (package + example companions) ---"
+"$RACO" test glmnet/
 
 echo "--- all done ---"

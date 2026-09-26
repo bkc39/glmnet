@@ -5,8 +5,8 @@
 ;; cross-validation curve, as plot.cv.glmnet draws it. Each plot has a
 ;; procedure that returns its plot-lib renderers, to combine with others, and
 ;; one that returns the finished plot as a pict, with R's axis labels and top
-;; axis, and can also write it to a file. This package is separate from
-;; `glmnet` so that plot-lib stays out of glmnet's dependencies.
+;; axis, and can also write it to a file. main.rkt does not re-export this
+;; module, so that `(require glmnet)` does not load plot-lib.
 
 (require racket/class
          racket/contract
