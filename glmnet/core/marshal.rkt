@@ -1,49 +1,46 @@
 #lang racket/base
 
-;; Shared marshalling between the row-major Racket front end and the
-;; column-major, double-precision Fortran ABI, plus the jerr handling common to
-;; every model family. core/elnet.rkt (Gaussian) and core/lognet.rkt (binomial)
-;; build on this; each family layers its own family-specific jerr cases on top
-;; of `check-jerr`.
+;; Shared plumbing between the Racket front end and the column-major,
+;; double-precision Fortran ABI, used by every model family: the input
+;; contracts, the design-matrix layer's entry points for fitters (data.rkt), the
+;; linear predictor the prediction helpers evaluate, and the jerr handling
+;; common to every family. Each family layers its own family-specific jerr cases
+;; on top of `check-jerr`.
 
 (require racket/contract
-         ffi/vector)
+         ffi/vector
+         (only-in "../data.rkt" design-matrix/c)
+         (submod "../data.rkt" support))
 
-(provide matrix/c response/c
-         rows->dims matrix->colmajor response->f64vector
+(provide design-matrix/c response/c
+         design-matrix-data design-matrix-nrows design-matrix-ncols
+         as-design-matrix as-response
+         prediction-matrix linear-predictor
          check-jerr)
 
 ;; --- input contracts -------------------------------------------------------
 
-(define matrix/c (and/c (listof (listof real?)) pair?))
 (define response/c (and/c (listof real?) pair?))
 
-;; --- shape + marshalling ---------------------------------------------------
+;; --- prediction ------------------------------------------------------------
 
-(define (rows->dims X who)
-  (define no (length X))
-  (define ni (length (car X)))
-  (when (zero? ni)
-    (error who "predictor rows must be non-empty"))
-  (unless (andmap (lambda (r) (= (length r) ni)) X)
-    (error who "all predictor rows must have the same length (got ragged rows)"))
-  (values no ni))
+;; The new-data argument of a prediction helper, as a design matrix with one
+;; column per coefficient.
+(define (prediction-matrix X ni who)
+  (define x (as-design-matrix X who "X"))
+  (unless (= (design-matrix-ncols x) ni)
+    (raise-arguments-error who "X does not have one column per coefficient"
+                           "columns of X" (design-matrix-ncols x) "coefficients" ni))
+  x)
 
-;; Pack the row-major matrix X (list of rows) into the column-major f64vector
-;; the Fortran expects: element (i, j) lives at index i + j*no.
-(define (matrix->colmajor X no ni)
-  (define v (make-f64vector (* no ni)))
-  (for ([row (in-list X)]
-        [i (in-naturals)])
-    (for ([xij (in-list row)]
-          [j (in-naturals)])
-      (f64vector-set! v (+ i (* j no)) (exact->inexact xij))))
-  v)
-
-(define (response->f64vector y no who)
-  (unless (= (length y) no)
-    (error who "response length ~a does not match ~a observations" (length y) no))
-  (list->f64vector (map exact->inexact y)))
+;; intercept + x_i . beta for row i of the design matrix x.
+(define (linear-predictor x i intercept beta)
+  (define v (design-matrix-data x))
+  (define no (design-matrix-nrows x))
+  (for/fold ([acc intercept])
+            ([b (in-vector beta)]
+             [j (in-naturals)])
+    (+ acc (* b (f64vector-ref v (+ i (* j no)))))))
 
 ;; --- error handling --------------------------------------------------------
 

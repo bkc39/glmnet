@@ -21,7 +21,7 @@
  (struct-out poisson-result)
  (contract-out
   [poisson-fit
-   (->* (matrix/c count-response/c #:lambda (>=/c 0))
+   (->* (design-matrix/c count-response/c #:lambda (>=/c 0))
         (#:alpha (real-in 0 1)
          #:standardize? boolean?
          #:intercept? boolean?
@@ -29,12 +29,12 @@
          #:max-iters exact-positive-integer?)
         poisson-result?)]
   [poisson-predict-mean
-   (-> poisson-result? matrix/c (listof (>/c 0)))]))
+   (-> poisson-result? design-matrix/c (listof (>/c 0)))]))
 
 (provide
  (contract-out
   [poisson-path
-   (->* (matrix/c count-response/c)
+   (->* (design-matrix/c count-response/c)
            (#:lambda lambda-sequence/c
             #:nlambda exact-positive-integer?
             #:lambda-min-ratio lambda-min-ratio/c
@@ -74,12 +74,13 @@
                      #:intercept? [intercept? #t]
                      #:thresh [thresh 1e-7]
                      #:max-iters [max-iters 100000])
-  (define-values (no ni) (rows->dims X 'poisson-fit))
-  (define xcol (matrix->colmajor X no ni))
-  (define yv (response->f64vector y no 'poisson-fit))
+  (define x (as-design-matrix X 'poisson-fit "X"))
+  (define no (design-matrix-nrows x))
+  (define ni (design-matrix-ncols x))
+  (define yv (as-response y no 'poisson-fit "y"))
   (define beta (make-f64vector ni 0.0))
   (define-values (intercept dev-ratio lam nlp jerr)
-    (glmnet-fishnet-solo/raw (exact->inexact alpha) no ni xcol yv
+    (glmnet-fishnet-solo/raw (exact->inexact alpha) no ni (design-matrix-data x) yv
                              (exact->inexact lambda)
                              (if standardize? 1 0)
                              (if intercept? 1 0)
@@ -87,26 +88,16 @@
                              max-iters
                              beta))
   (check-poisson-jerr jerr 'poisson-fit)
-  (poisson-result intercept
-                  (for/vector ([i (in-range ni)]) (f64vector-ref beta i))
-                  dev-ratio lam nlp))
+  (poisson-result intercept (unpack-vector beta ni) dev-ratio lam nlp))
 
 ;; --- prediction ------------------------------------------------------------
 
-;; The linear predictor intercept + x . beta (log mean) for one predictor row.
-(define (eta-row result row)
-  (define coefs (poisson-result-coefficients result))
-  (unless (= (length row) (vector-length coefs))
-    (error 'poisson-predict-mean
-           "row has ~a features, expected ~a" (length row) (vector-length coefs)))
-  (for/fold ([acc (poisson-result-intercept result)])
-            ([b (in-vector coefs)]
-             [xj (in-list row)])
-    (+ acc (* b (exact->inexact xj)))))
-
 ;; The fitted Poisson mean exp(intercept + x . beta) for each row of X.
 (define (poisson-predict-mean result X)
-  (for/list ([row (in-list X)]) (exp (eta-row result row))))
+  (define beta (poisson-result-coefficients result))
+  (define x (prediction-matrix X (vector-length beta) 'poisson-predict-mean))
+  (for/list ([i (in-range (design-matrix-nrows x))])
+    (exp (linear-predictor x i (poisson-result-intercept result) beta))))
 
 ;; --- regularization path (#10) ---------------------------------------------
 
@@ -119,9 +110,10 @@
                       #:intercept? [intercept? #t]
                       #:thresh [thresh 1e-7]
                       #:max-iters [max-iters 100000])
-  (define-values (no ni) (rows->dims X 'poisson-path))
-  (define yv (response->f64vector y no 'poisson-path))
-  (define xcol (matrix->colmajor X no ni))
+  (define x (as-design-matrix X 'poisson-path "X"))
+  (define no (design-matrix-nrows x))
+  (define ni (design-matrix-ncols x))
+  (define yv (as-response y no 'poisson-path "y"))
   (define-values (nlam flmin ulam)
     (path-lambdas lambda nlambda lambda-min-ratio no ni))
   (define a0 (make-f64vector nlam 0.0))
@@ -129,7 +121,7 @@
   (define dev (make-f64vector nlam 0.0))
   (define alm (make-f64vector nlam 0.0))
   (define-values (lmu nlp jerr)
-    (glmnet-fishnet-path/raw (exact->inexact alpha) no ni xcol yv
+    (glmnet-fishnet-path/raw (exact->inexact alpha) no ni (design-matrix-data x) yv
                              nlam flmin ulam
                              (if standardize? 1 0) (if intercept? 1 0)
                              (exact->inexact thresh) max-iters
