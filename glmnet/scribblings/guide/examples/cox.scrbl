@@ -38,8 +38,10 @@ censored. @math{x₂} is noise.
 @examples[#:eval ev #:label #f
 (define fit (cox-fit X times statuses #:lambda 0.1))
 fit
+(coef fit)
 ]
 
+A Cox fit has no intercept, so @racket[coef] holds only the coefficients.
 @math{β₁} is positive, so risk rises with @math{x₁}, and the noise coefficient
 is exactly @racket[0.0]. Exponentiated, a coefficient is a @emph{hazard ratio}:
 one more unit of @math{x₁} multiplies the hazard at every time by
@@ -52,7 +54,8 @@ one more unit of @math{x₁} multiplies the hazard at every time by
 
 @racket[cox-linear-predictor] returns @math{xβ} for each row and
 @racket[cox-relative-risk] returns @math{exp(xβ)}, the hazard relative to the
-baseline:
+baseline. They are @racket[predict] with @racket[#:type 'link] and
+@racket[#:type 'response]:
 
 @examples[#:eval ev #:label #f
 (cox-linear-predictor fit '((1.0 1.0) (2.0 1.0) (3.0 1.0)))

@@ -177,7 +177,7 @@ linear predictor @math{η = β₀ + xβ} to the response:
          #:sep @hspace[2]
          #:row-properties '(bottom-border ())
  (list (list @bold{Family}          @bold{Fit}                 @bold{Result}                  @bold{Prediction})
-       (list "Gaussian"             @racket[elnet-fit]         @racket[elnet-result]          "---")
+       (list "Gaussian"             @racket[elnet-fit]         @racket[elnet-result]          @racket[elnet-predict])
        (list "Binomial"             @racket[logistic-fit]      @racket[logistic-result]       @elem{@racket[logistic-predict-proba], @racket[logistic-predict]})
        (list "Multinomial"          @racket[multinomial-fit]   @racket[multinomial-result]    @elem{@racket[multinomial-predict-proba], @racket[multinomial-predict]})
        (list "Cox"                  @racket[cox-fit]           @racket[cox-result]            @elem{@racket[cox-linear-predictor], @racket[cox-relative-risk]})
@@ -188,7 +188,9 @@ All six fit procedures take the same keywords: @racket[#:lambda],
 @racket[#:alpha], @racket[#:standardize?], @racket[#:intercept?] (not
 @racket[cox-fit]), @racket[#:thresh] and @racket[#:max-iters].
 Each also has a path counterpart that fits many values of @math{λ} at once;
-see @secref["concepts-path"].
+see @secref["concepts-path"]. Each prediction helper is @racket[predict] with a
+fixed @racket[#:type]; @secref["concepts-predict"] covers @racket[predict] and
+@racket[coef], which work on every result.
 
 @section[#:tag "concepts-results"]{Results}
 
@@ -198,7 +200,9 @@ families:
 @itemlist[
  @item{@bold{intercept} --- a real, or a vector of one per class or response
        (@racket[multinomial-result-intercepts],
-       @racket[mgaussian-result-intercepts]). Cox results have none.}
+       @racket[mgaussian-result-intercepts]). Cox results have none. As in R,
+       the multinomial intercepts are centred to sum to zero; adding the same
+       constant to each would not change any probability.}
  @item{@bold{coefficients} --- a dense vector with one entry per predictor, on
        the original (unstandardized) scale; a predictor the penalty dropped is
        exactly @racket[0.0]. Multinomial and multi-response results hold a
@@ -208,6 +212,10 @@ families:
  @item{@bold{lambda} --- the penalty the solver used.}
  @item{@bold{num-passes} --- the number of coordinate-descent passes.}
 ]
+
+A result prints as a one-line summary: its family, @math{λ}, deviance ratio,
+and how many of the predictors have a nonzero coefficient. The fields are read
+with the struct's accessors:
 
 @examples[#:eval ev #:label #f
 (define fit (ridge X y #:lambda 0.1))
@@ -257,6 +265,14 @@ penalty relaxes, here @math{x₁} first and then @math{x₂}. The default path h
 barely change the fit: when the deviance ratio improves by less than
 @racket[1e-5] or passes @racket[0.999].
 
+A path prints as R prints one: for each fitted @math{λ}, the number of
+nonzero coefficients (@tt{Df}), the percentage of the null deviance explained
+(@tt{%Dev}) and @math{λ}:
+
+@examples[#:eval ev #:label #f
+path
+]
+
 With @racket[#:lambda], the path fits exactly those values, largest first:
 
 @examples[#:eval ev #:label #f
@@ -266,8 +282,116 @@ With @racket[#:lambda], the path fits exactly those values, largest first:
 ]
 
 Each point agrees with the single fit at that @math{λ} to within the solver's
-tolerance. Choosing among the values on a path is the job of cross-validation
-(@hyperlink["https://github.com/bkc39/glmnet/issues/27"]{#27}).
+tolerance. @racket[predict] and @racket[coef] evaluate a path at any @math{λ}
+(@secref["concepts-predict"]). Choosing among the values on a path is the job
+of cross-validation (@hyperlink["https://github.com/bkc39/glmnet/issues/27"]{#27}).
+
+@section[#:tag "concepts-predict"]{Predictions and coefficients}
+
+Every result, whether a single fit or a @tech{regularization path}, is a
+@racket[glmnet-model?]. Three procedures work on all of them, as R's generics
+of the same names do:
+
+@itemlist[
+ @item{@racket[predict] evaluates the model on new rows, given as a
+       @tech{design matrix} with one column per predictor;}
+ @item{@racket[coef] returns the intercept, then one coefficient per
+       predictor;}
+ @item{@racket[deviance-ratio] returns the fraction of null deviance
+       explained.}
+]
+
+@examples[#:eval ev #:label #f
+(define fit (lasso X y #:lambda 0.1))
+(predict fit '((6.0 5.0) (7.0 8.0)))
+(coef fit)
+(deviance-ratio fit)
+]
+
+@subsection[#:tag "concepts-predict-type"]{What is predicted}
+
+@racket[#:type] chooses what @racket[predict] returns, with R's names:
+@racket['link], the default, is the linear predictor; @racket['response] is on
+the scale of the response; and @racket['class] is the predicted class, for the
+two families that have classes:
+
+@tabular[#:style 'boxed
+         #:sep @hspace[2]
+         #:row-properties '(bottom-border ())
+ (list (list @bold{Family}                  @racket['link]                   @racket['response]                @racket['class])
+       (list "Gaussian"                     @math{η = β₀ + xβ}              @math{η}                          "---")
+       (list "Binomial"                     @elem{log-odds @math{η}}         @elem{@math{P(y = 1)}}            @elem{@racket[1] if @math{η > 0}, else @racket[0]})
+       (list "Multinomial"                  @elem{@math{η_k}, one per class} @elem{softmax of the @math{η_k}}  @elem{the class with the largest @math{η_k}})
+       (list "Cox"                          @math{xβ}                        @elem{relative risk @math{exp(xβ)}} "---")
+       (list "Poisson"                      @math{log μ = η}                 @elem{mean @math{μ = exp(η)}}     "---")
+       (list "Multi-response"               @elem{@math{η_r}, one per response} @math{η_r}                   "---"))]
+
+@examples[#:eval ev #:label #f
+(define labels '(0 1 0 1 1))
+(define clf (logistic-fit X labels #:lambda 0.05))
+(predict clf '((1.0 1.0) (5.0 5.0)))
+(predict clf '((1.0 1.0) (5.0 5.0)) #:type 'response)
+(predict clf '((1.0 1.0) (5.0 5.0)) #:type 'class)
+(eval:error (predict fit X #:type 'class))
+]
+
+The prediction helpers of each family are @racket[predict] at a fixed type:
+@racket[logistic-predict-proba] is @racket[#:type 'response], for example, and
+@racket[elnet-predict] is the Gaussian default.
+
+@subsection[#:tag "concepts-predict-lambda"]{Predicting along a path}
+
+For a path, @racket[#:lambda] chooses the @math{λ} at which to evaluate, as
+R's @tt{s} does. It is a single @math{λ} or a list; for a list, the result has
+one entry per element, in the order given. Without @racket[#:lambda], a path
+gives one entry per fitted @math{λ}:
+
+@examples[#:eval ev #:label #f
+(glmnet-path-lambda user-path)
+(coef user-path #:lambda 0.1)
+(predict user-path '((6.0 5.0)))
+(predict user-path '((6.0 5.0)) #:lambda '(0.01 0.5))
+]
+
+A @math{λ} that was not fitted is handled as R handles it by default: the
+coefficients are interpolated linearly in @math{λ} between the two fitted
+values on either side. For @math{λ_l > s > λ_r},
+
+@centered{@math{β(s) = w β(λ_l) + (1 − w) β(λ_r),  w = (s − λ_r) / (λ_l − λ_r)},}
+
+and the same holds for the intercept. At @math{s = 0.2}, between
+@math{0.5} and @math{0.1}, the weight is @math{w = 0.25}:
+
+@examples[#:eval ev #:label #f
+(coef user-path #:lambda 0.2)
+(for/vector ([hi (in-vector (coef user-path #:lambda 0.5))]
+             [lo (in-vector (coef user-path #:lambda 0.1))])
+  (+ (* 0.25 hi) (* 0.75 lo)))
+]
+
+A @math{λ} above the largest fitted value, or below the smallest, is clamped
+to that end of the path:
+
+@examples[#:eval ev #:label #f
+(equal? (coef user-path #:lambda 5.0) (coef user-path #:lambda 0.5))
+(equal? (coef user-path #:lambda 0.0) (coef user-path #:lambda 0.01))
+]
+
+Interpolated coefficients approximate the fit at @math{s}; they are not that
+fit. The closer together the fitted values, the better the approximation. To
+get the fit itself, fit at @math{s}: R's @tt{exact = TRUE} refits, and here a
+single fit or a path through @math{s} does the same:
+
+@examples[#:eval ev #:label #f
+(coef (lasso X y #:lambda 0.2))
+]
+
+A single fit is a path with one @math{λ}, so, as in R, it gives the same
+answer whatever @racket[#:lambda] says:
+
+@examples[#:eval ev #:label #f
+(equal? (coef fit #:lambda 0.5) (coef fit))
+]
 
 @section[#:tag "concepts-standardize"]{Standardization and the intercept}
 
