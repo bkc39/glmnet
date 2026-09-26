@@ -117,6 +117,56 @@
             '';
           };
 
+          # The glmnet-plot package (glmnet/plot), installed on top of glmnet:
+          # checks both packages' declared dependencies, runs glmnet-plot's
+          # tests and renders its manual, whose examples draw the plots. The
+          # fonts are fixed so that text renders the same in every sandbox.
+          plot = pkgs.stdenv.mkDerivation {
+            pname = "glmnet-plot";
+            inherit version;
+            src = cleanSrc pkgs ./.;
+
+            nativeBuildInputs = [ pkgs.racket ];
+            buildInputs = [ native ];
+
+            FONTCONFIG_FILE = pkgs.makeFontsConf { fontDirectories = [ pkgs.dejavu_fonts ]; };
+
+            buildPhase = ''
+              runHook preBuild
+
+              export HOME=$TMPDIR
+              export PLTUSERHOME=$TMPDIR/racket-home
+              export GLMNET_NATIVE_LIB_PATH=${native}
+              mkdir -p $PLTUSERHOME ./glmnet/native-libs
+              cp ${native}/lib/libglmnetcompat.* ./glmnet/native-libs/ 2>/dev/null || true
+
+              raco pkg install --batch --deps fail --no-setup --copy --scope user \
+                --name glmnet ./glmnet
+              raco pkg install --batch --deps fail --no-setup --copy --scope user \
+                --name glmnet-plot ./glmnet-plot
+
+              raco setup --no-docs --check-pkg-deps --pkgs glmnet glmnet-plot
+
+              runHook postBuild
+            '';
+
+            doCheck = true;
+            checkPhase = ''
+              runHook preCheck
+              raco test ./glmnet-plot/
+              raco scribble --htmls --dest "$TMPDIR/glmnet-plot-doc" \
+                glmnet-plot/scribblings/glmnet-plot.scrbl
+              runHook postCheck
+            '';
+
+            installPhase = ''
+              runHook preInstall
+              mkdir -p $out
+              echo "glmnet-plot check passed" > $out/plot-ok
+              runHook postInstall
+            '';
+          };
+
           # Stage the native library for non-Nix workflows (dev convenience).
           copy-native-libs = pkgs.writeShellApplication {
             name = "copy-native-libs";
@@ -190,7 +240,7 @@
         in
         {
           default = racket;
-          inherit native racket copy-native-libs gen-goldens parity;
+          inherit native racket plot copy-native-libs gen-goldens parity;
         });
 
       apps = forAllSystems (system: {
@@ -205,7 +255,7 @@
       });
 
       checks = forAllSystems (system: {
-        inherit (self.packages.${system}) native racket parity;
+        inherit (self.packages.${system}) native racket plot parity;
       });
 
       devShells = forAllSystems (system:

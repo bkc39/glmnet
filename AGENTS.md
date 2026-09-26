@@ -31,9 +31,21 @@ glmnet/                        Racket collection
   tests/*.rkt                  rackunit unit tests
   private/install-glmnet-native.rkt   pre-install hook (env -> staged -> candidate)
   native-libs/candidates/<plat>/      committed prebuilt shared objects
+glmnet-plot/                   second package, also collection "glmnet": glmnet/plot
+  plot.rkt                     R's plot.glmnet / plot.cv.glmnet on plot-lib (picts)
+  scribblings/glmnet-plot.scrbl       its own manual, plots rendered live
+  tests/*.rkt                  rackunit tests + docs coverage for glmnet/plot
 scripts/                       build-so.sh, test-local.sh (portable candidates)
-flake.nix                      native + racket derivations, devShell, checks
+flake.nix                      native + racket + plot derivations, devShell, checks
 ```
+
+`glmnet-plot` is a separate package so that `glmnet` keeps its light
+dependencies (#41's rule for heavy dependencies): plot-lib is Typed Racket and
+pulls in the drawing stack. It depends on `glmnet`, never the reverse, so the
+`glmnet` manual links to its manual with an indirect link (`plot-manual` in
+`scribblings/utils.rkt`). Files of the two packages share the `glmnet`
+collection, so their names must not collide (hence `plot-test.rkt`,
+`plot-docs-coverage-test.rkt`, `glmnet-plot.scrbl`).
 
 ## Non-negotiable invariants
 
@@ -115,6 +127,8 @@ tags name the example pages and stay stable. An example section changes when
 its `glmnet/examples/NN-*.rkt` changes. `tests/docs-coverage-test.rkt` fails,
 naming the bindings, if anything `(require glmnet)` exports has no `defproc`,
 `defstruct*`, `defthing` or `defform` entry under `scribblings/`.
+`glmnet-plot/tests/plot-docs-coverage-test.rkt` does the same for
+`glmnet/plot` against `glmnet-plot/scribblings/`.
 
 ## Local dev loop
 
@@ -126,12 +140,14 @@ cp fortran/build/libglmnetcompat.* glmnet/native-libs/      # stage for the load
 
 # racket (link mode, once)
 raco pkg install --batch --auto --link --name glmnet ./glmnet
-raco test ./glmnet/
+raco pkg install --batch --auto --link --name glmnet-plot ./glmnet-plot
+raco test ./glmnet/ ./glmnet-plot/
 bash scripts/run-examples.sh                                 # run every example
 ```
 
 Or `nix build .#native` (runs the Fortran ctest suite) and `nix flake check`
-(builds the native lib + Racket package, runs `raco test`, renders the docs).
+(builds the native lib + Racket package, runs `raco test`, renders the docs;
+its `plot` check does the same for `glmnet-plot`).
 
 ## Shipping native libraries (catalog candidates)
 

@@ -30,6 +30,26 @@ package installed, build it with
 A prebuilt native library is staged at install time; no Fortran toolchain is
 needed to use the package.
 
+## Plots (`glmnet-plot`)
+
+The coefficient-path and cross-validation plots of R's `plot.glmnet` and
+`plot.cv.glmnet` are in a second package in this repository, `glmnet-plot`
+(directory `glmnet-plot/`). It adds `glmnet/plot` to the `glmnet` collection
+and is separate so that `glmnet` does not depend on the plot library:
+
+```bash
+raco pkg install glmnet-plot
+```
+
+```racket
+(require glmnet glmnet/plot)
+(plot-cv (elnet-cv X y))               ; => a pict
+(plot-coefficient-path (elnet-path X y) #:label #t #:out-file "path.png")
+```
+
+Its manual, `glmnet-plot/scribblings/glmnet-plot.scrbl`, draws every plot it
+describes.
+
 ## Quick check
 
 ```racket
@@ -50,6 +70,7 @@ Or verify everything in one shot:
 
 ```bash
 nix build .#native              # build libglmnetcompat + run the Fortran ctest suite
+nix build .#plot                # install glmnet + glmnet-plot, test glmnet-plot, render its manual
 nix flake check                 # build everything, run raco test, render the docs
 ```
 
@@ -59,4 +80,5 @@ A local toolchain (gfortran + cmake + Racket) works too; see `AGENTS.md`.
 
 **GPL-2.0-or-later.** This package vendors and links the GPL-2.0 glmnet Fortran
 (R glmnet's own, under `fortran/vendor/`); see `LICENSE` and
-`fortran/vendor/NOTICE.md`.
+`fortran/vendor/NOTICE.md`. `glmnet-plot` links `glmnet` and has the same
+licence; its plot library, plot-lib, is Apache-2.0 or MIT.
