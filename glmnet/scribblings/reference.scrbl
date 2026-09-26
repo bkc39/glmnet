@@ -1369,12 +1369,15 @@ cross-validated fit @racket[cv] of @secref["ref-cv"]:
   An error is raised if every coefficient is zero at every @math{λ}, as there
   is then nothing to plot. A @math{λ} of @racket[0] has no position on a
   log @math{λ} axis and is left out: the curves, and their labels, end at the
-  smallest positive @math{λ}.
+  smallest positive @math{λ}. If every @math{λ} of the path is @racket[0], an
+  error is raised for a log @math{λ} axis, as R's @tt{plot} stops too; the
+  path can still be plotted against the L1 norm or the deviance ratio.
 
   @examples[#:eval ev
   (plot-coefficient-path path #:xvar 'norm #:label '("x1" "x2" "x3")
                          #:width 400 #:height 300 #:title "Lasso path")
-  (eval:error (plot-coefficient-path (elnet-path X y #:lambda '(10.0 5.0))))]}
+  (eval:error (plot-coefficient-path (elnet-path X y #:lambda '(10.0 5.0))))
+  (eval:error (plot-coefficient-path (elnet-path X y #:lambda '(0.0))))]}
 
 @defproc[(coefficient-path-renderers [model (or/c glmnet-path? glmnet-cv?)]
                                      [#:xvar xvar (or/c 'lambda 'norm 'dev) 'lambda]

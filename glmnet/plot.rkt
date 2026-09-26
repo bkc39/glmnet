@@ -365,6 +365,10 @@
   (define who 'plot-coefficient-path)
   (define p (model-path model))
   (define xs (x-positions p xvar sign-lambda))
+  (unless (ormap finite? xs)
+    (raise-arguments-error who "every λ of the path is 0, which has no place on a log λ axis"
+                           "λ values" (vector->list (glmnet-path-lambda p))
+                           "xvar" xvar))
   (define right? (labels-right? xvar sign-lambda))
   (define f (approx-f xvar sign-lambda))
   (define-values (x-min x-max) (padded-range xs))
