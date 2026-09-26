@@ -85,7 +85,12 @@ An error names the offending row and column, counting from 0:
 ]
 
 Without the check, a @racket[+nan.0] or an infinity would reach the solver,
-which would return meaningless coefficients and no error.
+which would return meaningless coefficients and no error. R's @tt{glmnet} also
+stops on a missing value in @tt{x}, but not on every non-finite value. In every
+family but Cox it fits an @tt{x} with an infinite entry, giving that column a
+zero coefficient. It fits a Poisson response with an infinite count and
+returns an empty model. Its @tt{predict} carries non-finite new data through to
+the predictions. Here each of these is an error.
 
 The @deftech{response} has one entry per row of the design matrix. Its shape
 depends on the family:
