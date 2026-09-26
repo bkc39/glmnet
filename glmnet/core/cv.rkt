@@ -36,7 +36,8 @@
            cross-validate
            optimal-lambdas
            concordance
-           cox-deviance))
+           cox-deviance
+           write-cv))
 
 ;; lambda, cvm, cvsd, cvup, cvlo, nzero : one entry per lambda, as in R
 ;; measure    : the loss, such as 'mse or 'auc (R's type.measure)
@@ -612,11 +613,11 @@
 ;; --- printing ------------------------------------------------------------------
 
 ;; As R's print.cv.glmnet: the measure, then lambda.min and lambda.1se with
-;; their index, cvm, cvsd and nzero.
-(define (write-cv cv port)
+;; their index, cvm, cvsd and nzero. `call`, when given, follows the family.
+(define (write-cv cv port [call #f])
   (define (number x) (if (flrational? x) (signif x) (number->string x)))
-  (fprintf port "#<glmnet-cv:~a ~a"
-           (glmnet-path-family (glmnet-cv-path cv)) (glmnet-cv-name cv))
+  (fprintf port "#<glmnet-cv:~a~a ~a"
+           (glmnet-path-family (glmnet-cv-path cv)) (call-suffix call) (glmnet-cv-name cv))
   (write-table
    (cons '("" "Lambda" "Index" "Measure" "SE" "Nonzero")
          (for/list ([label (in-list '("min" "1se"))]

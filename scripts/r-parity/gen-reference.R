@@ -69,6 +69,13 @@ datasets <- list(longley = load_longley(), wdbc = load_wdbc(),
 ## R's coef(fit, s) and predict(fit, newx, s, type) with the default
 ## exact = FALSE, for every type the family has, as one entry per s. newx is
 ## the training X. Class labels become integers (the factor levels are 0..K-1).
+## coef_names records how R names coef's result (#26): the row names, which
+## are "(Intercept)" and colnames(X), and, for a list, the names of its
+## elements (the class levels, or colnames(Y) for the multi-response family).
+
+coef_names <- function(co)
+  if (is.list(co)) list(groups = names(co), rows = rownames(co[[1]])) else
+    list(rows = rownames(co))
 
 predict_types <- function(family)
   switch(family, binomial = , multinomial = c("link", "response", "class"),
@@ -89,7 +96,7 @@ generic_outputs <- function(fit, family, X, s) {
     lapply(seq_along(s), function(i) unname(lapply(co, function(B) unname(as.numeric(B[, i])))))
   else
     lapply(seq_along(s), function(i) unname(as.numeric(co[, i])))
-  list(s = s, coef_s = coefs, predict_s = preds)
+  list(s = s, coef_s = coefs, coef_names = coef_names(co), predict_s = preds)
 }
 
 ## A single-lambda fit is a one-lambda path: lambda.interp returns it for any s.
@@ -394,6 +401,7 @@ for (f in cv_fixtures) {
                    lambda_min = cv$lambda.min, lambda_1se = cv$lambda.1se,
                    index_min = cv$index[1, 1], index_1se = cv$index[2, 1],
                    coef_min = cv_coef(cv, "lambda.min"), coef_1se = cv_coef(cv, "lambda.1se"),
+                   coef_names = coef_names(coef(cv, s = "lambda.min")),
                    meta = meta))
   path <- file.path(goldens_dir, paste0(f$id, ".json"))
   writeLines(toJSON(golden, digits = NA, auto_unbox = TRUE, pretty = TRUE), path)

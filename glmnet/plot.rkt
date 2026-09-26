@@ -5,8 +5,10 @@
 ;; cross-validation curve, as plot.cv.glmnet draws it. Each plot has a
 ;; procedure that returns its plot-lib renderers, to combine with others, and
 ;; one that returns the finished plot as a pict, with R's axis labels and top
-;; axis, and can also write it to a file. main.rkt does not re-export this
-;; module, so that `(require glmnet)` does not load plot-lib.
+;; axis, and can also write it to a file. A formula model (#26) is plotted
+;; through the path or cross-validated path it holds, with its predictor names
+;; as the curve labels. main.rkt does not re-export this module, so that
+;; `(require glmnet)` does not load plot-lib.
 
 (require racket/class
          racket/contract
@@ -37,9 +39,14 @@
                   glmnet-cv-lambda-1se
                   design-matrix?
                   design-matrix-ncols
-                  design-matrix-column-names))
+                  design-matrix-column-names
+                  formula-model?
+                  formula-model-fit
+                  glmnet-model-predictor-names
+                  glmnet-model-response-names))
 
-(define model/c (or/c glmnet-path? glmnet-cv?))
+(define model/c (or/c glmnet-path? glmnet-cv? formula-model?))
+(define cv/c (or/c glmnet-cv? formula-model?))
 (define xvar/c (or/c 'lambda 'norm 'dev))
 (define sign-lambda/c (or/c -1 1))
 (define label/c (or/c boolean? design-matrix? (listof (or/c string? symbol?))))
@@ -68,9 +75,9 @@
          #:out-file out-file/c)
         pict?)]
   [cv-renderers
-   (->* (glmnet-cv?) (#:sign-lambda sign-lambda/c) (listof renderer2d?))]
+   (->* (cv/c) (#:sign-lambda sign-lambda/c) (listof renderer2d?))]
   [plot-cv
-   (->* (glmnet-cv?)
+   (->* (cv/c)
         (#:sign-lambda sign-lambda/c
          #:width exact-positive-integer?
          #:height exact-positive-integer?
@@ -82,7 +89,9 @@
 (module* support #f
   (provide constant-approx
            label-runs
-           keep-apart))
+           keep-apart
+           path-panels
+           panel-y-label))
 
 ;; --- R's conventions ---------------------------------------------------------
 
@@ -159,8 +168,9 @@
 ;; families, one per class or response ('coef), with that class's count of
 ;; nonzero coefficients on top, or one of each predictor's 2-norm across them
 ;; ('2norm), with the mean count over the classes, rounded to one decimal
-;; place (multinomial), or the first response's count (multi-response).
-(define (path-panels p type-coef)
+;; place (multinomial), or the first response's count (multi-response). A
+;; response is labelled by its name in `responses`, or else as y1, y2, ...
+(define (path-panels p type-coef [responses #f])
   (define family (glmnet-path-family p))
   (define coefs (glmnet-path-coefficients p))
   (case family
@@ -177,7 +187,10 @@
                    [df (in-list dfs)]
                    [r (in-naturals)])
           (panel betas df (format "Coefficients: Response ~a"
-                                  (if (eq? family 'multinomial) r (format "y~a" (add1 r))))))]
+                                  (cond
+                                    [(eq? family 'multinomial) r]
+                                    [responses (list-ref responses r)]
+                                    [else (format "y~a" (add1 r))]))))]
        [(2norm)
         (define norms
           (for/vector #:length (vector-length coefs) ([groups (in-vector coefs)])
@@ -238,8 +251,28 @@
   (lambda (j)
     (if names (~a (list-ref names j)) (number->string (add1 j)))))
 
-(define (model-path model)
-  (if (glmnet-cv? model) (glmnet-cv-path model) model))
+;; The path or cross-validated path a model holds: the model itself, or a
+;; formula model's fit, which must satisfy `kind?`.
+(define (model-fit who model kind? what)
+  (define fit (if (formula-model? model) (formula-model-fit model) model))
+  (unless (kind? fit)
+    (raise-arguments-error who (format "the formula model does not hold ~a" what)
+                           "model" model))
+  fit)
+
+(define (path-or-cv? v) (or (glmnet-path? v) (glmnet-cv? v)))
+
+;; The path to plot for a model of a coefficient plot.
+(define (model-path who model)
+  (define fit (model-fit who model path-or-cv? "a path or a cross-validated path"))
+  (if (glmnet-cv? fit) (glmnet-cv-path fit) fit))
+
+;; #t labels the curves of a model with named predictors, such as a formula
+;; model, by name, and those of any other model by position.
+(define (model-label model label)
+  (if (eq? label #t)
+      (or (glmnet-model-predictor-names model) #t)
+      label))
 
 ;; The renderers of one panel: a line per predictor that is nonzero at some
 ;; lambda, coloured as matplot colours them, and, when labelled, its label at
@@ -290,14 +323,14 @@
                                     #:type-coef [type-coef 'coef]
                                     #:response [response 0])
   (define who 'coefficient-path-renderers)
-  (define p (model-path model))
-  (define panels (path-panels p type-coef))
+  (define p (model-path who model))
+  (define panels (path-panels p type-coef (glmnet-model-response-names model)))
   (unless (< response (length panels))
     (raise-arguments-error who "the path has no class or response with this index"
                            "response" response
                            "classes or responses" (length panels)))
   (panel-renderers who (list-ref panels response) (x-positions p xvar sign-lambda)
-                   label (labels-right? xvar sign-lambda)))
+                   (model-label model label) (labels-right? xvar sign-lambda)))
 
 ;; The top axis of a coefficient plot, as plotCoef draws it: at the positions
 ;; of the bottom axis's ticks, the count read off the path by R's approx with
@@ -333,14 +366,15 @@
                                #:out-file [out-file #f])
   (define who 'plot-coefficient-path)
   (define kind (and out-file (image-kind who out-file)))
-  (define p (model-path model))
+  (define p (model-path who model))
+  (define label* (model-label model label))
   (define xs (x-positions p xvar sign-lambda))
   (define right? (labels-right? xvar sign-lambda))
   (define f (if (and (eq? xvar 'lambda) (= sign-lambda 1)) 0 1))
   (define-values (x-min x-max) (padded-range xs))
   (define pictures
-    (for*/list ([pnl (in-list (path-panels p type-coef))]
-                [renderers (in-value (panel-renderers who pnl xs label right?))]
+    (for*/list ([pnl (in-list (path-panels p type-coef (glmnet-model-response-names model)))]
+                [renderers (in-value (panel-renderers who pnl xs label* right?))]
                 #:unless (null? renderers))
       (define-values (y-min y-max)
         (padded-range (for*/list ([beta (in-vector (panel-coefficients pnl))]
@@ -353,11 +387,11 @@
                      #:width width #:height height #:title title
                      #:x-label (x-label xvar sign-lambda) #:y-label (panel-y-label pnl))))
       (define first-draw (draw x-min x-max))
-      (if (and label x-min)
+      (if (and label* x-min)
           (let*-values ([(finite-xs) (filter finite? xs)]
                         [(end) (apply (if right? max min) finite-xs)]
                         [(x-min x-max) (room-for-labels first-draw x-min x-max end right?
-                                                        (curve-label-width p label))])
+                                                        (curve-label-width p label*))])
             (draw x-min x-max))
           first-draw)))
   (when (null? pictures)
@@ -408,7 +442,8 @@
 
 ;; --- cross-validation --------------------------------------------------------
 
-(define (cv-renderers cv #:sign-lambda [sign-lambda -1])
+(define (cv-renderers model #:sign-lambda [sign-lambda -1])
+  (define cv (model-fit 'cv-renderers model glmnet-cv? "a cross-validated path"))
   (define (x-of l) (* sign-lambda (log (exact->inexact l))))
   (define rows
     (for/list ([l (in-vector (glmnet-cv-lambda cv))]
@@ -471,13 +506,14 @@
            (for/list ([t (in-list pre-ticks)])
              (hash-ref label-of (pre-tick-value t))))))
 
-(define (plot-cv cv
+(define (plot-cv model
                  #:sign-lambda [sign-lambda -1]
                  #:width [width (plot-width)]
                  #:height [height (plot-height)]
                  #:title [title (plot-title)]
                  #:out-file [out-file #f])
   (define who 'plot-cv)
+  (define cv (model-fit who model glmnet-cv? "a cross-validated path"))
   (define kind (and out-file (image-kind who out-file)))
   (define renderers (cv-renderers cv #:sign-lambda sign-lambda))
   (define xs

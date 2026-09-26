@@ -5,7 +5,8 @@
 ;; renderers; the options, the errors and the file output; and the pieces that
 ;; follow R: approx with method "constant", the per-class counts and 2-norms of
 ;; the multi-response panels, and the labels along the top of a CV plot. The
-;; images themselves are not compared.
+;; images themselves are not compared, except that a formula model (#26) must
+;; draw the same image as its fit labelled with its predictor names.
 
 (module+ test
   (require rackunit
@@ -13,6 +14,7 @@
            racket/list
            racket/logging
            racket/math
+           file/convertible
            pict
            (only-in plot/no-gui renderer2d? plot-width plot-height)
            glmnet
@@ -145,6 +147,49 @@
     (check-exn #rx"one column per predictor"
                (lambda () (plot-coefficient-path p #:label (rows->design-matrix '((1.0 2.0))))))
     (check-exn exn:fail:contract? (lambda () (plot-coefficient-path p #:label '(1 2 3 4)))))
+
+  (define (png pict) (convert pict 'png-bytes))
+
+  (test-case "a formula model is plotted through its fit, its curves labelled by name"
+    (define names '("a" "b" "c" "d"))
+    (define table
+      (cons (cons "y" y)
+            (for/list ([name (in-list names)] [j (in-naturals)])
+              (cons name (map (lambda (row) (list-ref row j)) X)))))
+    (define fp (formula-path (~ y all) table))
+    (define fcv (formula-cv (~ y all) table #:fold-ids folds))
+    (define p (formula-model-fit fp))
+    (define cv (formula-model-fit fcv))
+    (check-equal? (png (plot-coefficient-path fp #:label #t))
+                  (png (plot-coefficient-path p #:label names)))
+    (check-not-equal? (png (plot-coefficient-path fp #:label #t))
+                      (png (plot-coefficient-path p #:label #t)))
+    (check-equal? (png (plot-coefficient-path fp #:label '(w x y z)))
+                  (png (plot-coefficient-path p #:label '(w x y z))))
+    (check-equal? (png (plot-coefficient-path fp)) (png (plot-coefficient-path p)))
+    (check-equal? (png (plot-coefficient-path fcv #:label #t #:xvar 'norm))
+                  (png (plot-coefficient-path cv #:label names #:xvar 'norm)))
+    (check-equal? (png (plot-cv fcv)) (png (plot-cv cv)))
+    (check-equal? (length (coefficient-path-renderers fcv #:label #t))
+                  (length (coefficient-path-renderers cv #:label #t)))
+    (check-equal? (length (cv-renderers fcv)) (length (cv-renderers cv)))
+    (check-exn #rx"plot-cv: the formula model does not hold a cross-validated path"
+               (lambda () (plot-cv fp)))
+    (check-exn #rx"does not hold a path or a cross-validated path"
+               (lambda () (plot-coefficient-path (formula-fit (~ y all) table #:lambda 0.1))))
+    (check-exn exn:fail:contract? (lambda () (plot-cv p))))
+
+  (test-case "a formula model's responses name the multi-response panels"
+    (define table (list (cons "u" (map first Y)) (cons "v" (map second Y))
+                        (cons "a" (map first X)) (cons "b" (map second X))))
+    (define mg (formula-path (~ (v u) a b) table #:family 'mgaussian))
+    (check-equal? (map panel-y-label (path-panels (formula-model-fit mg) 'coef '("v" "u")))
+                  '("Coefficients: Response v" "Coefficients: Response u"))
+    (check-equal? (map panel-y-label (path-panels (formula-model-fit mg) 'coef))
+                  '("Coefficients: Response y1" "Coefficients: Response y2"))
+    (check-not-equal? (png (plot-coefficient-path mg #:label #t))
+                      (png (plot-coefficient-path (formula-model-fit mg) #:label '(a b))))
+    (check-size (plot-coefficient-path mg #:label #t #:height 200) 400 400))
 
   (test-case "a lambda of 0 has no place on a log axis and is left out"
     (define p (elnet-path X y #:lambda '(1.0 0.5 0.1 0.0)))

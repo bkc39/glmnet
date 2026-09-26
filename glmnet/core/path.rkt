@@ -28,7 +28,9 @@
            path-num-predictors
            signif
            write-table
-           write-point))
+           write-point
+           write-path
+           call-suffix))
 
 ;; family       : 'gaussian 'binomial 'multinomial 'cox 'poisson 'mgaussian
 ;; lambda       : the fitted lambdas, decreasing (vector of length L)
@@ -131,17 +133,19 @@
   (~r (if (zero? r) 0.0 r) #:precision `(= ,places)))
 
 ;; A single fit, from its one-lambda path: #<glmnet:binomial λ=0.04 dev=0.7134 nz=2/3>.
-(define (write-point p port)
-  (fprintf port "#<glmnet:~a λ=~a dev=~a nz=~a/~a>"
+;; `call`, when given, follows the family, as the formula of a formula model does.
+(define (write-point p port [call #f])
+  (fprintf port "#<glmnet:~a~a λ=~a dev=~a nz=~a/~a>"
            (glmnet-path-family p)
+           (call-suffix call)
            (signif (vector-ref (glmnet-path-lambda p) 0))
            (fixed (vector-ref (glmnet-path-dev-ratio p) 0) 4)
            (vector-ref (glmnet-path-df p) 0)
            (path-num-predictors p)))
 
 ;; A path, as R's print.glmnet: Df, %Dev and Lambda for each fitted lambda.
-(define (write-path p port)
-  (fprintf port "#<glmnet-path:~a" (glmnet-path-family p))
+(define (write-path p port [call #f])
+  (fprintf port "#<glmnet-path:~a~a" (glmnet-path-family p) (call-suffix call))
   (write-table (cons '("Df" "%Dev" "Lambda")
                      (for/list ([df (in-vector (glmnet-path-df p))]
                                 [dev (in-vector (glmnet-path-dev-ratio p))]
@@ -149,6 +153,10 @@
                        (list (number->string df) (fixed (* 100 dev) 2) (signif lam))))
                port)
   (write-string ">" port))
+
+;; What a printed model shows after its family: nothing, or its call.
+(define (call-suffix call)
+  (if call (string-append " " call) ""))
 
 ;; Rows of strings as a table, one line each, every column right-aligned and
 ;; indented by two spaces.

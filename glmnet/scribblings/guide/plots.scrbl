@@ -9,9 +9,9 @@
 @hyperlink["https://glmnet.stanford.edu/"]{glmnet} package: the coefficient
 path of a fit, as R's @tt{plot.glmnet} draws it, and the cross-validation
 curve, as @tt{plot.cv.glmnet} draws it. It plots a @racket[glmnet-path] from
-one of the path fitters (see @secref["concepts-path"]) and a
-@racket[glmnet-cv] from one of the cross-validation procedures (see
-@secref["concepts-cv"]).
+one of the path fitters (see @secref["concepts-path"]), a @racket[glmnet-cv]
+from one of the cross-validation procedures (see @secref["concepts-cv"]), and
+a @racket[formula-model] of either (see @secref["formulas"]).
 
 @racket[(require glmnet)] does not load the plots, so a program that only fits
 models does not load the plot library either. They have a module of their
@@ -130,6 +130,23 @@ such as the one the path was fitted to:
 With @racket[#:sign-lambda 1], the path ends at the left, and so do the
 labels. Where R cuts off labels that run past the edge of the plot, these
 plots widen the x axis until the labels fit.
+
+A @racket[formula-model] fitted by @racket[formula-path] or
+@racket[formula-cv] knows its predictors' names, so @racket[#:label #t]
+labels its curves with them:
+
+@examples[#:eval ev #:label #f
+(define table
+  (list (cons "y" y)
+        (cons "x1" (map car X))
+        (cons "x2" (map cadr X))
+        (cons "square" (map caddr X))))
+(define named-path (formula-path (~ y all) table))
+(plot-coefficient-path named-path #:label #t)
+]
+
+For the multi-response family, each plot's y-axis label names its response,
+as R names it by the column of @tt{y}.
 
 @subsection[#:tag "plot-path-multi"]{Several classes or responses}
 
