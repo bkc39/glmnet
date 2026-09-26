@@ -110,7 +110,9 @@ the evaluator from `scribblings/utils.rkt`; never paste output by hand. Use
 tags name the example pages and stay stable. An example section changes when
 its `glmnet/examples/NN-*.rkt` changes. `tests/docs-coverage-test.rkt` fails,
 naming the bindings, if anything `(require glmnet)` exports has no `defproc`,
-`defstruct*`, `defthing` or `defform` entry under `scribblings/`.
+`defstruct*`, `defthing` or `defform` entry in the manual: `scribblings/glmnet.scrbl`
+and the files it reaches through `include-section`, outside code blocks and
+examples. A new `.scrbl` file counts once something includes it.
 
 ## Local dev loop
 
