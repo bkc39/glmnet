@@ -92,21 +92,27 @@
     (define ctol (hash-ref tols 'coef))
     (define ptol (hash-ref tols 'pred))
     (define preds (hash-ref gen 'predict_s))
-    (for ([got (in-list (coef model #:lambda s))]
+    (define coefs (coef model #:lambda s))
+    (check-equal? (length coefs) (length (hash-ref gen 'coef_s)) "coef: number of s")
+    (for ([got (in-list coefs)]
           [expected (in-list (hash-ref gen 'coef_s))]
           [i (in-naturals)])
       (check-nested-close got expected ctol (format "coef[s ~a]" i)))
     (for ([(type all-expected) (in-hash preds)])
-      (for ([got (in-list (predict model X #:type type #:lambda s))]
+      (define all-got (predict model X #:type type #:lambda s))
+      (check-equal? (length all-got) (length all-expected) (format "predict ~a: number of s" type))
+      (for ([got (in-list all-got)]
             [expected (in-list all-expected)]
             [etas (in-list (hash-ref preds 'link))]
             [i (in-naturals)])
         (define msg (format "predict ~a[s ~a]" type i))
-        (if (eq? type 'class)
-            (for ([c (in-list got)] [e (in-list expected)] [eta (in-list etas)] [row (in-naturals)]
-                  #:when (decisive? eta ptol))
-              (check-equal? c e (format "~a[row ~a]" msg row)))
-            (check-nested-close got expected ptol msg)))))
+        (cond
+          [(eq? type 'class)
+           (check-equal? (length got) (length expected) (format "~a: row count" msg))
+           (for ([c (in-list got)] [e (in-list expected)] [eta (in-list etas)] [row (in-naturals)]
+                 #:when (decisive? eta ptol))
+             (check-equal? c e (format "~a[row ~a]" msg row)))]
+          [else (check-nested-close got expected ptol msg)]))))
 
   ;; The path a path or predict golden describes, fitted as R fits it.
   (define (fit-golden-path g ds)
