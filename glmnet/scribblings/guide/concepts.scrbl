@@ -289,16 +289,16 @@ of cross-validation (@hyperlink["https://github.com/bkc39/glmnet/issues/27"]{#27
 @section[#:tag "concepts-predict"]{Predictions and coefficients}
 
 Every result, whether a single fit or a @tech{regularization path}, is a
-@racket[glmnet-model?]. Three procedures work on all of them, as R's generics
-of the same names do:
+@racket[glmnet-model?]. Three procedures work on all of them:
 
 @itemlist[
  @item{@racket[predict] evaluates the model on new rows, given as a
-       @tech{design matrix} with one column per predictor;}
+       @tech{design matrix} with one column per predictor, as R's
+       @tt{predict} does;}
  @item{@racket[coef] returns the intercept, then one coefficient per
-       predictor;}
+       predictor, as R's @tt{coef} does;}
  @item{@racket[deviance-ratio] returns the fraction of null deviance
-       explained.}
+       explained, which R keeps in a fit's @tt{dev.ratio} field.}
 ]
 
 @examples[#:eval ev #:label #f
