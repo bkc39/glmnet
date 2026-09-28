@@ -112,7 +112,7 @@
 ;; Multinomial shares the binomial (lognet) jerr codes: 8000/9000 (a class
 ;; probability collapsed -- e.g. perfect separation) and 90000 (coefficient-bound
 ;; non-convergence) on top of the shared cases in `check-jerr`.
-(define (check-multinomial-jerr jerr who)
+(define (check-multinomial-jerr jerr who [lmu #f])
   (cond
     [(and (>= jerr 8000) (< jerr 9000))
      (error who
@@ -124,7 +124,7 @@
      (error who (format "a class has a degenerate null probability (jerr=~a)" jerr))]
     [(= jerr 90000)
      (error who "coefficient-bound adjustment failed to converge (jerr=90000)")]
-    [else (check-jerr jerr who)]))
+    [else (check-jerr jerr who lmu)]))
 
 ;; --- public API ------------------------------------------------------------
 
@@ -196,7 +196,7 @@
                                  (if standardize? 1 0) (if intercept? 1 0)
                                  (exact->inexact thresh) max-iters
                                  a0 beta dev alm))
-  (check-multinomial-jerr jerr 'multinomial-path)
+  (check-multinomial-jerr jerr 'multinomial-path lmu)
   (define coefficients (unpack-column-groups beta ni k lmu))
   (glmnet-path 'multinomial (finish-lambdas alm lmu (not lambda))
                (for/vector #:length lmu ([a (in-vector (unpack-intercept-groups a0 k lmu))])

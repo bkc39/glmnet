@@ -99,7 +99,7 @@
 ;; Logistic adds the 8000/9000 (a class probability collapsed -- e.g. perfect
 ;; separation) and 90000 (coefficient-bound non-convergence) fatal codes on top
 ;; of the shared cases in `check-jerr`.
-(define (check-logistic-jerr jerr who)
+(define (check-logistic-jerr jerr who [lmu #f])
   (cond
     [(and (>= jerr 8000) (< jerr 9000))
      (error who
@@ -111,7 +111,7 @@
      (error who (format "a class has a degenerate null probability (jerr=~a)" jerr))]
     [(= jerr 90000)
      (error who "coefficient-bound adjustment failed to converge (jerr=90000)")]
-    [else (check-jerr jerr who)]))
+    [else (check-jerr jerr who lmu)]))
 
 ;; --- public API ------------------------------------------------------------
 
@@ -176,7 +176,7 @@
                             (if standardize? 1 0) (if intercept? 1 0)
                             (exact->inexact thresh) max-iters
                             a0 beta dev alm))
-  (check-logistic-jerr jerr 'logistic-path)
+  (check-logistic-jerr jerr 'logistic-path lmu)
   (define coefficients (unpack-columns beta ni lmu))
   (glmnet-path 'binomial (finish-lambdas alm lmu (not lambda))
                (unpack-vector a0 lmu) coefficients (unpack-vector dev lmu)

@@ -69,18 +69,20 @@ curve.
 
 @section[#:tag "ex-cox-path"]{Varying @math{λ}}
 
+@racket[cox-path] fits a list of @math{λ} in one call, largest first
+(@secref["concepts-path"]):
+
 @examples[#:eval ev #:label #f
 (define (round3 x)
   (/ (round (* 1000 x)) 1000))
 (define (rounded v)
   (for/list ([b (in-vector v)])
     (round3 b)))
-(for ([lam (in-list '(0.01 0.1 0.5 1.0))])
-  (define fit (cox-fit X times statuses #:lambda lam))
-  (printf "λ = ~a: β = ~a, dev-ratio = ~a\n"
-          lam
-          (rounded (cox-result-coefficients fit))
-          (round3 (cox-result-dev-ratio fit))))
+(define path (cox-path X times statuses #:lambda '(0.01 0.1 0.5 1.0)))
+(for ([lam (in-vector (glmnet-path-lambda path))]
+      [beta (in-vector (glmnet-path-coefficients path))]
+      [dev (in-vector (glmnet-path-dev-ratio path))])
+  (printf "λ = ~a: β = ~a, dev-ratio = ~a\n" lam (rounded beta) (round3 dev)))
 ]
 
 With eight subjects and five events, a small penalty lets the noise predictor
