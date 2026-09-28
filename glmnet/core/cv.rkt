@@ -187,6 +187,32 @@
          (missing f "event" 1)))]
     [else (void)]))
 
+;; A held-out fold whose own Cox deviance R cannot compute: its first event,
+;; in time order, is among its last two observations, or it has none. R's
+;; coxnet.deviance stops there (jerr 30000 from the Fortran's `groups`).
+(define (check-held-out-events who response held-out)
+  (for ([rows (in-vector held-out)]
+        [f (in-naturals)])
+    (define first-event
+      (for/fold ([t +inf.0]) ([i (in-list rows)]
+                              #:when (fl= (cdr (vector-ref response i)) 1.0))
+        (flmin t (nudged-time (vector-ref response i)))))
+    (define from-first-event
+      (for/sum ([i (in-list rows)])
+        (if (fl>= (nudged-time (vector-ref response i)) first-event) 1 0)))
+    (cond
+      [(= first-event +inf.0)
+       (raise-arguments-error
+        who (string-append "a held-out fold has no event, so its deviance is undefined "
+                           "without grouping; use #:grouped? #t")
+        "held-out fold" f)]
+      [(< from-first-event 3)
+       (raise-arguments-error
+        who (string-append "the first event of a held-out fold is among its last two observations "
+                           "in time order, so its deviance is undefined without grouping; "
+                           "use #:grouped? #t")
+        "held-out fold" f)])))
+
 (define (exact-round y) (inexact->exact (round y)))
 
 ;; --- losses ------------------------------------------------------------------
@@ -339,19 +365,22 @@
 
 ;; --- Cox partial-likelihood deviance -------------------------------------------
 
+;; The time of a (time . status) pair as R's coxnet.deviance sees it: a
+;; censored time is nudged up by 100 * .Machine$double.eps, so that a subject
+;; censored at an event time stays in that event's risk set.
+(define (nudged-time t+d)
+  (fl+ (car t+d) (fl* (fl- 1.0 (cdr t+d)) (fl* 100.0 double-eps))))
+
 ;; R's coxnet.deviance on the observations `rows`, without weights, offset or
 ;; strata: a procedure from a coefficient vector to 2 (lsat - loglik). loglik
 ;; is the Breslow partial log-likelihood that the Fortran's loglike computes,
 ;; from the linear predictor centred at its mean, and lsat its saturated value.
-;; As in R, censored times are first nudged up by 100 * .Machine$double.eps, so
-;; that a subject censored at an event time stays in that event's risk set.
 (define (cox-deviance x rows response)
   (define xs (design-matrix-select-rows x rows))
   (define n (length rows))
   (define times
     (for/vector #:length n ([i (in-list rows)])
-      (define t+d (vector-ref response i))
-      (fl+ (car t+d) (fl* (fl- 1.0 (cdr t+d)) (fl* 100.0 double-eps)))))
+      (nudged-time (vector-ref response i))))
   (define events (for/vector #:length n ([i (in-list rows)]) (cdr (vector-ref response i))))
   (define event-rows (for/list ([d (in-vector events)] [i (in-naturals)] #:when (fl= d 1.0)) i))
   ;; The distinct event times, latest first, and the number of events at each.
@@ -439,9 +468,6 @@
   (define held-out
     (for/vector #:length k ([f (in-range k)])
       (for/list ([g (in-vector folds)] [i (in-naturals)] #:when (= g f)) i)))
-  (define fold-paths
-    (for/vector #:length k ([f (in-range k)])
-      (fit-rows (for/list ([g (in-vector folds)] [i (in-naturals)] #:unless (= g f)) i))))
   (define per-fold (/ n k))
   (define measure*
     (cond
@@ -450,10 +476,22 @@
                     who)
        'deviance]
       [else measure]))
+  (define cox-grouped?
+    (cond
+      [(not (and (eq? family 'cox) (eq? measure* 'deviance))) grouped?]
+      [(and (not grouped?) (< per-fold 10))
+       (log-warning "~a: fewer than 10 observations per fold; the Cox deviance is grouped" who)
+       #t]
+      [else grouped?]))
+  (when (and (eq? family 'cox) (eq? measure* 'deviance) (not cox-grouped?))
+    (check-held-out-events who response held-out))
+  (define fold-paths
+    (for/vector #:length k ([f (in-range k)])
+      (fit-rows (for/list ([g (in-vector folds)] [i (in-naturals)] #:unless (= g f)) i))))
   (define-values (raw weights counts grouped-raw?)
     (cond
       [(eq? family 'cox)
-       (cox-losses who x response path fold-paths held-out folds measure* grouped? per-fold)]
+       (cox-losses x response path fold-paths held-out folds measure* cox-grouped?)]
       [(eq? measure* 'auc)
        (auc-losses response (fold-predictions x path fold-paths held-out) held-out)]
       [else
@@ -551,21 +589,14 @@
 ;; deviance divided by the fold's size (grouped, of all the data less that of
 ;; the training data; otherwise of the held-out fold) or the C-index of the
 ;; held-out fold, with the folds weighted by their sizes.
-(define (cox-losses who x response path fold-paths held-out folds measure grouped? per-fold)
+(define (cox-losses x response path fold-paths held-out folds measure grouped?)
   (define lams (vector->list (glmnet-path-lambda path)))
   (define k (vector-length held-out))
   (define sizes (for/list ([rows (in-vector held-out)]) (->fl (length rows))))
   (define per-fold-columns
     (case measure
       [(deviance)
-       (define grouped?*
-         (cond
-           [(and (not grouped?) (< per-fold 10))
-            (log-warning "~a: fewer than 10 observations per fold; the Cox deviance is grouped"
-                         who)
-            #t]
-           [else grouped?]))
-       (define all (and grouped?* (cox-deviance x (range (design-matrix-nrows x)) response)))
+       (define all (and grouped? (cox-deviance x (range (design-matrix-nrows x)) response)))
        (for/list ([fold-path (in-vector fold-paths)]
                   [rows (in-vector held-out)]
                   [size (in-list sizes)]
@@ -573,7 +604,7 @@
          (define betas (coef fold-path #:lambda lams))
          (define deviance
            (cond
-             [grouped?*
+             [grouped?
               (define training
                 (cox-deviance x
                               (for/list ([g (in-vector folds)] [i (in-naturals)] #:unless (= g f))

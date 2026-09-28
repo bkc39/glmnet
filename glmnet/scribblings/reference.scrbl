@@ -988,13 +988,24 @@ carry the signal:
   @racket['C] is Harrell's concordance index of each fold. Every fold's
   training data must contain an event.
 
+  A held-out fold's own deviance is undefined when the fold has no event, or
+  when its first event is among its last two observations in time order. R
+  stops then, and so does @racket[cox-cv], naming the fold. With
+  @racket[#:grouped? #t], the default, the fold's own deviance is not needed.
+
   @examples[#:eval ev
   (define times (for/list ([v (in-list y60)]) (exp (* -0.3 v))))
   (define statuses
     (for/list ([i (in-range 60)])
       (if (zero? (modulo i 5)) 0 1)))
   (cox-cv X60 times statuses)
-  (cox-cv X60 times statuses #:type-measure 'C)]}
+  (cox-cv X60 times statuses #:type-measure 'C)
+  (define thirds (for/list ([i (in-range 60)]) (modulo i 3)))
+  (define fold-0-censored
+    (for/list ([i (in-range 60)])
+      (if (zero? (modulo i 3)) 0 1)))
+  (eval:error
+   (cox-cv X60 times fold-0-censored #:fold-ids thirds #:grouped? #f))]}
 
 @defproc[(poisson-cv [X design-matrix/c]
                      [y (and/c (listof (>=/c 0)) pair?)]

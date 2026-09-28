@@ -567,11 +567,18 @@ probabilities with 0/1 indicators of the classes. @racket['auc] and
 By default the errors are averaged within each fold first, which R calls
 @emph{grouped}; @racket[#:grouped? #f] computes the error and its standard
 error over the individual observations instead. As in R, the folds are never
-grouped when they have fewer than 3 observations each, @racket['auc] needs 10
-observations per fold and otherwise falls back to @racket['deviance], and each
-of these changes logs a warning. For Cox models, the deviance of a fold is
-computed as R computes it: the deviance of all the data less that of the
-fold's training data, at the fold's coefficients.
+grouped when they average fewer than 3 observations, @racket['auc] needs an
+average of 10 observations per fold and otherwise falls back to
+@racket['deviance], and each of these changes logs a warning.
+
+For Cox models, the deviance of a fold is computed as R computes it. Grouped,
+it is the deviance of all the data less that of the fold's training data, at
+the fold's coefficients. Ungrouped, it is the deviance of the held-out fold
+alone, which is undefined when the fold has no event or when its first event
+is among its last two observations in time order; R stops then, and so does
+@racket[cox-cv], naming the fold. When the folds average fewer than 10
+observations, the Cox deviance is grouped even with @racket[#:grouped? #f],
+with a warning, as in R.
 
 @section[#:tag "concepts-standardize"]{Standardization and the intercept}
 

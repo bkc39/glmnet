@@ -221,8 +221,41 @@
                   (regexp-match? #rx"logistic-cv: fewer than 10 observations per fold" m))))
 
   (test-case "fewer than 10 observations per fold: the Cox deviance is grouped"
-    (check-equal? (cox-cv X times statuses #:fold-ids folds #:grouped? #f)
-                  (cox-cv X times statuses #:fold-ids folds)))
+    (define-values (ungrouped messages)
+      (warnings-of (lambda () (cox-cv X times statuses #:fold-ids folds #:grouped? #f))))
+    (check-equal? ungrouped (cox-cv X times statuses #:fold-ids folds))
+    (check-true (for/or ([m (in-list messages)])
+                  (regexp-match? #rx"cox-cv: fewer than 10 observations per fold; the Cox deviance is grouped"
+                                 m))))
+
+  ;; Ten observations in each of three folds, so that the Cox deviance can be
+  ;; ungrouped, with every time distinct. Fold 0 holds rows 0, 3, ..., 27, in
+  ;; time order; R's cv.glmnet stops on the first two of these status vectors,
+  ;; and not on the third.
+  (define fold-of-3 (for/list ([i (in-range n)]) (modulo i 3)))
+  (define distinct-times (for/list ([i (in-range n)]) (+ 1.0 i)))
+  (define (fold-0-events . rows)
+    (for/list ([i (in-range n)])
+      (if (or (positive? (modulo i 3)) (memv i rows)) 1 0)))
+
+  (test-case "ungrouped Cox deviance: a held-out fold without an event stops, as in R"
+    (check-contract-error
+     (lambda () (cox-cv X distinct-times (fold-0-events) #:fold-ids fold-of-3 #:grouped? #f))
+     #rx"^cox-cv: a held-out fold has no event, so its deviance is undefined without grouping"
+     #rx"held-out fold: 0")
+    (check-true (glmnet-cv? (cox-cv X distinct-times (fold-0-events) #:fold-ids fold-of-3))))
+
+  (test-case "ungrouped Cox deviance: a first event among a fold's last two observations stops"
+    (for ([row (in-list '(24 27))])
+      (check-contract-error
+       (lambda () (cox-cv X distinct-times (fold-0-events row) #:fold-ids fold-of-3 #:grouped? #f))
+       #rx"^cox-cv: the first event of a held-out fold is among its last two observations"
+       #rx"held-out fold: 0"))
+    (define third-last (cox-cv X distinct-times (fold-0-events 21) #:fold-ids fold-of-3 #:grouped? #f))
+    (check-true (for/and ([v (in-vector (glmnet-cv-cvm third-last))]) (rational? v)))
+    (check-not-equal? (glmnet-cv-cvm third-last)
+                      (glmnet-cv-cvm (cox-cv X distinct-times (fold-0-events 21)
+                                             #:fold-ids fold-of-3))))
 
   ;; --- losses ----------------------------------------------------------------
 
