@@ -64,6 +64,16 @@
 
   ;; --- contracts / input validation -----------------------------------------
 
+  (test-case "a response matrix whose every column is constant is rejected"
+    (check-exn #rx"^mgaussian-fit: y is constant; gaussian glmnet fails at standardization step"
+               (lambda () (mgaussian-fit X '((2 3) (2 3) (2 3) (2 3) (2 3) (2 3)) #:lambda 0.1))))
+
+  (test-case "a single constant column fits, with its mean as intercept, as in R"
+    (define r (mgaussian-fit X (for/list ([row (in-list Y)]) (list (car row) 3.0)) #:lambda 0.1))
+    (check-= (vector-ref (mgaussian-result-intercepts r) 1) 3.0 1e-12)
+    (check-true (for/and ([b (in-vector (vector-ref (mgaussian-result-coefficients r) 1))])
+                  (zero? b))))
+
   (test-case "a ragged response matrix is rejected"
     (check-exn exn:fail?
                (lambda () (mgaussian-fit '((1.0 2.0) (3.0 4.0)) '((1.0 2.0) (3.0)) #:lambda 0.1))))

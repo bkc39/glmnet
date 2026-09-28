@@ -67,8 +67,9 @@ is the same for all of them. It has two knobs:
        coefficients exactly to zero; values in between are the elastic net.
        Every fit procedure defaults to @racket[1.0].}
  @item{@bold{@racket[#:lambda], @math{λ ≥ 0}}, sets the penalty's strength.
-       It is required: there is no default and, for now, no automatic path of
-       values. @math{λ = 0} is the unpenalized fit.}
+       A single fit requires it; to fit a whole sequence of values at once, use
+       a @tech{regularization path} (@secref["concepts-path"]). @math{λ = 0} is
+       the unpenalized fit.}
 ]
 
 The four Gaussian models are one routine, @racket[elnet-fit], with different
@@ -126,6 +127,8 @@ linear predictor @math{η = β₀ + xβ} to the response:
 All six fit procedures take the same keywords: @racket[#:lambda],
 @racket[#:alpha], @racket[#:standardize?], @racket[#:intercept?] (not
 @racket[cox-fit]), @racket[#:thresh] and @racket[#:max-iters].
+Each also has a path counterpart that fits many values of @math{λ} at once;
+see @secref["concepts-path"].
 
 @section[#:tag "concepts-results"]{Results}
 
@@ -160,6 +163,60 @@ field and @racket[match] destructures them:
 (match-define (elnet-result a0 beta _ _ _) fit)
 (list a0 beta)
 ]
+
+@section[#:tag "concepts-path"]{Regularization paths}
+
+The right @math{λ} is rarely known in advance. A @deftech{regularization path}
+fits a whole decreasing sequence of @math{λ} in one call, starting each fit
+from the solution before it, which is much cheaper than fitting each value
+separately. It is how R's @tt{glmnet(x, y)} is normally used. Every family has
+a path fitter: @racket[elnet-path], @racket[logistic-path],
+@racket[multinomial-path], @racket[cox-path], @racket[poisson-path] and
+@racket[mgaussian-path]. They take the same keywords as the single fits,
+except that @racket[#:lambda] is optional and, when given, a list.
+
+Without @racket[#:lambda], glmnet chooses the sequence the way R does:
+@racket[#:nlambda] values (default @racket[100]) from @math{λ_max}, the
+smallest @math{λ} at which every coefficient is zero, down to
+@racket[#:lambda-min-ratio] times @math{λ_max} (default @racket[0.01] when there
+are fewer observations than predictors, otherwise @racket[1e-4]):
+
+@examples[#:eval ev #:label #f
+(vector-length (glmnet-path-lambda (elnet-path X y)))
+(define path (elnet-path X y #:nlambda 12))
+(vector-ref (glmnet-path-coefficients path) 0)
+(glmnet-path-df path)
+]
+
+A @racket[glmnet-path] holds one entry per fitted @math{λ} in each of its
+@racket[lambda], @racket[intercepts], @racket[coefficients],
+@racket[dev-ratio] and @racket[df] fields. At the first @math{λ} every
+coefficient is zero; @racket[df] counts the predictors in the model as the
+penalty relaxes, here @math{x₁} first and then @math{x₂}. The default path has
+50 values, not 100, because glmnet, like R, stops an automatic sequence once
+another @math{λ} would barely change the fit. For the Gaussian family that is
+when @math{R²} gains less than @racket[1e-5] of its own value from one
+@math{λ} to the next, or passes @racket[0.999]; the reference lists each
+family's rule (@secref["ref-path"]).
+
+With @racket[#:lambda], the path fits those values, largest first:
+
+@examples[#:eval ev #:label #f
+(define user-path (elnet-path X y #:lambda '(0.01 0.5 0.1)))
+(glmnet-path-lambda user-path)
+(glmnet-path-coefficients user-path)
+]
+
+Each point agrees with the single fit at that @math{λ} to within the solver's
+tolerance. The early-stopping rule does not apply to a user sequence, but any
+path can still end early, for example where glmnet fails at one of its values
+by not converging within @racket[#:max-iters] passes. It then keeps the values
+before that one and logs a warning (@secref["concepts-convergence"]):
+
+@examples[#:eval ev #:label #f
+(glmnet-path-lambda (elnet-path X y #:lambda '(0.5 0.1 0.01) #:max-iters 1))
+] Choosing among the values on a path is the job of cross-validation
+(@hyperlink["https://github.com/bkc39/glmnet/issues/27"]{#27}).
 
 @section[#:tag "concepts-standardize"]{Standardization and the intercept}
 
@@ -203,17 +260,22 @@ Problems are reported in three ways:
  @item{Before the solver runs, an argument of the wrong type raises
        @racket[exn:fail:contract], and rows or responses of mismatched length
        raise @racket[exn:fail].}
- @item{A fatal condition reported by glmnet raises @racket[exn:fail] with a
-       readable message, for example when every predictor is constant, or when
-       a class probability collapses under perfect separation (a larger
-       @racket[#:lambda] usually fixes that).}
- @item{If the solver hits @racket[#:max-iters] before converging, the result
-       is still returned, holding partial coefficients, and a warning is logged
-       to the current logger.}
+ @item{Data that glmnet cannot fit raises @racket[exn:fail] with a readable
+       message: for example when every predictor is constant, when a class
+       probability collapses under perfect separation (a larger
+       @racket[#:lambda] usually fixes that), or when a Gaussian response is
+       constant, as R reports too.}
+ @item{When glmnet fits no @math{λ} at all, for example because the solver
+       hits @racket[#:max-iters] before converging, the fit raises
+       @racket[exn:fail] with glmnet's reason, naming the procedure called. R
+       warns and returns an empty model instead. A @tech{regularization path}
+       that fails after fitting some @math{λ} keeps those and logs a warning
+       with the topic @racket['glmnet], as R warns.}
 ]
 
 @examples[#:eval ev #:label #f
 (eval:error (ols '((1.0 2.0) (1.0 2.0) (1.0 2.0)) '(1.0 2.0 3.0)))
+(eval:error (lasso X y #:lambda 0.01 #:max-iters 1))
 ]
 
 @section[#:tag "concepts-precision"]{The native library}
