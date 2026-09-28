@@ -26,6 +26,11 @@
     (for ([bk (in-vector (multinomial-result-coefficients r))])
       (check-equal? (vector-length bk) 2)))
 
+  (test-case "the intercepts are centred to sum to zero, as R's coef() reports them"
+    (check-= (for/sum ([a (in-vector (multinomial-result-intercepts (multinomial-fit X y #:lambda 0.01)))])
+               a)
+             0.0 1e-12))
+
   (test-case "each class loads on its discriminating feature with the right sign"
     (define b (multinomial-result-coefficients (multinomial-fit X y #:lambda 0.01)))
     (check-true (< (vector-ref (vector-ref b 0) 0) 0.0) "class 0: low x1")

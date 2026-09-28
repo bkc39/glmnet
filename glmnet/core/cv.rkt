@@ -24,8 +24,10 @@
  (struct-out glmnet-cv)
  (contract-out
   [random-fold-ids
-   (->* (exact-positive-integer?) (exact-positive-integer?)
-        (listof exact-nonnegative-integer?))]))
+   (->i ([n exact-positive-integer?])
+        (#:nfolds [nfolds exact-positive-integer?])
+        #:pre/desc (n nfolds) (folds-within n nfolds)
+        [_ (listof exact-nonnegative-integer?)])]))
 
 ;; For the family modules and the unit tests only; not part of the public API.
 (module* support #f
@@ -68,7 +70,6 @@
        dev))])
 
 (define nfolds/c (and/c exact-integer? (>=/c 3)))
-(define fold-ids/c (or/c #f (and/c (listof exact-nonnegative-integer?) pair?)))
 (define cv-lambda-sequence/c
   (or/c #f (and/c (listof (>=/c 0)) (property/c length (>=/c 2)))))
 
@@ -77,15 +78,31 @@
   (for/list ([i (in-list rows)])
     (vector-ref v i)))
 
+;; The distinct values of a sorted list of flonums, in order, and how many
+;; times each occurs.
+(define (runs sorted)
+  (for/fold ([distinct '()] [counts '()] #:result (values (reverse distinct) (reverse counts)))
+            ([x (in-list sorted)])
+    (if (and (pair? distinct) (fl= x (car distinct)))
+        (values distinct (cons (add1 (car counts)) (cdr counts)))
+        (values (cons x distinct) (cons 1 counts)))))
+
 ;; --- folds -------------------------------------------------------------------
+
+(define default-nfolds 10)
+
+;; random-fold-ids's precondition: no more folds than observations.
+(define (folds-within n nfolds)
+  (define k (if (unsupplied-arg? nfolds) default-nfolds nfolds))
+  (or (<= k n)
+      (list "there are more folds than observations"
+            (format "folds: ~a" k)
+            (format "observations: ~a" n))))
 
 ;; n fold ids, as R's sample(rep(seq(nfolds), length = n)) makes them: the ids
 ;; 0, 1, ..., nfolds - 1, 0, 1, ... shuffled with the current pseudo-random
 ;; generator.
-(define (random-fold-ids n [nfolds 10])
-  (when (> nfolds n)
-    (raise-arguments-error 'random-fold-ids "there are more folds than observations"
-                           "folds" nfolds "observations" n))
+(define (random-fold-ids n #:nfolds [nfolds default-nfolds])
   (define ids (for/vector #:length n ([i (in-range n)]) (modulo i nfolds)))
   (for ([i (in-range (sub1 n) 0 -1)])
     (define j (random (add1 i)))
@@ -94,6 +111,38 @@
     (vector-set! ids j t))
   (vector->list ids))
 
+;; A #:fold-ids argument: #f, or fold ids from 0 that use every fold up to the
+;; largest, of which there are at least 3. Only ids below the number of
+;; observations are tallied, so a huge id costs no memory: with more folds than
+;; observations, one of those ids is necessarily missing.
+(define fold-ids/c
+  (and/c (or/c #f (and/c (listof exact-nonnegative-integer?) pair?))
+         (flat-contract-with-explanation
+          (lambda (ids)
+            (define k (and ids (add1 (apply max ids))))
+            (define (missing-fold)
+              (define present (make-vector (min k (length ids)) #f))
+              (for ([f (in-list ids)] #:when (< f (vector-length present)))
+                (vector-set! present f #t))
+              (for/first ([p (in-vector present)] [f (in-naturals)] #:unless p) f))
+            (cond
+              [(not ids) #t]
+              [(< k 3)
+               (lambda (blame)
+                 (raise-blame-error blame ids
+                                    '("cross-validation needs at least 3 folds"
+                                      expected: "fold ids from 0 to at least 2" given: "~e")
+                                    ids))]
+              [(missing-fold)
+               => (lambda (f)
+                    (lambda (blame)
+                      (raise-blame-error blame ids
+                                         '("a fold has no observations; fold ids must cover 0 to ~a"
+                                           expected: "an observation in fold ~a" given: "~e")
+                                         (sub1 k) f ids)))]
+              [else #t]))
+          #:name 'fold-ids-covering-every-fold)))
+
 ;; The fold of each of the n observations, as a vector.
 (define (resolve-folds who n nfolds fold-ids)
   (cond
@@ -101,23 +150,12 @@
      (unless (= (length fold-ids) n)
        (raise-arguments-error who "fold-ids does not have one entry per row of X"
                               "length of fold-ids" (length fold-ids) "rows of X" n))
-     (define k (add1 (apply max fold-ids)))
-     (when (< k 3)
-       (raise-arguments-error who "cross-validation needs at least 3 folds" "folds" k))
-     (define sizes (make-vector k 0))
-     (for ([f (in-list fold-ids)])
-       (vector-set! sizes f (add1 (vector-ref sizes f))))
-     (for ([size (in-vector sizes)]
-           [f (in-naturals)]
-           #:when (zero? size))
-       (raise-arguments-error who "a fold has no observations; fold ids must cover 0..k-1"
-                              "fold" f "k" k))
      (list->vector fold-ids)]
     [else
      (when (> nfolds n)
        (raise-arguments-error who "there are more folds than observations"
                               "folds" nfolds "observations" n))
-     (list->vector (random-fold-ids n nfolds))]))
+     (list->vector (random-fold-ids n #:nfolds nfolds))]))
 
 ;; Each fold's training data (every other fold) must be data the family can
 ;; fit: both classes for the binomial, every class for the multinomial, and an
@@ -148,6 +186,32 @@
                  (and (not (= g f)) (fl= (cdr t+d) 1.0)))
          (missing f "event" 1)))]
     [else (void)]))
+
+;; A held-out fold whose own Cox deviance R cannot compute: its first event,
+;; in time order, is among its last two observations, or it has none. R's
+;; coxnet.deviance stops there (jerr 30000 from the Fortran's `groups`).
+(define (check-held-out-events who response held-out)
+  (for ([rows (in-vector held-out)]
+        [f (in-naturals)])
+    (define first-event
+      (for/fold ([t +inf.0]) ([i (in-list rows)]
+                              #:when (fl= (cdr (vector-ref response i)) 1.0))
+        (flmin t (nudged-time (vector-ref response i)))))
+    (define from-first-event
+      (for/sum ([i (in-list rows)])
+        (if (fl>= (nudged-time (vector-ref response i)) first-event) 1 0)))
+    (cond
+      [(= first-event +inf.0)
+       (raise-arguments-error
+        who (string-append "a held-out fold has no event, so its deviance is undefined "
+                           "without grouping; use #:grouped? #t")
+        "held-out fold" f)]
+      [(< from-first-event 3)
+       (raise-arguments-error
+        who (string-append "the first event of a held-out fold is among its last two observations "
+                           "in time order, so its deviance is undefined without grouping; "
+                           "use #:grouped? #t")
+        "held-out fold" f)])))
 
 (define (exact-round y) (inexact->exact (round y)))
 
@@ -250,12 +314,13 @@
 ;; auc and Cindex compute. A pair is comparable when the earlier time is an
 ;; event; an event comes before a censored time equal to it, and two events at
 ;; the same time are not compared. A comparable pair is concordant when the
-;; later time has the larger x, and a tie in x counts a half. The pairs are
-;; counted in O(n log n) with a Fenwick tree over the ranks of x.
+;; later time has the larger x, and a tie in x counts a half. Sorting and a
+;; Fenwick tree over the ranks of x count the pairs in O(n log n).
 (define (concordance times statuses xs)
   (define n (vector-length times))
   (define keys (for/vector #:length n ([x (in-vector xs)]) (fl+ 0.0 x)))
-  (define distinct (list->vector (sort (remove-duplicates (vector->list keys) =) <)))
+  (define-values (distinct-keys _) (runs (sort (vector->list keys) <)))
+  (define distinct (list->vector distinct-keys))
   (define m (vector-length distinct))
   (define (rank i)
     (define x (vector-ref keys i))
@@ -300,27 +365,28 @@
 
 ;; --- Cox partial-likelihood deviance -------------------------------------------
 
+;; The time of a (time . status) pair as R's coxnet.deviance sees it: a
+;; censored time is nudged up by 100 * .Machine$double.eps, so that a subject
+;; censored at an event time stays in that event's risk set.
+(define (nudged-time t+d)
+  (fl+ (car t+d) (fl* (fl- 1.0 (cdr t+d)) (fl* 100.0 double-eps))))
+
 ;; R's coxnet.deviance on the observations `rows`, without weights, offset or
 ;; strata: a procedure from a coefficient vector to 2 (lsat - loglik). loglik
 ;; is the Breslow partial log-likelihood that the Fortran's loglike computes,
 ;; from the linear predictor centred at its mean, and lsat its saturated value.
-;; As in R, censored times are first nudged up by 100 * .Machine$double.eps, so
-;; that a subject censored at an event time stays in that event's risk set.
 (define (cox-deviance x rows response)
   (define xs (design-matrix-select-rows x rows))
   (define n (length rows))
   (define times
     (for/vector #:length n ([i (in-list rows)])
-      (define t+d (vector-ref response i))
-      (fl+ (car t+d) (fl* (fl- 1.0 (cdr t+d)) (fl* 100.0 double-eps)))))
+      (nudged-time (vector-ref response i))))
   (define events (for/vector #:length n ([i (in-list rows)]) (cdr (vector-ref response i))))
   (define event-rows (for/list ([d (in-vector events)] [i (in-naturals)] #:when (fl= d 1.0)) i))
   ;; The distinct event times, latest first, and the number of events at each.
-  (define event-times
-    (sort (remove-duplicates (for/list ([i (in-list event-rows)]) (vector-ref times i)) =) >))
-  (define events-at
-    (for/list ([t (in-list event-times)])
-      (for/sum ([i (in-list event-rows)] #:when (fl= (vector-ref times i) t)) 1.0)))
+  (define-values (event-times event-counts)
+    (runs (sort (for/list ([i (in-list event-rows)]) (vector-ref times i)) >)))
+  (define events-at (map ->fl event-counts))
   (define lsat (fl- 0.0 (r-sum (for/list ([dk (in-list events-at)]) (fl* dk (fllog dk))))))
   (define latest-first (sort (range n) > #:key (lambda (i) (vector-ref times i))))
   (define fmax (fllog (fl* 0.1 1.7976931348623157e308)))
@@ -396,15 +462,12 @@
   (define n (design-matrix-nrows x))
   (define folds (resolve-folds who n nfolds fold-ids))
   (define k (add1 (for/fold ([m 0]) ([f (in-vector folds)]) (max m f))))
-  (define path (fit-all))
+  (define path (fitting who "fitting all the data" fit-all))
   (define family (glmnet-path-family path))
   (check-training-folds who family response folds k)
   (define held-out
     (for/vector #:length k ([f (in-range k)])
       (for/list ([g (in-vector folds)] [i (in-naturals)] #:when (= g f)) i)))
-  (define fold-paths
-    (for/vector #:length k ([f (in-range k)])
-      (fit-rows (for/list ([g (in-vector folds)] [i (in-naturals)] #:unless (= g f)) i))))
   (define per-fold (/ n k))
   (define measure*
     (cond
@@ -413,10 +476,25 @@
                     who)
        'deviance]
       [else measure]))
+  (define cox-grouped?
+    (cond
+      [(not (and (eq? family 'cox) (eq? measure* 'deviance))) grouped?]
+      [(and (not grouped?) (< per-fold 10))
+       (log-warning "~a: fewer than 10 observations per fold; the Cox deviance is grouped" who)
+       #t]
+      [else grouped?]))
+  (when (and (eq? family 'cox) (eq? measure* 'deviance) (not cox-grouped?))
+    (check-held-out-events who response held-out))
+  (define fold-paths
+    (for/vector #:length k ([f (in-range k)])
+      (fitting who (format "fitting the training data of held-out fold ~a" f)
+               (lambda ()
+                 (fit-rows (for/list ([g (in-vector folds)] [i (in-naturals)] #:unless (= g f))
+                             i))))))
   (define-values (raw weights counts grouped-raw?)
     (cond
       [(eq? family 'cox)
-       (cox-losses who x response path fold-paths held-out folds measure* grouped? per-fold)]
+       (cox-losses x response path fold-paths held-out folds measure* cox-grouped?)]
       [(eq? measure* 'auc)
        (auc-losses response (fold-predictions x path fold-paths held-out) held-out)]
       [else
@@ -472,6 +550,18 @@
              lambda-min lambda-1se index-min index-1se
              (vector->list folds)))
 
+;; Calls fit, and raises a failure again under the name of the procedure the
+;; user called, with `what` in place of the path fitter's name.
+(define (fitting who what fit)
+  (with-handlers ([exn:fail?
+                   (lambda (e)
+                     (define message
+                       (format "~a: ~a: ~a" who what
+                               (regexp-replace #rx"^[^ :\n]+-path: " (exn-message e) "")))
+                     (raise ((if (exn:fail:contract? e) exn:fail:contract exn:fail)
+                             message (exn-continuation-marks e))))])
+    (fit)))
+
 ;; Per lambda, per observation, the link prediction of the fold path that did
 ;; not see the observation, at the full-data lambdas: R's buildPredmat with
 ;; alignment = "lambda".
@@ -514,21 +604,14 @@
 ;; deviance divided by the fold's size (grouped, of all the data less that of
 ;; the training data; otherwise of the held-out fold) or the C-index of the
 ;; held-out fold, with the folds weighted by their sizes.
-(define (cox-losses who x response path fold-paths held-out folds measure grouped? per-fold)
+(define (cox-losses x response path fold-paths held-out folds measure grouped?)
   (define lams (vector->list (glmnet-path-lambda path)))
   (define k (vector-length held-out))
   (define sizes (for/list ([rows (in-vector held-out)]) (->fl (length rows))))
   (define per-fold-columns
     (case measure
       [(deviance)
-       (define grouped?*
-         (cond
-           [(and (not grouped?) (< per-fold 10))
-            (log-warning "~a: fewer than 10 observations per fold; the Cox deviance is grouped"
-                         who)
-            #t]
-           [else grouped?]))
-       (define all (and grouped?* (cox-deviance x (range (design-matrix-nrows x)) response)))
+       (define all (and grouped? (cox-deviance x (range (design-matrix-nrows x)) response)))
        (for/list ([fold-path (in-vector fold-paths)]
                   [rows (in-vector held-out)]
                   [size (in-list sizes)]
@@ -536,7 +619,7 @@
          (define betas (coef fold-path #:lambda lams))
          (define deviance
            (cond
-             [grouped?*
+             [grouped?
               (define training
                 (cox-deviance x
                               (for/list ([g (in-vector folds)] [i (in-naturals)] #:unless (= g f))

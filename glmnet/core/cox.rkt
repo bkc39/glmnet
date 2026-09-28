@@ -85,7 +85,7 @@
 ;; Cox adds the 8888 (all observations censored -> no events) and 20000/30000
 ;; (initialization numerical error) fatal codes on top of the shared cases in
 ;; `check-jerr`.
-(define (check-cox-jerr jerr who)
+(define (check-cox-jerr jerr who [lmu #f])
   (cond
     [(= jerr 8888)
      (error who
@@ -96,7 +96,7 @@
                      "Cox initialization numerical error (jerr=~a); check the data "
                      "or try a larger lambda")
                     jerr))]
-    [else (check-jerr jerr who)]))
+    [else (check-jerr jerr who lmu)]))
 
 (define (check-events statuses who)
   (unless (for/or ([s (in-list statuses)]) (= s 1))
@@ -165,7 +165,7 @@
                             (if standardize? 1 0)
                             (exact->inexact thresh) max-iters
                             beta dev alm))
-  (check-cox-jerr jerr 'cox-path)
+  (check-cox-jerr jerr 'cox-path lmu)
   (define coefficients (unpack-columns beta ni lmu))
   (glmnet-path 'cox (finish-lambdas alm lmu (not lambda))
                #f coefficients (unpack-vector dev lmu)
