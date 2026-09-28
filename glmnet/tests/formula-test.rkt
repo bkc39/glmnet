@@ -10,6 +10,7 @@
 
 (module+ test
   (require rackunit
+           racket/generic
            racket/list
            syntax/macro-testing
            glmnet
@@ -305,6 +306,42 @@
     (check-equal? (predict (formula-model-fit gfit)
                            (table->design-matrix longley (take (column-names longley) 6)))
                   (predict gfit longley)))
+
+  ;; A model that gives its fit the predictor and response names it holds.
+  (struct named (fit predictors responses)
+    #:methods gen:glmnet-model
+    [(define/generic ->path glmnet-model->path)
+     (define (glmnet-model->path m) (->path (named-fit m)))
+     (define (glmnet-model-predictor-names m) (named-predictors m))
+     (define (glmnet-model-response-names m) (named-responses m))])
+
+  (test-case "coef and predict need one distinct name per predictor, and per response"
+    (define fit (formula-model-fit gfit))
+    (define names (glmnet-model-predictor-names gfit))
+    (check-equal? (coef (named fit names #f)) (coef gfit))
+    (check-equal? (predict (named fit names #f) longley) (predict gfit longley))
+    (check-exn #rx"coef: the model does not have one name per predictor\n  predictor names: '\\(\\)\n  predictors: 6"
+               (lambda () (coef (named fit '() #f))))
+    (check-exn #rx"predict: the model does not have one name per predictor"
+               (lambda () (predict (named fit '() #f) longley)))
+    (check-exn #rx"coef: the model does not have one name per predictor"
+               (lambda () (coef (named fit (take names 5) #f))))
+    (check-exn #rx"predict: the model does not have one name per predictor"
+               (lambda () (predict (named fit (cons "Employed" names) #f) longley)))
+    (define twice (cons "GNP" (cdr names)))
+    (check-exn #rx"coef: the model gives two predictors the same name\n  name: \"GNP\""
+               (lambda () (coef (named fit twice #f))))
+    (check-exn #rx"predict: the model gives two predictors the same name"
+               (lambda () (predict (named fit twice #f) longley)))
+    (define mg (formula-fit (~ (pulse weight) all) linnerud #:family 'mgaussian #:lambda 1.0))
+    (define mg-names (glmnet-model-predictor-names mg))
+    (check-equal? (coef (named (formula-model-fit mg) mg-names '("pulse" "weight"))) (coef mg))
+    (check-exn #rx"coef: the model does not have one name per response\n  response names: '\\(\"pulse\"\\)\n  responses: 2"
+               (lambda () (coef (named (formula-model-fit mg) mg-names '("pulse"))))))
+
+  (test-case "a formula model is made only by the formula procedures"
+    (check-exn #rx"formula-model: unbound identifier"
+               (lambda () (convert-compile-time-error formula-model))))
 
   (test-case "the name methods of gen:glmnet-model"
     (check-equal? (glmnet-model-predictor-names gfit)

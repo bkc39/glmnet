@@ -1265,11 +1265,15 @@ predictors @racket["x1"] to @racket["x8"]:
 @defstruct*[formula-model ([formula formula?]
                            [predictor-names (listof string?)]
                            [fit glmnet-model?])
-            #:transparent]{
+            #:transparent
+            #:omit-constructor]{
   A model fitted from a formula. @racket[fit] is the result of the family's
   procedure: a single fit, a @racket[glmnet-path] or a @racket[glmnet-cv].
   @racket[predictor-names] names its predictors, in the order of its
-  coefficients.
+  coefficients. Only @racket[formula-fit], @racket[formula-path] and
+  @racket[formula-cv] make a formula model, since only they know that its
+  names are those of the columns its fit was fitted to; the constructor is not
+  exported.
 
   A formula model implements @racket[gen:glmnet-model] through @racket[fit]:
   @racket[predict], @racket[coef] and @racket[deviance-ratio] give what they
@@ -1514,7 +1518,9 @@ family:
   or @racket[#f] if it does not name them. A @racket[formula-model] names them;
   the results of the family procedures do not. When a model names its
   predictors, @racket[coef] keys its coefficients by these names and
-  @racket[predict] reads the columns with these names from a table.
+  @racket[predict] reads the columns with these names from a table. The names
+  must be distinct, one per predictor of the model's path; @racket[coef] and
+  @racket[predict] raise an error for a model whose names are not.
 
   @examples[#:eval ev
   (define named-model
@@ -1531,7 +1537,8 @@ family:
   name them. For a @racket[formula-model], they are the columns of its
   formula's response: for the Cox family the time and status columns. For the
   multi-response family, @racket[coef] keys the coefficients of each response
-  by its name.
+  by its name, and raises an error for a model that does not name each
+  response once.
 
   @examples[#:eval ev
   (glmnet-model-response-names named-model)

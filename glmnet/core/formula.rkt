@@ -48,9 +48,10 @@
   [formula-response (-> formula? formula-response/c)]
   [formula-terms (-> formula? (listof formula-term/c))]
   [formula-predictor-names (-> formula? table? (listof string?))]
-  [struct formula-model ([formula formula?]
-                         [predictor-names (listof string?)]
-                         [fit glmnet-model?])]
+  [formula-model? (-> any/c boolean?)]
+  [formula-model-formula (-> formula-model? formula?)]
+  [formula-model-predictor-names (-> formula-model? (listof string?))]
+  [formula-model-fit (-> formula-model? glmnet-model?)]
   [formula-fit
    (->* (formula? table? #:lambda (>=/c 0))
         (#:family family/c

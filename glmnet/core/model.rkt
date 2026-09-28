@@ -194,13 +194,28 @@
        (vector-append (vector a) b))]
     [else (vector-append (vector a0) beta)]))
 
+;; The names a model gives its predictors, or #f if it names none. They must
+;; name each predictor of its path p once, since `coef` pairs them with the
+;; coefficients and `predict` reads the table's columns by them.
+(define (model-predictor-names who model p)
+  (define names (glmnet-model-predictor-names model))
+  (when names
+    (define n (path-num-predictors p))
+    (unless (= (length names) n)
+      (raise-arguments-error who "the model does not have one name per predictor"
+                             "predictor names" names "predictors" n))
+    (define dup (check-duplicates names))
+    (when dup
+      (raise-arguments-error who "the model gives two predictors the same name" "name" dup)))
+  names)
+
 ;; For a model with named predictors, what turns coefficient-vector's result
 ;; into association lists keyed as R's coef names its rows and list elements:
 ;; "(Intercept)" and the predictor names, inside one list per class label
 ;; (multinomial) or response name (multi-response; y1, y2, ... when the model
 ;; names no responses). For any other model, `values`.
-(define (coefficient-namer model p)
-  (define names (glmnet-model-predictor-names model))
+(define (coefficient-namer who model p)
+  (define names (model-predictor-names who model p))
   (cond
     [(not names) values]
     [else
@@ -215,14 +230,17 @@
      (case (glmnet-path-family p)
        [(multinomial) (label-groups (range k))]
        [(mgaussian)
-        (label-groups (or (glmnet-model-response-names model)
-                          (for/list ([r (in-range k)]) (format "y~a" (add1 r)))))]
+        (define responses (glmnet-model-response-names model))
+        (when (and responses (not (= (length responses) k)))
+          (raise-arguments-error who "the model does not have one name per response"
+                                 "response names" responses "responses" k))
+        (label-groups (or responses (for/list ([r (in-range k)]) (format "y~a" (add1 r)))))]
        [else label])]))
 
 (define (coef model #:lambda [s (glmnet-model-default-lambda model)])
   (define p (glmnet-model->path model))
   (define interpolate (lambda-interpolator (glmnet-path-lambda p)))
-  (define name (coefficient-namer model p))
+  (define name (coefficient-namer 'coef model p))
   (at-lambdas (resolve-lambda 'coef model s)
               (lambda (s)
                 (define-values (a0 beta) (point-at p interpolate s))
@@ -280,11 +298,12 @@
         (for/list ([i (in-range n)])
           (transform (linear-predictor x i a0 beta))))))
 
-;; The new data X as a design matrix with one column per coefficient: for a
-;; model with named predictors, the columns of the table X with those names,
-;; in the model's order; otherwise X itself, column for column.
-(define (model-matrix who model X ni)
-  (define names (glmnet-model-predictor-names model))
+;; The new data X as a design matrix with one column per predictor of the
+;; model's path p: for a model with named predictors, the columns of the table
+;; X with those names, in the model's order; otherwise X itself, column for
+;; column.
+(define (model-matrix who model X p)
+  (define names (model-predictor-names who model p))
   (cond
     [names
      (unless (table? X)
@@ -294,7 +313,7 @@
     [(and (table? X) (not (design-matrix? X)))
      (raise-arguments-error who "the model's predictors are not named, so X must be a design matrix"
                             "X" X)]
-    [else (prediction-matrix X ni who)]))
+    [else (prediction-matrix X (path-num-predictors p) who)]))
 
 ;; `predict`, with `who` named in errors; the family prediction helpers are
 ;; this at a fixed type.
@@ -302,7 +321,7 @@
   (define p (glmnet-model->path model))
   (define family (glmnet-path-family p))
   (check-type who family type)
-  (define x (model-matrix who model X (path-num-predictors p)))
+  (define x (model-matrix who model X p))
   (define interpolate (lambda-interpolator (glmnet-path-lambda p)))
   (define transform (row-transform family type))
   (at-lambdas (resolve-lambda who model s)
