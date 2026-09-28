@@ -923,9 +923,19 @@ family:
 A single fit prints on one line with its family, its @math{λ} (to four
 significant digits), its deviance ratio (to four decimal places) and the
 number of nonzero coefficients out of the number of predictors, counting a
-predictor once when it is nonzero for any class or response. A path prints as
-R's @tt{print.glmnet} table, with one row per fitted @math{λ}. Printing does not
-change @racket[equal?], which compares results field by field.
+predictor once when it is nonzero for any class or response.
+
+A path prints R's @tt{print.glmnet} table line for line, without the
+@tt{Call:} line R prints above it. Each fitted @math{λ} has a row, numbered
+from 1, with @tt{Df}, the deviance ratio as a percentage rounded to two
+places (@tt{%Dev}), and @math{λ} to four significant digits (@tt{Lambda}).
+As in R, @tt{%Dev} and @tt{Lambda} are then rounded to about five significant
+digits of the column's largest value, so a @math{λ} far below the first can
+show as @racket[0], and each column is written with one number of decimals
+throughout, or in scientific notation when that is narrower.
+
+Printing does not change @racket[equal?], which compares results field by
+field.
 
 @examples[#:eval ev
 (list fit clf)

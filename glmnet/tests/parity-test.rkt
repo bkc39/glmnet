@@ -114,6 +114,12 @@
              (check-equal? c e (format "~a[row ~a]" msg row)))]
           [else (check-nested-close got expected ptol msg)]))))
 
+  ;; The lines of a path's printed table, without the #<glmnet-path:family
+  ;; line before it and the > after it.
+  (define (printed-table p)
+    (define s (format "~a" p))
+    (cdr (regexp-split #rx"\n" (substring s 0 (sub1 (string-length s))))))
+
   ;; The path a path or predict golden describes, fitted as R fits it.
   (define (fit-golden-path g ds)
     (define family (hash-ref g 'family))
@@ -132,12 +138,13 @@
                                        #:thresh thresh)]))
 
   ;; predict and coef along a path (#25), at s on, between, above and below
-  ;; the fitted lambdas.
+  ;; the fitted lambdas, and the path's printed table.
   (define (run-predict-golden g)
     (define ds (load-dataset (hash-ref g 'dataset)))
     (define p  (fit-golden-path g ds))
     (test-case (hash-ref g 'id)
-      (check-generic p (first ds) g (hash-ref (hash-ref g 'meta) 'tolerances))))
+      (check-generic p (first ds) g (hash-ref (hash-ref g 'meta) 'tolerances))
+      (check-equal? (printed-table p) (hash-ref g 'print) "printed table")))
 
   ;; A regularization path (#10): R's lambda sequence (or the user's), where it
   ;; stops, and the fit at every lambda.

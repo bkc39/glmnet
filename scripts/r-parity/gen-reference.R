@@ -287,7 +287,13 @@ for (f in path_fixtures) {
 ## The generic interface on each path fixture above, at four s given in this
 ## (unsorted) order: a fitted lambda, a point 30% of the way from one fitted
 ## lambda to the next, and points above the largest and below the smallest
-## fitted lambda, which lambda.interp clamps to the ends of the path.
+## fitted lambda, which lambda.interp clamps to the ends of the path. `print`
+## holds the lines of R's print.glmnet table, from its header on.
+
+print_table <- function(fit) {
+  out <- capture.output(print(fit))
+  out[grep("^ +Df +%Dev +Lambda$", out)[1]:length(out)]
+}
 
 for (f in path_fixtures) {
   d   <- datasets[[f$dataset]]
@@ -299,7 +305,8 @@ for (f in path_fixtures) {
   golden <- list(id = sub("^path-", "predict-", f$id), dataset = f$dataset,
                  family = f$family, kind = "predict", alpha = f$alpha, thresh = 1e-7)
   if (!is.null(f$lambda)) golden$lambda_user <- f$lambda
-  golden <- c(golden, generic_outputs(fit, f$family, d$X, s), list(meta = meta))
+  golden <- c(golden, generic_outputs(fit, f$family, d$X, s),
+              list(print = print_table(fit), meta = meta))
   path <- file.path(goldens_dir, paste0(golden$id, ".json"))
   writeLines(toJSON(golden, digits = NA, auto_unbox = TRUE, pretty = TRUE), path)
   cat("wrote", path, "  ( s =", signif(s, 4), ")\n")

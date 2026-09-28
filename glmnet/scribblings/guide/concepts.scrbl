@@ -265,9 +265,9 @@ penalty relaxes, here @math{x₁} first and then @math{x₂}. The default path h
 barely change the fit: when the deviance ratio improves by less than
 @racket[1e-5] or passes @racket[0.999].
 
-A path prints as R prints one: for each fitted @math{λ}, the number of
-nonzero coefficients (@tt{Df}), the percentage of the null deviance explained
-(@tt{%Dev}) and @math{λ}:
+A path prints as R prints one: a numbered row for each fitted @math{λ}, with
+the number of nonzero coefficients (@tt{Df}), the percentage of the null
+deviance explained (@tt{%Dev}) and @math{λ}:
 
 @examples[#:eval ev #:label #f
 path
