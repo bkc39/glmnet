@@ -179,14 +179,25 @@
                (lambda () (plot-coefficient-path (formula-fit (~ y all) table #:lambda 0.1))))
     (check-exn exn:fail:contract? (lambda () (plot-cv p))))
 
-  (test-case "a formula model's responses name the multi-response panels"
-    (define table (list (cons "u" (map first Y)) (cons "v" (map second Y))
-                        (cons "a" (map first X)) (cons "b" (map second X))))
+  (test-case "a formula model's responses name the multi-response panels, in the formula's order"
+    (define-values (u v a b) (values (map first Y) (map second Y) (map first X) (map second X)))
+    (define table (list (cons "u" u) (cons "v" v) (cons "a" a) (cons "b" b)))
     (define mg (formula-path (~ (v u) a b) table #:family 'mgaussian))
-    (check-equal? (map panel-y-label (path-panels (formula-model-fit mg) 'coef '("v" "u")))
+    (check-equal? (map panel-y-label
+                       (path-panels (formula-model-fit mg) 'coef (glmnet-model-response-names mg)))
                   '("Coefficients: Response v" "Coefficients: Response u"))
     (check-equal? (map panel-y-label (path-panels (formula-model-fit mg) 'coef))
                   '("Coefficients: Response y1" "Coefficients: Response y2"))
+    ;; The same fit with its responses named the other way round draws other
+    ;; panel titles, and a table in another order draws the same ones.
+    (define swapped (list (cons "u" v) (cons "v" u) (cons "a" a) (cons "b" b)))
+    (define mg-swapped (formula-path (~ (u v) a b) swapped #:family 'mgaussian))
+    (check-equal? (formula-model-fit mg-swapped) (formula-model-fit mg))
+    (check-not-equal? (png (plot-coefficient-path mg)) (png (plot-coefficient-path mg-swapped)))
+    (define reordered (list (cons "b" b) (cons "u" u) (cons "a" a) (cons "v" v)))
+    (check-equal? (png (plot-coefficient-path (formula-path (~ (v u) a b) reordered
+                                                            #:family 'mgaussian)))
+                  (png (plot-coefficient-path mg)))
     (check-not-equal? (png (plot-coefficient-path mg #:label #t))
                       (png (plot-coefficient-path (formula-model-fit mg) #:label '(a b))))
     (check-size (plot-coefficient-path mg #:label #t #:height 200) 400 400))
