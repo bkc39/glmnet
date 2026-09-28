@@ -252,13 +252,13 @@
              #:when (for/or ([beta (in-vector betas)]) (not (zero? (vector-ref beta j)))))
     j))
 
-;; The (x . coefficients) pairs of the lambdas whose x is finite, in path
-;; order: those a log axis can show.
-(define (finite-points xs betas)
+;; For the lambdas whose x is finite, those a log axis can show, the pairs of
+;; that x and the lambda's entry of `per-lambda`, in path order.
+(define (finite-points xs per-lambda)
   (for/list ([x (in-list xs)]
-             [beta (in-vector betas)]
+             [v (in-vector per-lambda)]
              #:when (finite? x))
-    (cons x beta)))
+    (cons x v)))
 
 (define (model-path model)
   (if (glmnet-cv? model) (glmnet-cv-path model) model))
@@ -336,13 +336,11 @@
 ;; of the bottom axis's ticks, the count read off the path by R's approx with
 ;; method "constant" and `f`.
 (define (count-ticks xs counts f)
-  (define finite-points
-    (for/list ([x (in-list xs)] [c (in-vector counts)] #:when (finite? x))
-      (cons x c)))
+  (define points (finite-points xs counts))
   (cond
-    [(null? finite-points) no-ticks]
+    [(null? points) no-ticks]
     [else
-     (define count-at (constant-approx (map car finite-points) (map cdr finite-points) f))
+     (define count-at (constant-approx (map car points) (map cdr points) f))
      ;; plot-lib merges neighbouring ticks that have the same label, and only
      ;; draws the labels of major ticks. Each minor tick gets a different blank
      ;; label, so that two major ticks with the same count stay apart.
