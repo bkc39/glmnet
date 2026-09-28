@@ -332,13 +332,12 @@
     (for/first ([label (in-naturals)]
                 #:unless (hash-ref present label #f))
       label))
-  (cond
-    [(zero? largest)
-     (raise-arguments-error who "a multinomial response needs at least two classes"
-                            "column" column)]
-    [(< missing largest)
-     (raise-arguments-error who "a multinomial response must use every class label from 0 to its largest"
-                            "column" column "missing label" missing "largest label" largest)]))
+  (when (zero? largest)
+    (raise-arguments-error who "a multinomial response needs at least two classes"
+                           "column" column))
+  (when (< missing largest)
+    (raise-arguments-error who "a multinomial response must use every class label from 0 to its largest"
+                           "column" column "missing label" missing "largest label" largest)))
 
 ;; The design matrix of predictors and the response arguments of the family's
 ;; procedures, from the table: R's model.frame and model.response.
