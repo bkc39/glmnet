@@ -3,6 +3,18 @@
 
 @(define ev (make-glmnet-eval))
 
+@(require racket/format)
+@(define (enters path j)
+   (~r (ev `(for/first ([lam (in-vector (glmnet-path-lambda ,path))]
+                        [beta (in-vector (glmnet-path-coefficients ,path))]
+                        #:unless (zero? (vector-ref beta ,j)))
+              (- (log lam))))
+       #:precision 2))
+@(define (peak path j)
+   (~r (ev `(for/fold ([m 0.0]) ([beta (in-vector (glmnet-path-coefficients ,path))])
+              (max m (vector-ref beta ,j))))
+       #:precision 2))
+
 @title[#:tag "plots" #:style 'toc]{Plots}
 
 @racketmodname[glmnet/plot] draws the two plots of R's
@@ -66,8 +78,8 @@ To read it as R users do:
 ]
 
 Read from the left, @math{x₁} enters the model at once. @math{x₂} enters at
-about @math{−log λ = 1.2}, where the curve of @math{x₁} bends, and the two
-coefficients then grow towards their least-squares values, @math{2} and
+@math{−log λ = @(enters 'path 1)}, where the curve of @math{x₁} bends, and the
+two coefficients then grow towards their least-squares values, @math{2} and
 @math{−1}. The irrelevant @math{x₃} enters only over the last few @math{λ},
 with a coefficient below @racket[0.001]: its curve looks flat, but the count
 along the top reaches 3.
@@ -78,15 +90,17 @@ The elastic net fits the same data with @racket[#:alpha 0.5], as the
 elastic-net example does:
 
 @examples[#:eval ev #:label #f
-(plot-coefficient-path (elnet-path X y #:alpha 0.5) #:label #t)
+(define enet (elnet-path X y #:alpha 0.5))
+(plot-coefficient-path enet #:label #t)
 ]
 
 The ridge part of the penalty spreads weight across correlated predictors,
 and @math{x₃ = x₁²} is strongly correlated with @math{x₁}. So @math{x₃} enters
 together with @math{x₁}, at the start. Its coefficient peaks near
-@racket[0.07] and shrinks again as the penalty weakens and @math{x₁} takes
-over, while @math{x₂} enters at about @math{−log λ = 0.85}. The lasso, which
-has no ridge part, picked @math{x₁} alone. @secref["ex-elastic-net-grouping"]
+@racketvalfont{@(peak 'enet 2)} and shrinks again as the penalty weakens and
+@math{x₁} takes over, while @math{x₂} enters at
+@math{−log λ = @(enters 'enet 1)}. The lasso, which has no ridge part, picked
+@math{x₁} alone. @secref["ex-elastic-net-grouping"]
 shows the same effect in single fits.
 
 @subsection[#:tag "plot-path-xvar"]{The x axis}
@@ -236,13 +250,15 @@ cross-validation on the coefficient path:
 
 With @racket[#:out-file], both plot procedures also write the plot to a file,
 in the format that the file's extension names: @filepath{.png}, @filepath{.pdf},
-@filepath{.svg} or @filepath{.eps}. They still return the pict:
+@filepath{.svg} or @filepath{.eps}, in upper or lower case. They still return
+the pict. Any other extension breaks their contract:
 
 @examples[#:eval ev #:label #f
 (require racket/file)
 (define file (make-temporary-file "cv-~a.png"))
 (void (plot-cv cv #:out-file file))
 (call-with-input-file file (lambda (in) (read-bytes 4 in)))
+(delete-file file)
 (eval:error (plot-cv cv #:out-file "cv.jpg"))
 ]
 
@@ -265,6 +281,12 @@ The plots follow R glmnet 4.1.10's @tt{plotCoef}, @tt{plot.multnet},
        When no coefficient of a class is nonzero, R draws no plot for it, and
        neither does @racket[plot-coefficient-path]. When exactly one is, both
        warn that the plot is not meaningful; here the warning is logged.}
+ @item{When no coefficient is nonzero at all, R warns and returns without
+       drawing anything. @racket[plot-coefficient-path] then has no pict to
+       return, and raises an error instead.}
+ @item{R writes the curve labels at half its text size (@tt{cex = 0.5});
+       here they are three quarters of @racket[plot-font-size], which is
+       easier to read.}
  @item{A @math{λ} of @racket[0] has no place on a log @math{λ} axis, and
        neither R nor @racket[plot-coefficient-path] draws it. R still puts the
        curve labels level with the coefficients at that @math{λ}, at an
