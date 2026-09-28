@@ -19,6 +19,8 @@ glmnet/                        Racket collection
   foreign/raw/library.rkt      ffi-lib loader + define-glmnet definer
   foreign/raw/*.rkt            raw FFI bindings (capi.rkt, elnet.rkt, ...)
   foreign.rkt                  contracted wrappers + load-time precision guard
+  data.rkt                     design-matrix layer (glmnet/data): the one input layout
+  core/*.rkt                   one module per family; marshal.rkt, path.rkt shared
   main.rkt                     public API (require glmnet)
   examples/NN-*.rkt            #lang scribble/lp2 literate examples (run-example)
   examples/test/NN-*.rkt       companion runners + rackunit harnesses
@@ -76,7 +78,8 @@ different `α` (`parm`) and `λ`. Each new capability is shipped as one unit:
 4. **Add the Racket raw binding.** Extend `foreign/raw/elnet.rkt` via
    `define-glmnet` (`_f64vector`/`_s32vector` buffers, `(_ptr o …)` scalar outs;
    no allocator/finalizer — these are pure calls). Add a contracted wrapper in
-   `foreign.rkt` (row->column-major marshal, `jerr` check, result struct).
+   `core/` (inputs through the design-matrix layer, `data.rkt`, via
+   `core/marshal.rkt`; `jerr` check; result struct).
 5. **Test the Racket binding.** `glmnet/tests/*-test.rkt` rackunit: round-trip vs
    closed-form / known values, `jerr` error surfacing, shape-mismatch contract
    errors.
@@ -105,7 +108,11 @@ the evaluator from `scribblings/utils.rkt`; never paste output by hand. Use
 `eval:error` for expected failures. Each `@deftech` is defined once, in
 `guide/concepts.scrbl`. Every `@section` gets an explicit `#:tag`; the `ex-*`
 tags name the example pages and stay stable. An example section changes when
-its `glmnet/examples/NN-*.rkt` changes.
+its `glmnet/examples/NN-*.rkt` changes. `tests/docs-coverage-test.rkt` fails,
+naming the bindings, if anything `(require glmnet)` exports has no `defproc`,
+`defstruct*`, `defthing` or `defform` entry in the manual: `scribblings/glmnet.scrbl`
+and the files it reaches through `include-section`, outside code blocks and
+examples. A new `.scrbl` file counts once something includes it.
 
 ## Local dev loop
 

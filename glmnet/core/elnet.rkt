@@ -18,7 +18,7 @@
  (struct-out elnet-result)
  (contract-out
   [elnet-fit
-   (->* (matrix/c response/c #:lambda (>=/c 0))
+   (->* (design-matrix/c response/c #:lambda (>=/c 0))
         (#:alpha (real-in 0 1)
          #:standardize? boolean?
          #:intercept? boolean?
@@ -26,28 +26,28 @@
          #:max-iters exact-positive-integer?)
         elnet-result?)]
   [ols
-   (->* (matrix/c response/c)
+   (->* (design-matrix/c response/c)
         (#:standardize? boolean?
          #:intercept? boolean?
          #:thresh (>/c 0)
          #:max-iters exact-positive-integer?)
         elnet-result?)]
   [ridge
-   (->* (matrix/c response/c #:lambda (>=/c 0))
+   (->* (design-matrix/c response/c #:lambda (>=/c 0))
         (#:standardize? boolean?
          #:intercept? boolean?
          #:thresh (>/c 0)
          #:max-iters exact-positive-integer?)
         elnet-result?)]
   [lasso
-   (->* (matrix/c response/c #:lambda (>=/c 0))
+   (->* (design-matrix/c response/c #:lambda (>=/c 0))
         (#:standardize? boolean?
          #:intercept? boolean?
          #:thresh (>/c 0)
          #:max-iters exact-positive-integer?)
         elnet-result?)]
   [elastic-net
-   (->* (matrix/c response/c #:alpha (real-in 0 1) #:lambda (>=/c 0))
+   (->* (design-matrix/c response/c #:alpha (real-in 0 1) #:lambda (>=/c 0))
         (#:standardize? boolean?
          #:intercept? boolean?
          #:thresh (>/c 0)
@@ -57,7 +57,7 @@
 (provide
  (contract-out
   [elnet-path
-   (->* (matrix/c response/c)
+   (->* (design-matrix/c response/c)
            (#:lambda lambda-sequence/c
             #:nlambda exact-positive-integer?
             #:lambda-min-ratio lambda-min-ratio/c
@@ -76,23 +76,23 @@
 
 ;; --- public API ------------------------------------------------------------
 
-;; #:who is for the wrappers below, so that errors name the procedure the user
-;; called; the contract does not offer it.
-(define (elnet-fit X y
+;; One Gaussian fit at a single lambda. `who` names the public procedure in
+;; error messages.
+(define (fit-elnet who X y
+                   #:alpha alpha
                    #:lambda lambda
-                   #:alpha [alpha 1.0]
-                   #:standardize? [standardize? #t]
-                   #:intercept? [intercept? #t]
-                   #:thresh [thresh 1e-7]
-                   #:max-iters [max-iters 100000]
-                   #:who [who 'elnet-fit])
-  (define-values (no ni) (rows->dims X who))
-  (define xcol (matrix->colmajor X no ni))
-  (define yv (response->f64vector y no who))
+                   #:standardize? standardize?
+                   #:intercept? intercept?
+                   #:thresh thresh
+                   #:max-iters max-iters)
+  (define x (as-design-matrix X who "X"))
+  (define no (design-matrix-nrows x))
+  (define ni (design-matrix-ncols x))
+  (define yv (as-response y no who "y"))
   (check-response-varies (list y) intercept? who)
   (define beta (make-f64vector ni 0.0))
   (define-values (intercept rsq lam nlp jerr)
-    (glmnet-elnet-solo/raw (exact->inexact alpha) no ni xcol yv
+    (glmnet-elnet-solo/raw (exact->inexact alpha) no ni (design-matrix-data x) yv
                            (exact->inexact lambda)
                            (if standardize? 1 0)
                            (if intercept? 1 0)
@@ -100,9 +100,22 @@
                            max-iters
                            beta))
   (check-jerr jerr who)
-  (elnet-result intercept
-                (for/vector ([i (in-range ni)]) (f64vector-ref beta i))
-                rsq lam nlp))
+  (elnet-result intercept (unpack-vector beta ni) rsq lam nlp))
+
+(define (elnet-fit X y
+                   #:lambda lambda
+                   #:alpha [alpha 1.0]
+                   #:standardize? [standardize? #t]
+                   #:intercept? [intercept? #t]
+                   #:thresh [thresh 1e-7]
+                   #:max-iters [max-iters 100000])
+  (fit-elnet 'elnet-fit X y
+             #:alpha alpha
+             #:lambda lambda
+             #:standardize? standardize?
+             #:intercept? intercept?
+             #:thresh thresh
+             #:max-iters max-iters))
 
 ;; Ordinary least squares = elastic net at lambda 0 (alpha then irrelevant).
 ;; Coordinate descent approaches the OLS solution from above as `thresh`
@@ -113,14 +126,13 @@
              #:intercept? [intercept? #t]
              #:thresh [thresh 1e-10]
              #:max-iters [max-iters 100000])
-  (elnet-fit X y
+  (fit-elnet 'ols X y
              #:alpha 1.0
              #:lambda 0.0
              #:standardize? standardize?
              #:intercept? intercept?
              #:thresh thresh
-             #:max-iters max-iters
-             #:who 'ols))
+             #:max-iters max-iters))
 
 ;; Ridge regression = elastic net at alpha 0 (pure L2 penalty). Shrinks all
 ;; coefficients smoothly toward zero; none are driven exactly to zero.
@@ -130,14 +142,13 @@
                #:intercept? [intercept? #t]
                #:thresh [thresh 1e-7]
                #:max-iters [max-iters 100000])
-  (elnet-fit X y
+  (fit-elnet 'ridge X y
              #:alpha 0.0
              #:lambda lambda
              #:standardize? standardize?
              #:intercept? intercept?
              #:thresh thresh
-             #:max-iters max-iters
-             #:who 'ridge))
+             #:max-iters max-iters))
 
 ;; Lasso = elastic net at alpha 1 (pure L1 penalty). Performs variable
 ;; selection: coefficients are driven exactly to zero, more of them as lambda
@@ -148,14 +159,13 @@
                #:intercept? [intercept? #t]
                #:thresh [thresh 1e-7]
                #:max-iters [max-iters 100000])
-  (elnet-fit X y
+  (fit-elnet 'lasso X y
              #:alpha 1.0
              #:lambda lambda
              #:standardize? standardize?
              #:intercept? intercept?
              #:thresh thresh
-             #:max-iters max-iters
-             #:who 'lasso))
+             #:max-iters max-iters))
 
 ;; Elastic net at an explicit alpha in [0,1]: blends the lasso's selection with
 ;; the ridge's shrinkage. alpha 0 reduces to `ridge`, alpha 1 to `lasso`.
@@ -166,14 +176,13 @@
                      #:intercept? [intercept? #t]
                      #:thresh [thresh 1e-7]
                      #:max-iters [max-iters 100000])
-  (elnet-fit X y
+  (fit-elnet 'elastic-net X y
              #:alpha alpha
              #:lambda lambda
              #:standardize? standardize?
              #:intercept? intercept?
              #:thresh thresh
-             #:max-iters max-iters
-             #:who 'elastic-net))
+             #:max-iters max-iters))
 
 ;; --- regularization path (#10) ---------------------------------------------
 
@@ -186,10 +195,11 @@
                     #:intercept? [intercept? #t]
                     #:thresh [thresh 1e-7]
                     #:max-iters [max-iters 100000])
-  (define-values (no ni) (rows->dims X 'elnet-path))
-  (define yv (response->f64vector y no 'elnet-path))
+  (define x (as-design-matrix X 'elnet-path "X"))
+  (define no (design-matrix-nrows x))
+  (define ni (design-matrix-ncols x))
+  (define yv (as-response y no 'elnet-path "y"))
   (check-response-varies (list y) intercept? 'elnet-path)
-  (define xcol (matrix->colmajor X no ni))
   (define-values (nlam flmin ulam)
     (path-lambdas lambda nlambda lambda-min-ratio no ni))
   (define a0 (make-f64vector nlam 0.0))
@@ -197,7 +207,7 @@
   (define dev (make-f64vector nlam 0.0))
   (define alm (make-f64vector nlam 0.0))
   (define-values (lmu nlp jerr)
-    (glmnet-elnet-path/raw (exact->inexact alpha) no ni xcol yv
+    (glmnet-elnet-path/raw (exact->inexact alpha) no ni (design-matrix-data x) yv
                            nlam flmin ulam
                            (if standardize? 1 0) (if intercept? 1 0)
                            (exact->inexact thresh) max-iters

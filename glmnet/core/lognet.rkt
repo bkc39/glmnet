@@ -22,7 +22,7 @@
  (struct-out logistic-result)
  (contract-out
   [logistic-fit
-   (->* (matrix/c binary-response/c #:lambda (>=/c 0))
+   (->* (design-matrix/c binary-response/c #:lambda (>=/c 0))
         (#:alpha (real-in 0 1)
          #:standardize? boolean?
          #:intercept? boolean?
@@ -30,15 +30,15 @@
          #:max-iters exact-positive-integer?)
         logistic-result?)]
   [logistic-predict-proba
-   (-> logistic-result? matrix/c (listof (real-in 0 1)))]
+   (-> logistic-result? design-matrix/c (listof (real-in 0 1)))]
   [logistic-predict
-   (->* (logistic-result? matrix/c) (#:threshold (real-in 0 1))
+   (->* (logistic-result? design-matrix/c) (#:threshold (real-in 0 1))
         (listof (or/c 0 1)))]))
 
 (provide
  (contract-out
   [logistic-path
-   (->* (matrix/c binary-response/c)
+   (->* (design-matrix/c binary-response/c)
            (#:lambda lambda-sequence/c
             #:nlambda exact-positive-integer?
             #:lambda-min-ratio lambda-min-ratio/c
@@ -89,12 +89,13 @@
                       #:intercept? [intercept? #t]
                       #:thresh [thresh 1e-7]
                       #:max-iters [max-iters 100000])
-  (define-values (no ni) (rows->dims X 'logistic-fit))
-  (define xcol (matrix->colmajor X no ni))
-  (define yv (response->f64vector y no 'logistic-fit))
+  (define x (as-design-matrix X 'logistic-fit "X"))
+  (define no (design-matrix-nrows x))
+  (define ni (design-matrix-ncols x))
+  (define yv (as-response y no 'logistic-fit "y"))
   (define beta (make-f64vector ni 0.0))
   (define-values (intercept dev-ratio lam nlp jerr)
-    (glmnet-lognet-solo/raw (exact->inexact alpha) no ni xcol yv
+    (glmnet-lognet-solo/raw (exact->inexact alpha) no ni (design-matrix-data x) yv
                             (exact->inexact lambda)
                             (if standardize? 1 0)
                             (if intercept? 1 0)
@@ -102,33 +103,25 @@
                             max-iters
                             beta))
   (check-logistic-jerr jerr 'logistic-fit)
-  (logistic-result intercept
-                   (for/vector ([i (in-range ni)]) (f64vector-ref beta i))
-                   dev-ratio lam nlp))
+  (logistic-result intercept (unpack-vector beta ni) dev-ratio lam nlp))
 
 ;; --- prediction ------------------------------------------------------------
 
-;; Linear predictor (log-odds of class 1) for one predictor row.
-(define (logit-row result row ni)
-  (unless (= (length row) ni)
-    (error 'logistic-predict
-           "row has ~a features, expected ~a" (length row) ni))
-  (for/fold ([acc (logistic-result-intercept result)])
-            ([b (in-vector (logistic-result-coefficients result))]
-             [xj (in-list row)])
-    (+ acc (* b (exact->inexact xj)))))
-
 (define (sigmoid z) (/ 1.0 (+ 1.0 (exp (- z)))))
 
-;; P(y = 1 | x) for each row of X.
+;; P(y = 1 | x) for each row of X. `who` names the public procedure in errors.
+(define (class-1-probabilities result X who)
+  (define beta (logistic-result-coefficients result))
+  (define x (prediction-matrix X (vector-length beta) who))
+  (for/list ([i (in-range (design-matrix-nrows x))])
+    (sigmoid (linear-predictor x i (logistic-result-intercept result) beta))))
+
 (define (logistic-predict-proba result X)
-  (define ni (vector-length (logistic-result-coefficients result)))
-  (for/list ([row (in-list X)])
-    (sigmoid (logit-row result row ni))))
+  (class-1-probabilities result X 'logistic-predict-proba))
 
 ;; Hard 0/1 prediction: class 1 when P(y=1) >= threshold (default 0.5).
 (define (logistic-predict result X #:threshold [threshold 0.5])
-  (for/list ([p (in-list (logistic-predict-proba result X))])
+  (for/list ([p (in-list (class-1-probabilities result X 'logistic-predict))])
     (if (>= p threshold) 1 0)))
 
 ;; --- regularization path (#10) ---------------------------------------------
@@ -142,9 +135,10 @@
                        #:intercept? [intercept? #t]
                        #:thresh [thresh 1e-7]
                        #:max-iters [max-iters 100000])
-  (define-values (no ni) (rows->dims X 'logistic-path))
-  (define yv (response->f64vector y no 'logistic-path))
-  (define xcol (matrix->colmajor X no ni))
+  (define x (as-design-matrix X 'logistic-path "X"))
+  (define no (design-matrix-nrows x))
+  (define ni (design-matrix-ncols x))
+  (define yv (as-response y no 'logistic-path "y"))
   (define-values (nlam flmin ulam)
     (path-lambdas lambda nlambda lambda-min-ratio no ni))
   (define a0 (make-f64vector nlam 0.0))
@@ -152,7 +146,7 @@
   (define dev (make-f64vector nlam 0.0))
   (define alm (make-f64vector nlam 0.0))
   (define-values (lmu nlp jerr)
-    (glmnet-lognet-path/raw (exact->inexact alpha) no ni xcol yv
+    (glmnet-lognet-path/raw (exact->inexact alpha) no ni (design-matrix-data x) yv
                             nlam flmin ulam
                             (if standardize? 1 0) (if intercept? 1 0)
                             (exact->inexact thresh) max-iters

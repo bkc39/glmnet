@@ -33,8 +33,9 @@ is not, or if the library's ABI version is not the one this package expects,
 
 @section[#:tag "gs-first-fit"]{A first fit}
 
-A @tech{design matrix} is a list of rows, one per observation; the response is
-a list with one entry per row. Here the response is exactly
+The simplest form of a @tech{design matrix} is a list of rows, one per
+observation; the response is a list with one entry per row (see
+@secref["concepts-data"] for the other form). Here the response is exactly
 @math{y = 1 + 2x₁ − x₂}, and the third column, @math{x₃ = x₁²}, carries no
 signal:
 

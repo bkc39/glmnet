@@ -23,14 +23,16 @@
 (require (for-label glmnet
                     racket/base
                     racket/contract
-                    racket/match))
+                    racket/match
+                    ffi/vector))
 
 (provide (all-from-out scribble/manual)
          (all-from-out scribble/example)
          (for-label (all-from-out glmnet
                                   racket/base
                                   racket/contract
-                                  racket/match))
+                                  racket/match
+                                  ffi/vector))
          make-glmnet-eval
          see-reference
          exnraise)

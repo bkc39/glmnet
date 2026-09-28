@@ -7,9 +7,11 @@
 ;; common cases. The other families add `logistic-fit` (two-class), `multinomial-fit`
 ;; (K-class), `cox-fit` (proportional-hazards survival), `poisson-fit` (counts, log
 ;; link), and `mgaussian-fit` (multi-response Gaussian), each with prediction
-;; helpers. `foreign.rkt` also re-exports the Phase 0 connectivity checks.
+;; helpers. `data.rkt` is the design-matrix layer every fitter reads its input
+;; through, and `foreign.rkt` also re-exports the Phase 0 connectivity checks.
 
-(require "core/elnet.rkt"
+(require "data.rkt"
+         "core/elnet.rkt"
          "core/lognet.rkt"
          "core/multinomial.rkt"
          "core/cox.rkt"
@@ -18,7 +20,8 @@
          "core/path.rkt"
          "foreign.rkt")
 
-(provide (all-from-out "core/elnet.rkt")
+(provide (all-from-out "data.rkt")
+         (all-from-out "core/elnet.rkt")
          (all-from-out "core/lognet.rkt")
          (all-from-out "core/multinomial.rkt")
          (all-from-out "core/cox.rkt")
