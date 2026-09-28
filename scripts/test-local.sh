@@ -3,8 +3,9 @@ set -euo pipefail
 
 # End-to-end test using the system Racket install (no Nix, no
 # GLMNET_NATIVE_LIB_PATH). Installs the glmnet package from
-# native-libs/candidates/ via the pre-install hook, then runs the unit tests and
-# all example companions. This reproduces what pkg-build.racket-lang.org does.
+# native-libs/candidates/ via the pre-install hook, then runs the unit tests
+# (glmnet/plot's among them) and all example companions. This reproduces what
+# pkg-build.racket-lang.org does.
 
 RACKET=$(command -v racket 2>/dev/null || true)
 RACO=$(command -v raco 2>/dev/null || true)

@@ -62,7 +62,9 @@
             '';
           };
 
-          # The Racket package, with the native library injected.
+          # The Racket package, with the native library injected. The manual's
+          # examples draw the plots of glmnet/plot; the fonts are fixed so that
+          # their text renders the same in every sandbox.
           racket = pkgs.stdenv.mkDerivation {
             pname = "glmnet";
             inherit version;
@@ -71,9 +73,12 @@
             nativeBuildInputs = [ pkgs.racket pkgs.makeWrapper ];
             buildInputs = [ native ];
 
+            FONTCONFIG_FILE = pkgs.makeFontsConf { fontDirectories = [ pkgs.dejavu_fonts ]; };
+
             buildPhase = ''
               runHook preBuild
 
+              export HOME=$TMPDIR
               export PLTUSERHOME=$TMPDIR/racket-home
               export GLMNET_NATIVE_LIB_PATH=${native}
               mkdir -p $PLTUSERHOME
@@ -86,7 +91,9 @@
               raco pkg install --batch --deps fail --no-setup --copy --scope user \
                 --name glmnet ./glmnet
 
-              raco setup --no-docs --pkgs glmnet
+              # Checks the declared dependencies, as the catalog's build server
+              # does: plot-lib, pict-lib and draw-lib for glmnet/plot among them.
+              raco setup --no-docs --check-pkg-deps --pkgs glmnet
 
               runHook postBuild
             '';
@@ -94,8 +101,8 @@
             doCheck = true;
             checkPhase = ''
               runHook preCheck
-              # Recursive: covers tests/ plus the literate examples' companion
-              # harnesses under glmnet/examples/test/.
+              # Recursive: covers tests/ (the plot tests among them) plus the
+              # literate examples' companion harnesses under glmnet/examples/test/.
               raco test ./glmnet/
 
               # Render the Scribble docs to catch errors.

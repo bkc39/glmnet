@@ -17,8 +17,8 @@ a runnable literate example with a matching section in the user guide. See
 `AGENTS.md` for the development workflow and `plans/` notes.
 
 The Scribble manual (`glmnet/scribblings/`) has a user guide (getting started,
-concepts, one worked example per model family) and an API reference. With the
-package installed, build it with
+concepts, plots, one worked example per model family) and an API reference.
+With the package installed, build it with
 `raco scribble --htmls glmnet/scribblings/glmnet.scrbl`.
 
 ## Install
@@ -29,6 +29,21 @@ package installed, build it with
 
 A prebuilt native library is staged at install time; no Fortran toolchain is
 needed to use the package.
+
+## Plots
+
+The coefficient-path and cross-validation plots of R's `plot.glmnet` and
+`plot.cv.glmnet` are in `glmnet/plot`, a module of this package.
+`(require glmnet)` does not load it, so a program that only fits models does
+not load the plot library:
+
+```racket
+(require glmnet glmnet/plot)
+(plot-cv (elnet-cv X y))               ; => a pict
+(plot-coefficient-path (elnet-path X y) #:label #t #:out-file "path.png")
+```
+
+The manual's *Plots* chapter draws every plot it describes.
 
 ## Quick check
 
@@ -59,4 +74,5 @@ A local toolchain (gfortran + cmake + Racket) works too; see `AGENTS.md`.
 
 **GPL-2.0-or-later.** This package vendors and links the GPL-2.0 glmnet Fortran
 (R glmnet's own, under `fortran/vendor/`); see `LICENSE` and
-`fortran/vendor/NOTICE.md`.
+`fortran/vendor/NOTICE.md`. The plot library that `glmnet/plot` draws with,
+plot-lib, is Apache-2.0 or MIT.

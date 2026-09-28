@@ -24,9 +24,12 @@ glmnet/                        Racket collection
   core/model.rkt               gen:glmnet-model: predict / coef / deviance-ratio on any result
   core/cv.rkt                  cross-validation (R's cv.glmnet) behind every family's *-cv
   main.rkt                     public API (require glmnet)
+  plot.rkt                     glmnet/plot: R's plot.glmnet / plot.cv.glmnet on plot-lib
+                               (picts); not re-exported by main.rkt
   examples/NN-*.rkt            #lang scribble/lp2 literate examples (run-example)
   examples/test/NN-*.rkt       companion runners + rackunit harnesses
-  scribblings/glmnet.scrbl     manual root: guide.scrbl (guide/*.scrbl) + reference.scrbl
+  scribblings/glmnet.scrbl     manual root: guide.scrbl (guide/*.scrbl) + reference.scrbl;
+                               the plots are guide/plots.scrbl and reference's ref-plot
   scribblings/utils.rkt        for-label imports + make-glmnet-eval for live examples
   tests/*.rkt                  rackunit unit tests
   private/install-glmnet-native.rkt   pre-install hook (env -> staged -> candidate)
@@ -34,6 +37,14 @@ glmnet/                        Racket collection
 scripts/                       build-so.sh, test-local.sh (portable candidates)
 flake.nix                      native + racket derivations, devShell, checks
 ```
+
+There is one package, one collection and one manual (arc #44, decision 4, as
+the owner revised it). The plots, `glmnet/plot`, are part of the `glmnet`
+package, which therefore depends on plot-lib, but `main.rkt` does not re-export
+them: plot-lib is Typed Racket and pulls in the drawing stack, and
+`(require glmnet)` must not load it, just as Racket's own `plot` stays out of
+`racket`. Their documentation is a guide chapter (`guide/plots.scrbl`, tag
+`plots`) and a reference section (`ref-plot`, `@defmodule[glmnet/plot]`).
 
 ## Non-negotiable invariants
 
@@ -116,7 +127,8 @@ its `glmnet/examples/NN-*.rkt` changes. `tests/docs-coverage-test.rkt` fails,
 naming the bindings, if anything `(require glmnet)` exports has no `defproc`,
 `defstruct*`, `defthing` or `defform` entry in the manual: `scribblings/glmnet.scrbl`
 and the files it reaches through `include-section`, outside code blocks and
-examples. A new `.scrbl` file counts once something includes it.
+examples, and so does anything `(require glmnet/plot)` exports. A new `.scrbl`
+file counts once something includes it.
 
 ## Local dev loop
 
@@ -133,7 +145,9 @@ bash scripts/run-examples.sh                                 # run every example
 ```
 
 Or `nix build .#native` (runs the Fortran ctest suite) and `nix flake check`
-(builds the native lib + Racket package, runs `raco test`, renders the docs).
+(builds the native lib + Racket package, checks its declared dependencies with
+`raco setup --check-pkg-deps`, runs `raco test`, the plot tests included, and
+renders the manual, plots included).
 
 ## Shipping native libraries (catalog candidates)
 

@@ -303,6 +303,10 @@ before that one and logs a warning (@secref["concepts-convergence"]):
 (@secref["concepts-predict"]). Cross-validation chooses among the values on a
 path (@secref["concepts-cv"]).
 
+To plot a path's coefficients against @math{λ}, as R's @tt{plot} does, use
+@racket[plot-coefficient-path] from @racketmodname[glmnet/plot]; see
+@secref["plot-path"].
+
 @section[#:tag "concepts-predict"]{Predictions and coefficients}
 
 Every result, whether a single fit or a @tech{regularization path}, is a
@@ -506,6 +510,8 @@ nonzero coefficients at each. Every fifth candidate, from the largest:
 
 The error falls quickly as the three real predictors enter, reaches its
 minimum, and then rises slowly as the noise predictors are fitted.
+@racket[plot-cv], from @racketmodname[glmnet/plot], draws this curve as R's
+@tt{plot} draws a @tt{cv.glmnet} result; see @secref["plot-cv"].
 
 @subsection[#:tag "concepts-cv-predict"]{Predicting at the chosen λ}
 
