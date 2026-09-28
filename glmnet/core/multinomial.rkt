@@ -77,7 +77,7 @@
 ;; Multinomial shares the binomial (lognet) jerr codes: 8000/9000 (a class
 ;; probability collapsed -- e.g. perfect separation) and 90000 (coefficient-bound
 ;; non-convergence) on top of the shared cases in `check-jerr`.
-(define (check-multinomial-jerr jerr who)
+(define (check-multinomial-jerr jerr who [lmu #f])
   (cond
     [(and (>= jerr 8000) (< jerr 9000))
      (error who
@@ -89,7 +89,15 @@
      (error who (format "a class has a degenerate null probability (jerr=~a)" jerr))]
     [(= jerr 90000)
      (error who "coefficient-bound adjustment failed to converge (jerr=90000)")]
-    [else (check-jerr jerr who)]))
+    [else (check-jerr jerr who lmu)]))
+
+;; The K intercepts are identified only up to a common shift, which the softmax
+;; absorbs. R's coef() centres them to sum to zero (getcoef.multinomial), and so
+;; do we.
+(define (centre v)
+  (define mean (/ (for/sum ([a (in-vector v)]) a) (vector-length v)))
+  (for/vector #:length (vector-length v) ([a (in-vector v)])
+    (- a mean)))
 
 ;; --- public API ------------------------------------------------------------
 
@@ -116,7 +124,7 @@
                                  intercepts beta))
   (check-multinomial-jerr jerr 'multinomial-fit)
   (multinomial-result
-   (for/vector ([k (in-range nc)]) (f64vector-ref intercepts k))
+   (centre (for/vector ([k (in-range nc)]) (f64vector-ref intercepts k)))
    ;; beta is class-major: class k's predictor j at k*ni + j.
    (for/vector ([k (in-range nc)])
      (for/vector ([j (in-range ni)]) (f64vector-ref beta (+ (* k ni) j))))
@@ -190,8 +198,11 @@
                                  (if standardize? 1 0) (if intercept? 1 0)
                                  (exact->inexact thresh) max-iters
                                  a0 beta dev alm))
-  (check-multinomial-jerr jerr 'multinomial-path)
+  (check-multinomial-jerr jerr 'multinomial-path lmu)
   (define coefficients (unpack-column-groups beta ni k lmu))
+  (define intercepts
+    (for/vector #:length lmu ([a0-m (in-vector (unpack-intercept-groups a0 k lmu))])
+      (centre a0-m)))
   (glmnet-path 'multinomial (finish-lambdas alm lmu (not lambda))
-               (unpack-intercept-groups a0 k lmu) coefficients (unpack-vector dev lmu)
+               intercepts coefficients (unpack-vector dev lmu)
                (count-nonzero-groups coefficients) nlp))

@@ -76,16 +76,20 @@
 
 ;; --- public API ------------------------------------------------------------
 
+;; #:who is for the wrappers below, so that errors name the procedure the user
+;; called; the contract does not offer it.
 (define (elnet-fit X y
                    #:lambda lambda
                    #:alpha [alpha 1.0]
                    #:standardize? [standardize? #t]
                    #:intercept? [intercept? #t]
                    #:thresh [thresh 1e-7]
-                   #:max-iters [max-iters 100000])
-  (define-values (no ni) (rows->dims X 'elnet-fit))
+                   #:max-iters [max-iters 100000]
+                   #:who [who 'elnet-fit])
+  (define-values (no ni) (rows->dims X who))
   (define xcol (matrix->colmajor X no ni))
-  (define yv (response->f64vector y no 'elnet-fit))
+  (define yv (response->f64vector y no who))
+  (check-response-varies (list y) intercept? who)
   (define beta (make-f64vector ni 0.0))
   (define-values (intercept rsq lam nlp jerr)
     (glmnet-elnet-solo/raw (exact->inexact alpha) no ni xcol yv
@@ -95,7 +99,7 @@
                            (exact->inexact thresh)
                            max-iters
                            beta))
-  (check-jerr jerr 'elnet-fit)
+  (check-jerr jerr who)
   (elnet-result intercept
                 (for/vector ([i (in-range ni)]) (f64vector-ref beta i))
                 rsq lam nlp))
@@ -115,7 +119,8 @@
              #:standardize? standardize?
              #:intercept? intercept?
              #:thresh thresh
-             #:max-iters max-iters))
+             #:max-iters max-iters
+             #:who 'ols))
 
 ;; Ridge regression = elastic net at alpha 0 (pure L2 penalty). Shrinks all
 ;; coefficients smoothly toward zero; none are driven exactly to zero.
@@ -131,7 +136,8 @@
              #:standardize? standardize?
              #:intercept? intercept?
              #:thresh thresh
-             #:max-iters max-iters))
+             #:max-iters max-iters
+             #:who 'ridge))
 
 ;; Lasso = elastic net at alpha 1 (pure L1 penalty). Performs variable
 ;; selection: coefficients are driven exactly to zero, more of them as lambda
@@ -148,7 +154,8 @@
              #:standardize? standardize?
              #:intercept? intercept?
              #:thresh thresh
-             #:max-iters max-iters))
+             #:max-iters max-iters
+             #:who 'lasso))
 
 ;; Elastic net at an explicit alpha in [0,1]: blends the lasso's selection with
 ;; the ridge's shrinkage. alpha 0 reduces to `ridge`, alpha 1 to `lasso`.
@@ -165,7 +172,8 @@
              #:standardize? standardize?
              #:intercept? intercept?
              #:thresh thresh
-             #:max-iters max-iters))
+             #:max-iters max-iters
+             #:who 'elastic-net))
 
 ;; --- regularization path (#10) ---------------------------------------------
 
@@ -180,6 +188,7 @@
                     #:max-iters [max-iters 100000])
   (define-values (no ni) (rows->dims X 'elnet-path))
   (define yv (response->f64vector y no 'elnet-path))
+  (check-response-varies (list y) intercept? 'elnet-path)
   (define xcol (matrix->colmajor X no ni))
   (define-values (nlam flmin ulam)
     (path-lambdas lambda nlambda lambda-min-ratio no ni))
@@ -193,7 +202,7 @@
                            (if standardize? 1 0) (if intercept? 1 0)
                            (exact->inexact thresh) max-iters
                            a0 beta dev alm))
-  (check-jerr jerr 'elnet-path)
+  (check-jerr jerr 'elnet-path lmu)
   (define coefficients (unpack-columns beta ni lmu))
   (glmnet-path 'gaussian (finish-lambdas alm lmu (not lambda))
                (unpack-vector a0 lmu) coefficients (unpack-vector dev lmu)
