@@ -78,6 +78,15 @@
   (for/list ([i (in-list rows)])
     (vector-ref v i)))
 
+;; The distinct values of a sorted list of flonums, in order, and how many
+;; times each occurs.
+(define (runs sorted)
+  (for/fold ([distinct '()] [counts '()] #:result (values (reverse distinct) (reverse counts)))
+            ([x (in-list sorted)])
+    (if (and (pair? distinct) (fl= x (car distinct)))
+        (values distinct (cons (add1 (car counts)) (cdr counts)))
+        (values (cons x distinct) (cons 1 counts)))))
+
 ;; --- folds -------------------------------------------------------------------
 
 (define default-nfolds 10)
@@ -279,12 +288,13 @@
 ;; auc and Cindex compute. A pair is comparable when the earlier time is an
 ;; event; an event comes before a censored time equal to it, and two events at
 ;; the same time are not compared. A comparable pair is concordant when the
-;; later time has the larger x, and a tie in x counts a half. The pairs are
-;; counted in O(n log n) with a Fenwick tree over the ranks of x.
+;; later time has the larger x, and a tie in x counts a half. Sorting and a
+;; Fenwick tree over the ranks of x count the pairs in O(n log n).
 (define (concordance times statuses xs)
   (define n (vector-length times))
   (define keys (for/vector #:length n ([x (in-vector xs)]) (fl+ 0.0 x)))
-  (define distinct (list->vector (sort (remove-duplicates (vector->list keys) =) <)))
+  (define-values (distinct-keys _) (runs (sort (vector->list keys) <)))
+  (define distinct (list->vector distinct-keys))
   (define m (vector-length distinct))
   (define (rank i)
     (define x (vector-ref keys i))
@@ -345,11 +355,9 @@
   (define events (for/vector #:length n ([i (in-list rows)]) (cdr (vector-ref response i))))
   (define event-rows (for/list ([d (in-vector events)] [i (in-naturals)] #:when (fl= d 1.0)) i))
   ;; The distinct event times, latest first, and the number of events at each.
-  (define event-times
-    (sort (remove-duplicates (for/list ([i (in-list event-rows)]) (vector-ref times i)) =) >))
-  (define events-at
-    (for/list ([t (in-list event-times)])
-      (for/sum ([i (in-list event-rows)] #:when (fl= (vector-ref times i) t)) 1.0)))
+  (define-values (event-times event-counts)
+    (runs (sort (for/list ([i (in-list event-rows)]) (vector-ref times i)) >)))
+  (define events-at (map ->fl event-counts))
   (define lsat (fl- 0.0 (r-sum (for/list ([dk (in-list events-at)]) (fl* dk (fllog dk))))))
   (define latest-first (sort (range n) > #:key (lambda (i) (vector-ref times i))))
   (define fmax (fllog (fl* 0.1 1.7976931348623157e308)))

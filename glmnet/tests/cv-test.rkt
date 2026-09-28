@@ -287,6 +287,34 @@
     (define xs (for/vector ([row (in-list X)]) (exact->inexact (exact-round (third row)))))
     (check-= (concordance ts ds xs) (brute-force-concordance ts ds xs) 1e-15))
 
+  (test-case "concordance with many ties in the times and in x"
+    (define m 200)
+    (define ts (for/vector ([i (in-range m)]) (exact->inexact (modulo (* 7 i) 13))))
+    (define ds (for/vector ([i (in-range m)]) (if (zero? (modulo i 3)) 0.0 1.0)))
+    (define xs (for/vector ([i (in-range m)]) (exact->inexact (modulo (* 5 i) 4))))
+    (check-= (concordance ts ds xs) (brute-force-concordance ts ds xs) 1e-15))
+
+  (test-case "concordance of 20000 observations: every pair concordant, discordant or tied"
+    (define m 20000)
+    (define ts (for/vector ([i (in-range m)]) (exact->inexact (quotient i 2))))
+    (define ds (for/vector ([i (in-range m)]) (if (zero? (modulo i 5)) 0.0 1.0)))
+    ;; Larger for every later time, and for a censored time than for an event
+    ;; at the same time.
+    (define xs (for/vector ([t (in-vector ts)] [d (in-vector ds)]) (+ t (* 0.5 (- 1.0 d)))))
+    (check-= (concordance ts ds xs) 1.0 1e-15)
+    (check-= (concordance ts ds (for/vector ([x (in-vector xs)]) (- x))) 0.0 1e-15)
+    (check-= (concordance ts ds (make-vector m 3.0)) 0.5 1e-15))
+
+  (test-case "the Cox deviance of 20000 observations at beta = 0, two events at each time"
+    (define m 20000)
+    (define response (for/vector ([i (in-range m)]) (cons (exact->inexact (quotient i 2)) 1.0)))
+    (define x (rows->design-matrix (for/list ([i (in-range m)]) (list (sin (exact->inexact i))))))
+    (define deviance (cox-deviance x (range m) response))
+    ;; At beta = 0 the risk set at the j-th time (from 0) holds m - 2j observations.
+    (check-= (deviance #(0.0))
+             (* 2 (for/sum ([j (in-range (quotient m 2))]) (* 2 (- (log (- m (* 2 j))) (log 2)))))
+             1e-6))
+
   (test-case "the Cox deviance is 2 (lsat - loglik) with Breslow's partial likelihood"
     (define beta #(0.1 -0.2 0.3))
     (define ts (map (lambda (t) (exact->inexact (exact-round (/ t 3)))) times))
