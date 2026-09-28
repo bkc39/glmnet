@@ -190,9 +190,10 @@
   (cond
     [(zero? places) (round x)]
     [(or (zero? x) (> (+ (* 0.301029995663981195 (+ 0.5 (binary-exponent a))) places) 15)) x]
-    [(or (< (- up a) (- a down)) (and (= (- up a) (- a down)) (odd? (floor x10))))
-     (if (negative? x) (- up) up)]
-    [else (if (negative? x) (- down) down)]))
+    [else
+     (define nearer
+       (if (or (< (- up a) (- a down)) (and (= (- up a) (- a down)) (odd? (floor x10)))) up down))
+     (if (negative? x) (- nearer) nearer)]))
 
 ;; floor(log2 a) for a positive double, as C's logb.
 (define (binary-exponent a)
