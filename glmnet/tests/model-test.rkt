@@ -273,6 +273,14 @@
                   (vector-append (vector (vector-ref (glmnet-path-intercepts p) 1))
                                  (vector-ref (glmnet-path-coefficients p) 1))))
 
+  (test-case "when every fitted lambda is the same, any lambda gives the first point"
+    (define p (elnet-path X y #:lambda '(0.1 0.1)))
+    (define first-point
+      (vector-append (vector (vector-ref (glmnet-path-intercepts p) 0))
+                     (vector-ref (glmnet-path-coefficients p) 0)))
+    (check-equal? (coef p #:lambda 0.05) first-point)
+    (check-equal? (coef p #:lambda 5.0) first-point))
+
   (test-case "multinomial and Cox paths interpolate every class and have the right shape"
     (define mp (multinomial-path Xm ym #:nlambda 10))
     (define s (* 0.5 (+ (vector-ref (glmnet-path-lambda mp) 3) (vector-ref (glmnet-path-lambda mp) 4))))
