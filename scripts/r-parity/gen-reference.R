@@ -220,11 +220,17 @@ for (f in fixtures) {
 
 ## --- regularization paths (#10) ---------------------------------------------
 ## R's automatic path (nlambda = 100; lambda.min.ratio 0.01 when n < p, else
-## 1e-4), or a user sequence when a fixture sets `lambda`. The golden records
-## every fitted lambda (after R's fix.lam) and, per lambda, the intercepts,
-## coefficients, deviance ratio and df.
+## 1e-4), or a user sequence when a fixture sets `lambda`. A fixture may also set
+## `nlambda` and `lambda_min_ratio`, and `nobs` to use only the first nobs
+## observations. The golden records every fitted lambda (after R's fix.lam) and,
+## per lambda, the intercepts, coefficients, deviance ratio and df.
 
-path_fit <- function(family, d, alpha, lambda = NULL, thresh = 1e-7) {
+first_rows <- function(d, n) {
+  lapply(d, function(v) if (is.matrix(v)) v[seq_len(n), , drop = FALSE] else v[seq_len(n)])
+}
+
+path_fit <- function(family, d, alpha, lambda = NULL, nlambda = NULL,
+                     lambda_min_ratio = NULL, thresh = 1e-7) {
   y <- switch(family,
     binomial    = factor(d$y, levels = c(0, 1)),
     multinomial = factor(d$y),
@@ -234,14 +240,17 @@ path_fit <- function(family, d, alpha, lambda = NULL, thresh = 1e-7) {
   args <- list(d$X, y, family = family, alpha = alpha, standardize = TRUE,
                thresh = thresh)
   if (!is.null(lambda)) args$lambda <- lambda
+  if (!is.null(nlambda)) args$nlambda <- nlambda
+  if (!is.null(lambda_min_ratio)) args$lambda.min.ratio <- lambda_min_ratio
   if (family == "binomial") args$type.logistic <- "Newton"
   if (family == "multinomial") args$type.multinomial <- "ungrouped"
   if (family == "mgaussian") args$standardize.response <- FALSE
   suppressWarnings(do.call(glmnet, args))
 }
 
-fit_path <- function(family, d, alpha, lambda = NULL, thresh = 1e-7) {
-  fit <- path_fit(family, d, alpha, lambda, thresh)
+fit_path <- function(family, d, alpha, lambda = NULL, nlambda = NULL,
+                     lambda_min_ratio = NULL, thresh = 1e-7) {
+  fit <- path_fit(family, d, alpha, lambda, nlambda, lambda_min_ratio, thresh)
   L  <- length(fit$lambda)
   co <- coef(fit)
   if (is.list(co)) {                 # multinomial, mgaussian: one matrix per class/response
@@ -265,6 +274,10 @@ path_fixtures <- list(
   list(id = "path-gaussian-longley-lasso",      dataset = "longley",    family = "gaussian",    alpha = 1.0),
   list(id = "path-gaussian-longley-enet-user",  dataset = "longley",    family = "gaussian",    alpha = 0.5,
        lambda = c(0.1, 1, 0.05, 0.5)),
+  list(id = "path-gaussian-longley-lasso-ratio", dataset = "longley",   family = "gaussian",    alpha = 1.0,
+       nlambda = 20, lambda_min_ratio = 0.05),
+  list(id = "path-gaussian-longley5-lasso",     dataset = "longley",    family = "gaussian",    alpha = 1.0,
+       nobs = 5),                                                     # n < p: ratio 0.01
   list(id = "path-binomial-wdbc-lasso",         dataset = "wdbc",       family = "binomial",    alpha = 1.0),
   list(id = "path-multinomial-iris-lasso",      dataset = "iris",       family = "multinomial", alpha = 1.0),
   list(id = "path-cox-veteran-lasso",           dataset = "veteran",    family = "cox",         alpha = 1.0),
@@ -273,10 +286,15 @@ path_fixtures <- list(
 )
 
 for (f in path_fixtures) {
-  res <- fit_path(f$family, datasets[[f$dataset]], f$alpha, f$lambda)
+  d <- datasets[[f$dataset]]
+  if (!is.null(f[["nobs"]])) d <- first_rows(d, f[["nobs"]])
+  res <- fit_path(f$family, d, f$alpha, f[["lambda"]], f[["nlambda"]], f[["lambda_min_ratio"]])
   golden <- list(id = f$id, dataset = f$dataset, family = f$family, kind = "path",
                  alpha = f$alpha, thresh = 1e-7)
-  if (!is.null(f$lambda)) golden$lambda_user <- f$lambda
+  if (!is.null(f[["lambda"]])) golden$lambda_user <- f[["lambda"]]
+  if (!is.null(f[["nlambda"]])) golden$nlambda <- f[["nlambda"]]
+  if (!is.null(f[["lambda_min_ratio"]])) golden$lambda_min_ratio <- f[["lambda_min_ratio"]]
+  if (!is.null(f[["nobs"]])) golden$nobs <- f[["nobs"]]
   golden <- c(golden, res, list(meta = meta))
   path <- file.path(goldens_dir, paste0(f$id, ".json"))
   writeLines(toJSON(golden, digits = NA, auto_unbox = TRUE, pretty = TRUE), path)
@@ -297,14 +315,18 @@ print_table <- function(fit) {
 
 for (f in path_fixtures) {
   d   <- datasets[[f$dataset]]
-  fit <- path_fit(f$family, d, f$alpha, f$lambda)
+  if (!is.null(f[["nobs"]])) d <- first_rows(d, f[["nobs"]])
+  fit <- path_fit(f$family, d, f$alpha, f[["lambda"]], f[["nlambda"]], f[["lambda_min_ratio"]])
   lam <- fit$lambda
   L   <- length(lam)
   i   <- ceiling(L / 2)
   s   <- c(lam[i], 0.7 * lam[i] + 0.3 * lam[i + 1], 2 * lam[1], lam[L] / 2)
   golden <- list(id = sub("^path-", "predict-", f$id), dataset = f$dataset,
                  family = f$family, kind = "predict", alpha = f$alpha, thresh = 1e-7)
-  if (!is.null(f$lambda)) golden$lambda_user <- f$lambda
+  if (!is.null(f[["lambda"]])) golden$lambda_user <- f[["lambda"]]
+  if (!is.null(f[["nlambda"]])) golden$nlambda <- f[["nlambda"]]
+  if (!is.null(f[["lambda_min_ratio"]])) golden$lambda_min_ratio <- f[["lambda_min_ratio"]]
+  if (!is.null(f[["nobs"]])) golden$nobs <- f[["nobs"]]
   golden <- c(golden, generic_outputs(fit, f$family, d$X, s),
               list(print = print_table(fit), meta = meta))
   path <- file.path(goldens_dir, paste0(golden$id, ".json"))

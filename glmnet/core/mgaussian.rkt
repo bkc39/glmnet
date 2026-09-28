@@ -13,6 +13,7 @@
 
 (require racket/contract
          ffi/vector
+         (only-in "../data.rkt" design-matrix->columns)
          "marshal.rkt"
          "model.rkt"
          (submod "model.rkt" support)
@@ -85,6 +86,7 @@
   (define ni (design-matrix-ncols x))
   (define y (response-matrix Y no 'mgaussian-fit))
   (define nr (design-matrix-ncols y))
+  (check-response-varies (design-matrix->columns y) intercept? 'mgaussian-fit)
   (define intercepts (make-f64vector nr 0.0))
   (define beta (make-f64vector (* ni nr) 0.0))
   (define-values (r-squared lam nlp jerr)
@@ -124,6 +126,7 @@
   (define ni (design-matrix-ncols x))
   (define y (response-matrix Y no 'mgaussian-path))
   (define k (design-matrix-ncols y))
+  (check-response-varies (design-matrix->columns y) intercept? 'mgaussian-path)
   (define-values (nlam flmin ulam)
     (path-lambdas lambda nlambda lambda-min-ratio no ni))
   (define a0 (make-f64vector (* k nlam) 0.0))
@@ -137,7 +140,7 @@
                                (if standardize? 1 0) (if intercept? 1 0)
                                (exact->inexact thresh) max-iters
                                a0 beta dev alm))
-  (check-jerr jerr 'mgaussian-path)
+  (check-jerr jerr 'mgaussian-path lmu)
   (define coefficients (unpack-column-groups beta ni k lmu))
   (glmnet-path 'mgaussian (finish-lambdas alm lmu (not lambda))
                (unpack-intercept-groups a0 k lmu) coefficients (unpack-vector dev lmu)

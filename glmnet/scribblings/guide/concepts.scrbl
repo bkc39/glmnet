@@ -85,7 +85,12 @@ An error names the offending row and column, counting from 0:
 ]
 
 Without the check, a @racket[+nan.0] or an infinity would reach the solver,
-which would return meaningless coefficients and no error.
+which would return meaningless coefficients and no error. R's @tt{glmnet} also
+stops on a missing value in @tt{x}, but not on every non-finite value. In every
+family but Cox it fits an @tt{x} with an infinite entry, giving that column a
+zero coefficient. It fits a Poisson response with an infinite count and
+returns an empty model. Its @tt{predict} carries non-finite new data through to
+the predictions. Here each of these is an error.
 
 The @deftech{response} has one entry per row of the design matrix. Its shape
 depends on the family:
@@ -261,9 +266,11 @@ A @racket[glmnet-path] holds one entry per fitted @math{λ} in each of its
 @racket[dev-ratio] and @racket[df] fields. At the first @math{λ} every
 coefficient is zero; @racket[df] counts the predictors in the model as the
 penalty relaxes, here @math{x₁} first and then @math{x₂}. The default path has
-50 values, not 100, because glmnet, like R, stops once another @math{λ} would
-barely change the fit: when the deviance ratio improves by less than
-@racket[1e-5] or passes @racket[0.999].
+50 values, not 100, because glmnet, like R, stops an automatic sequence once
+another @math{λ} would barely change the fit. For the Gaussian family that is
+when @math{R²} gains less than @racket[1e-5] of its own value from one
+@math{λ} to the next, or passes @racket[0.999]; the reference lists each
+family's rule (@secref["ref-path"]).
 
 A path prints as R prints one: a numbered row for each fitted @math{λ}, with
 the number of nonzero coefficients (@tt{Df}), the percentage of the null
@@ -273,7 +280,7 @@ deviance explained (@tt{%Dev}) and @math{λ}:
 path
 ]
 
-With @racket[#:lambda], the path fits exactly those values, largest first:
+With @racket[#:lambda], the path fits those values, largest first:
 
 @examples[#:eval ev #:label #f
 (define user-path (elnet-path X y #:lambda '(0.01 0.5 0.1)))
@@ -282,7 +289,16 @@ With @racket[#:lambda], the path fits exactly those values, largest first:
 ]
 
 Each point agrees with the single fit at that @math{λ} to within the solver's
-tolerance. @racket[predict] and @racket[coef] evaluate a path at any @math{λ}
+tolerance. The early-stopping rule does not apply to a user sequence, but any
+path can still end early, for example where glmnet fails at one of its values
+by not converging within @racket[#:max-iters] passes. It then keeps the values
+before that one and logs a warning (@secref["concepts-convergence"]):
+
+@examples[#:eval ev #:label #f
+(glmnet-path-lambda (elnet-path X y #:lambda '(0.5 0.1 0.01) #:max-iters 1))
+]
+
+@racket[predict] and @racket[coef] evaluate a path at any @math{λ}
 (@secref["concepts-predict"]). Choosing among the values on a path is the job
 of cross-validation (@hyperlink["https://github.com/bkc39/glmnet/issues/27"]{#27}).
 
@@ -435,17 +451,22 @@ Problems are reported in three ways:
  @item{Before the solver runs, an argument of the wrong type, a ragged or
        empty matrix, a non-finite entry, or a response of the wrong length
        raises @racket[exn:fail:contract] (see @secref["concepts-data"]).}
- @item{A fatal condition reported by glmnet raises @racket[exn:fail] with a
-       readable message, for example when every predictor is constant, or when
-       a class probability collapses under perfect separation (a larger
-       @racket[#:lambda] usually fixes that).}
- @item{If the solver hits @racket[#:max-iters] before converging, the result
-       is still returned, holding partial coefficients, and a warning is logged
-       to the current logger.}
+ @item{Data that glmnet cannot fit raises @racket[exn:fail] with a readable
+       message: for example when every predictor is constant, when a class
+       probability collapses under perfect separation (a larger
+       @racket[#:lambda] usually fixes that), or when a Gaussian response is
+       constant, as R reports too.}
+ @item{When glmnet fits no @math{λ} at all, for example because the solver
+       hits @racket[#:max-iters] before converging, the fit raises
+       @racket[exn:fail] with glmnet's reason, naming the procedure called. R
+       warns and returns an empty model instead. A @tech{regularization path}
+       that fails after fitting some @math{λ} keeps those and logs a warning
+       with the topic @racket['glmnet], as R warns.}
 ]
 
 @examples[#:eval ev #:label #f
 (eval:error (ols '((1.0 2.0) (1.0 2.0) (1.0 2.0)) '(1.0 2.0 3.0)))
+(eval:error (lasso X y #:lambda 0.01 #:max-iters 1))
 ]
 
 @section[#:tag "concepts-precision"]{The native library}

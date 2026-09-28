@@ -22,6 +22,7 @@
   (require rackunit
            json
            racket/list
+           racket/match
            racket/runtime-path
            glmnet
            (file "../private/demo-utils.rkt"))
@@ -120,41 +121,55 @@
     (define s (format "~a" p))
     (cdr (regexp-split #rx"\n" (substring s 0 (sub1 (string-length s))))))
 
-  ;; The path a path or predict golden describes, fitted as R fits it.
+  ;; The dataset of a path or predict golden; `nobs` restricts it to the first
+  ;; nobs observations.
+  (define (golden-dataset g)
+    (define full (load-dataset (hash-ref g 'dataset)))
+    (match (hash-ref g 'nobs #f)
+      [#f full]
+      [n (for/list ([column (in-list full)]) (take column n))]))
+
+  ;; The path a path or predict golden describes, fitted as R fits it. A golden
+  ;; may fix #:nlambda and #:lambda-min-ratio.
   (define (fit-golden-path g ds)
     (define family (hash-ref g 'family))
     (define alpha  (hash-ref g 'alpha))
     (define thresh (hash-ref g 'thresh))
     (define lambda (hash-ref g 'lambda_user #f))
+    (define nlambda (hash-ref g 'nlambda 100))
+    (define ratio  (hash-ref g 'lambda_min_ratio #f))
     (define X      (first ds))
+    (define (fit path-proc . data)
+      (keyword-apply path-proc '(#:alpha #:lambda #:lambda-min-ratio #:nlambda #:thresh)
+                     (list alpha lambda ratio nlambda thresh)
+                     X data))
     (case family
-      [("gaussian")    (elnet-path X (second ds) #:alpha alpha #:lambda lambda #:thresh thresh)]
-      [("binomial")    (logistic-path X (second ds) #:alpha alpha #:lambda lambda #:thresh thresh)]
-      [("multinomial") (multinomial-path X (second ds) #:alpha alpha #:lambda lambda #:thresh thresh)]
-      [("poisson")     (poisson-path X (second ds) #:alpha alpha #:lambda lambda #:thresh thresh)]
-      [("cox")         (cox-path X (second ds) (third ds) #:alpha alpha #:lambda lambda
-                             #:thresh thresh)]
-      [("mgaussian")   (mgaussian-path X (second ds) #:alpha alpha #:lambda lambda
-                                       #:thresh thresh)]))
+      [("gaussian")    (fit elnet-path (second ds))]
+      [("binomial")    (fit logistic-path (second ds))]
+      [("multinomial") (fit multinomial-path (second ds))]
+      [("poisson")     (fit poisson-path (second ds))]
+      [("cox")         (fit cox-path (second ds) (third ds))]
+      [("mgaussian")   (fit mgaussian-path (second ds))]))
 
   ;; predict and coef along a path (#25), at s on, between, above and below
   ;; the fitted lambdas, and the path's printed table.
   (define (run-predict-golden g)
-    (define ds (load-dataset (hash-ref g 'dataset)))
+    (define ds (golden-dataset g))
     (define p  (fit-golden-path g ds))
     (test-case (hash-ref g 'id)
       (check-generic p (first ds) g (hash-ref (hash-ref g 'meta) 'tolerances))
       (check-equal? (printed-table p) (hash-ref g 'print) "printed table")))
 
   ;; A regularization path (#10): R's lambda sequence (or the user's), where it
-  ;; stops, and the fit at every lambda.
+  ;; stops, and the fit at every lambda. A golden may fix #:nlambda and
+  ;; #:lambda-min-ratio, and `nobs` restricts it to the first nobs observations.
   (define (run-path-golden g)
     (define id     (hash-ref g 'id))
     (define tols   (hash-ref (hash-ref g 'meta) 'tolerances))
     (define ctol   (hash-ref tols 'coef))
     (define itol   (hash-ref tols 'intercept))
     (define dtol   (hash-ref tols 'dev_ratio))
-    (define p      (fit-golden-path g (load-dataset (hash-ref g 'dataset))))
+    (define p      (fit-golden-path g (golden-dataset g)))
     (define expected-lambda (hash-ref g 'lambda_path))
     (test-case id
       (check-equal? (vector-length (glmnet-path-lambda p)) (length expected-lambda)
