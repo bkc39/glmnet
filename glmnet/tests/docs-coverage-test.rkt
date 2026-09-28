@@ -66,11 +66,11 @@
       (match pending
         ['() (for/list ([(file datum) (in-hash seen)]) (cons file datum))]
         [(cons file rest)
-         (if (hash-ref seen file #f)
-             (loop rest seen)
-             (let ([datum (read-scrbl file)])
-               (loop (append (included-files file datum) rest)
-                     (hash-set seen file datum))))])))
+         (cond
+           [(hash-ref seen file #f) (loop rest seen)]
+           [else
+            (define datum (read-scrbl file))
+            (loop (append (included-files file datum) rest) (hash-set seen file datum))])])))
 
   ;; The value of keyword option kw among a form's leading options, or #f.
   (define (option forms kw)
