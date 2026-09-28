@@ -22,6 +22,7 @@ glmnet/                        Racket collection
   data.rkt                     design-matrix layer (glmnet/data): the one input layout
   core/*.rkt                   one module per family; marshal.rkt, path.rkt shared
   core/model.rkt               gen:glmnet-model: predict / coef / deviance-ratio on any result
+  core/cv.rkt                  cross-validation (R's cv.glmnet) behind every family's *-cv
   main.rkt                     public API (require glmnet)
   examples/NN-*.rkt            #lang scribble/lp2 literate examples (run-example)
   examples/test/NN-*.rkt       companion runners + rackunit harnesses

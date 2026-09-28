@@ -4,7 +4,9 @@
 ;; `gen:glmnet-model` by presenting itself as a `glmnet-path`: a single-lambda
 ;; fit is a path with one lambda. `predict` and `coef` read any model through
 ;; that view, and between two fitted lambdas they interpolate the coefficients
-;; as R's predict.glmnet does with exact = FALSE.
+;; as R's predict.glmnet does with exact = FALSE. A cross-validated model (#27)
+;; also names lambdas, 'lambda-min and 'lambda-1se, which `predict` and `coef`
+;; accept in place of a number.
 
 (require racket/contract
          racket/generic
@@ -17,21 +19,25 @@
          (submod "path.rkt" support))
 
 (define lambda-arg/c (or/c (>=/c 0) (and/c (listof (>=/c 0)) pair?)))
+(define lambda-name/c (or/c 'lambda-min 'lambda-1se))
 (define type/c (or/c 'link 'response 'class))
 
 (define-generics glmnet-model
   (glmnet-model->path glmnet-model)
   (glmnet-model-default-lambda glmnet-model)
+  (glmnet-model-named-lambda glmnet-model name)
   (deviance-ratio glmnet-model)
   #:defaults
   ([glmnet-path?
     (define (glmnet-model->path p) p)
     (define (glmnet-model-default-lambda p) (vector->list (glmnet-path-lambda p)))
+    (define (glmnet-model-named-lambda p name) #f)
     (define (deviance-ratio p) (glmnet-path-dev-ratio p))])
   #:fallbacks
   [(define/generic ->path glmnet-model->path)
    (define (glmnet-model-default-lambda m)
      (vector-ref (glmnet-path-lambda (->path m)) 0))
+   (define (glmnet-model-named-lambda m name) #f)
    (define (deviance-ratio m)
      (vector-ref (glmnet-path-dev-ratio (->path m)) 0))])
 
@@ -47,15 +53,16 @@
    (->i ([model glmnet-model?])
         #:pre/name (model) "the model has at least one fitted λ" (fitted? model)
         [result lambda-arg/c])]
+  [glmnet-model-named-lambda (-> glmnet-model? lambda-name/c (or/c #f (>=/c 0)))]
   [deviance-ratio (-> glmnet-model? (or/c real? (vectorof real? #:flat? #t)))]
   [predict
    (->i ([model glmnet-model?] [X design-matrix/c])
-        (#:type [type type/c] #:lambda [s lambda-arg/c])
+        (#:type [type type/c] #:lambda [s (or/c lambda-arg/c lambda-name/c)])
         #:pre/name (model) "the model has at least one fitted λ" (fitted? model)
         [result list?])]
   [coef
    (->i ([model glmnet-model?])
-        (#:lambda [s lambda-arg/c])
+        (#:lambda [s (or/c lambda-arg/c lambda-name/c)])
         #:pre/name (model) "the model has at least one fitted λ" (fitted? model)
         [result (or/c vector? (listof vector?))])]))
 
@@ -161,6 +168,16 @@
 (define (at-lambdas s one)
   (if (list? s) (map one s) (one s)))
 
+;; s, with a lambda name such as 'lambda-min replaced by the lambda the model
+;; gives it; `who` names the caller in the error for a model that has none.
+(define (resolve-lambda who model s)
+  (cond
+    [(symbol? s)
+     (or (glmnet-model-named-lambda model s)
+         (raise-arguments-error who "only a cross-validated model has a named lambda"
+                                "lambda" s))]
+    [else s]))
+
 ;; --- coef ----------------------------------------------------------------------
 
 ;; As R's coef: the intercept first, then one entry per predictor (no intercept
@@ -177,9 +194,10 @@
 (define (coef model #:lambda [s (glmnet-model-default-lambda model)])
   (define p (glmnet-model->path model))
   (define interpolate (lambda-interpolator (glmnet-path-lambda p)))
-  (at-lambdas s (lambda (s)
-                  (define-values (a0 beta) (point-at p interpolate s))
-                  (coefficient-vector a0 beta))))
+  (at-lambdas (resolve-lambda 'coef model s)
+              (lambda (s)
+                (define-values (a0 beta) (point-at p interpolate s))
+                (coefficient-vector a0 beta))))
 
 ;; --- predict -------------------------------------------------------------------
 
@@ -242,9 +260,10 @@
   (define x (prediction-matrix X (path-num-predictors p) who))
   (define interpolate (lambda-interpolator (glmnet-path-lambda p)))
   (define transform (row-transform family type))
-  (at-lambdas s (lambda (s)
-                  (define-values (a0 beta) (point-at p interpolate s))
-                  (predict-rows family x a0 beta transform))))
+  (at-lambdas (resolve-lambda who model s)
+              (lambda (s)
+                (define-values (a0 beta) (point-at p interpolate s))
+                (predict-rows family x a0 beta transform))))
 
 (define (predict model X
                  #:type [type 'link]

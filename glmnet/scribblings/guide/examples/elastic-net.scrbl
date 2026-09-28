@@ -82,11 +82,46 @@ splitting the weight cheaper than concentrating it, so the two copies get
 almost equal coefficients. On real data the copies are merely correlated, but
 the effect is the same.
 
+@section[#:tag "ex-elastic-net-cv"]{Choosing α and λ}
+
+@racket[elnet-cv] chooses @math{λ} for one @math{α} (@secref["concepts-cv"]).
+To choose @math{α} too, cross-validate each candidate on the same folds, so
+that the errors differ only because the models do. Take the 40 noisy
+observations of @secref["ex-lasso-cv"]:
+
+@examples[#:eval ev #:label #f
+(random-seed 3)
+(define (uniform a b)
+  (+ a (* (- b a) (random))))
+(define X40
+  (for/list ([i (in-range 40)])
+    (define x1 (uniform 0 6))
+    (list x1 (uniform 0 6) (* x1 x1))))
+(define y40
+  (for/list ([row (in-list X40)])
+    (+ 1.0 (* 2 (car row)) (- (cadr row)) (uniform -1 1))))
+(define folds (random-fold-ids 40))
+(for ([alpha (in-list '(0.0 0.25 0.5 0.75 1.0))])
+  (define cv (elnet-cv X40 y40 #:alpha alpha #:fold-ids folds))
+  (define best (glmnet-cv-index-min cv))
+  (printf "α = ~a: λ-min = ~a, error = ~a ± ~a\n"
+          alpha
+          (round3 (glmnet-cv-lambda-min cv))
+          (round3 (vector-ref (glmnet-cv-cvm cv) best))
+          (round3 (vector-ref (glmnet-cv-cvsd cv) best))))
+]
+
+Ridge, which keeps every predictor, the irrelevant @math{x₃} among them,
+predicts clearly worse. Every @math{α} above 0 reaches nearly the same error,
+well within one standard error of each other, so on these data the choice
+among them matters much less than the choice of @math{λ}.
+
 @section[#:tag "ex-elastic-net-when"]{When to use it}
 
 The elastic net is a good default when you want selection but expect groups of
 correlated predictors, as with gene expression, sensor arrays or
 technical indicators. @math{α} is a second tuning parameter alongside
-@math{λ}; values around @racket[0.5] are a common starting point.
+@math{λ}; values around @racket[0.5] are a common starting point, and
+cross-validation on shared folds chooses between candidates.
 
 @(close-eval ev)

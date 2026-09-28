@@ -89,6 +89,12 @@ explained and @math{λ} for each fitted value:
 path
 ]
 
+To choose one of those values, cross-validate: @racket[elnet-cv] estimates the
+prediction error at each @math{λ} on held-out data and picks R's
+@tt{lambda.min} and @tt{lambda.1se}, at which @racket[predict] and
+@racket[coef] then evaluate the fit. Six observations are too few for that;
+@secref["concepts-cv"] works through an example.
+
 @section[#:tag "gs-models"]{Choosing a model}
 
 @racket[ols], @racket[ridge], @racket[lasso] and @racket[elastic-net] are the
@@ -134,8 +140,6 @@ values between those it fitted; see @secref["concepts-predict"].
 Several R @tt{glmnet} features have no binding yet. Each has an open issue:
 
 @itemlist[
-  @item{Cross-validation, @tt{cv.glmnet}, @tt{lambda.min} and @tt{lambda.1se}
-        (@hyperlink["https://github.com/bkc39/glmnet/issues/27"]{#27}).}
   @item{Coefficient-path and CV-error plots
         (@hyperlink["https://github.com/bkc39/glmnet/issues/28"]{#28}).}
   @item{Observation weights, @tt{penalty.factor}, coefficient limits, offsets

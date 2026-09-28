@@ -26,6 +26,8 @@
            count-nonzero
            count-nonzero-groups
            path-num-predictors
+           signif
+           write-table
            write-point))
 
 (struct glmnet-path (family lambda intercepts coefficients dev-ratio df num-passes)
@@ -158,6 +160,19 @@
       (write-string " " port)
       (write-string (~a cell #:min-width width #:align 'right) port)))
   (write-string ">" port))
+
+;; Rows of strings as a table, one line each, every column right-aligned and
+;; indented by two spaces.
+(define (write-table rows port)
+  (define widths
+    (for/list ([column (in-list (apply map list rows))])
+      (apply max (map string-length column))))
+  (for ([row (in-list rows)])
+    (newline port)
+    (for ([cell (in-list row)]
+          [width (in-list widths)])
+      (write-string "  " port)
+      (write-string (~a cell #:min-width width #:align 'right) port))))
 
 ;; R's signif(x, digits) (nmath/fprec.c), in the same double arithmetic.
 (define (r-signif x digits)
