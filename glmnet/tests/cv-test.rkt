@@ -512,6 +512,18 @@
                (lambda () (cox-cv X distinct-times (for/list ([i (in-range n)]) (if (= i 29) 1 0))
                                   #:fold-ids folds))))
 
+  (test-case "a constant Gaussian response is an error naming the CV procedure, as R stops"
+    (check-exn #rx"^elnet-cv: fitting all the data: y is constant; gaussian glmnet fails at standardization step"
+               (lambda () (elnet-cv X (make-list n 2.0) #:fold-ids folds)))
+    (check-exn #rx"^elnet-cv: fitting all the data: y is constant"
+               (lambda () (elnet-cv X (make-list n 0.0) #:fold-ids folds #:intercept? #f)))
+    (check-exn #rx"^elnet-cv: fitting the training data of held-out fold 4: y is constant"
+               (lambda ()
+                 (elnet-cv X (for/list ([f (in-list folds)]) (if (= f 4) 5.0 2.0))
+                           #:fold-ids folds)))
+    (check-exn #rx"^mgaussian-cv: fitting all the data: y is constant"
+               (lambda () (mgaussian-cv X (make-list n '(1.0 2.0)) #:fold-ids folds))))
+
   (test-case "data errors name the CV procedure"
     (check-contract-error (lambda () (elnet-cv X (cdr y)))
                           #rx"^elnet-cv: y does not have one entry per row of X")
