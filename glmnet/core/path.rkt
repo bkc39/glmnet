@@ -28,7 +28,9 @@
            path-num-predictors
            signif
            write-table
-           write-point))
+           write-point
+           write-path
+           call-suffix))
 
 (struct glmnet-path (family lambda intercepts coefficients dev-ratio df num-passes)
   #:transparent
@@ -123,9 +125,11 @@
   (~r (if (zero? r) 0.0 r) #:precision `(= ,places)))
 
 ;; A single fit, from its one-lambda path: #<glmnet:binomial λ=0.04 dev=0.7134 nz=2/3>.
-(define (write-point p port)
-  (fprintf port "#<glmnet:~a λ=~a dev=~a nz=~a/~a>"
+;; `call`, when given, follows the family, as the formula of a formula model does.
+(define (write-point p port [call #f])
+  (fprintf port "#<glmnet:~a~a λ=~a dev=~a nz=~a/~a>"
            (glmnet-path-family p)
+           (call-suffix call)
            (signif (vector-ref (glmnet-path-lambda p) 0))
            (fixed (vector-ref (glmnet-path-dev-ratio p) 0) 4)
            (vector-ref (glmnet-path-df p) 0)
@@ -134,8 +138,9 @@
 ;; A path, as R's print.glmnet prints its table: Df, round(100 * dev.ratio, 2)
 ;; and signif(lambda, 4), one row per fitted lambda under its 1-based index,
 ;; each column zapped and formatted to 5 significant digits as print.anova
-;; (printCoefmat) does.
-(define (write-path p port)
+;; (printCoefmat) does. `call`, when given, follows the family, as the formula of
+;; a formula model does.
+(define (write-path p port [call #f])
   (define columns
     (list (cons "Df" (r-format (for/list ([df (in-vector (glmnet-path-df p))])
                                  (exact->inexact df))))
@@ -150,7 +155,7 @@
   (define widths
     (for/list ([column (in-list columns)])
       (apply max (map string-length column))))
-  (fprintf port "#<glmnet-path:~a" (glmnet-path-family p))
+  (fprintf port "#<glmnet-path:~a~a" (glmnet-path-family p) (call-suffix call))
   (for ([name (in-list (cons "" row-names))]
         [row (in-list (apply map list columns))])
     (newline port)
@@ -160,6 +165,10 @@
       (write-string " " port)
       (write-string (~a cell #:min-width width #:align 'right) port)))
   (write-string ">" port))
+
+;; What a printed model shows after its family: nothing, or its call.
+(define (call-suffix call)
+  (if call (string-append " " call) ""))
 
 ;; Rows of strings as a table, one line each, every column right-aligned and
 ;; indented by two spaces.

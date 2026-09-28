@@ -11,13 +11,19 @@ exports a C ABI that the Racket FFI binds to.
 
 ## Status
 
-Example-driven, in progress. Phase 0 (toolchain + FFI spine) is complete; the
-four core models — OLS, ridge, lasso, elastic net — land one at a time, each as
-a runnable literate example with a matching section in the user guide. See
-`AGENTS.md` for the development workflow and `plans/` notes.
+All six of R glmnet's families are bound: Gaussian (OLS, ridge, lasso and
+elastic net), binomial, multinomial, Cox, Poisson and multi-response Gaussian.
+Each fits at a single λ, along a regularization path and with cross-validation
+(R's `cv.glmnet`), and every result works with the generic `predict`, `coef`
+and `deviance-ratio`. A formula front end fits any family from named columns,
+and `glmnet/plot` draws R's path and cross-validation plots. Parity tests check
+the numbers against R glmnet 4.1.10. Not bound yet: observation weights,
+penalty factors, coefficient limits and offsets (#12), and sparse predictor
+matrices (#11). See `AGENTS.md` for the development workflow.
 
 The Scribble manual (`glmnet/scribblings/`) has a user guide (getting started,
-concepts, plots, one worked example per model family) and an API reference.
+concepts, formulas and named data, plots, one worked example per model family)
+and an API reference.
 With the package installed, build it with
 `raco scribble --htmls glmnet/scribblings/glmnet.scrbl`.
 
@@ -29,6 +35,23 @@ With the package installed, build it with
 
 A prebuilt native library is staged at install time; no Fortran toolchain is
 needed to use the package.
+
+## Formulas and named data
+
+Any family can be fitted from a table of named columns (an association list,
+a hash, or a design matrix with column names) with an R-style formula. The
+model keys its coefficients by name, and `predict` reads a new table by name:
+
+```racket
+(define data
+  (list (cons "y"  '(1.0 4.0 3.0 6.0 5.0 8.0))
+        (cons "x1" '(1.0 2.0 3.0 4.0 5.0 6.0))
+        (cons "x2" '(2.0 1.0 4.0 3.0 6.0 5.0))))
+(define m (formula-fit (~ y all) data #:lambda 0.05))   ; also formula-path, formula-cv
+(coef m)                                  ; => '(("(Intercept)" . ...) ("x1" . ...) ("x2" . ...))
+(predict m (list (cons "x2" '(6.0)) (cons "x1" '(7.0))))
+(formula-cv (~ (surv time status) (- all id)) patients #:family 'cox)
+```
 
 ## Plots
 
@@ -57,7 +80,7 @@ The manual's *Plots* chapter draws every plot it describes.
 
 ```bash
 nix develop                     # builds the native lib + link-installs the package
-bash scripts/run-examples.sh    # runs OLS, ridge, lasso, elastic net; prints each fit
+bash scripts/run-examples.sh    # runs all nine examples (glmnet/examples/); prints each fit
 raco test ./glmnet/             # full suite: unit tests + example harnesses
 ```
 

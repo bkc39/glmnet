@@ -23,7 +23,8 @@
          load-iris
          load-veteran
          load-warpbreaks
-         load-linnerud)
+         load-linnerud
+         load-table)
 
 (define-runtime-path data-dir "data")
 
@@ -55,6 +56,18 @@
 
 (define (read-data-csv name)
   (call-with-input-file (build-path data-dir name) port->string))
+
+;; A dataset as a table (#26): an association list from each column's name, as
+;; the CSV's header gives it, to the column's values. `name` is the CSV's name
+;; without its extension, such as "longley".
+(define (load-table name)
+  (define text (read-data-csv (string-append name ".csv")))
+  (define header
+    (for/list ([cell (in-list (string-split (car (string-split text "\n")) ","))])
+      (string-trim (string-trim cell) "\"")))
+  (for/list ([column-name (in-list header)]
+             [column (in-list (apply map list (parse-numeric-csv text)))])
+    (cons column-name column)))
 
 ;; Longley US macroeconomic data (16x7). Returns (values X y) with y = Employed
 ;; (the last column) and X = the first 6 columns. Real data, exported once from

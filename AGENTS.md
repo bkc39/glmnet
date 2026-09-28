@@ -19,10 +19,13 @@ glmnet/                        Racket collection
   foreign/raw/library.rkt      ffi-lib loader + define-glmnet definer
   foreign/raw/*.rkt            raw FFI bindings (capi.rkt, elnet.rkt, ...)
   foreign.rkt                  contracted wrappers + load-time precision guard
-  data.rkt                     design-matrix layer (glmnet/data): the one input layout
+  data.rkt                     design-matrix layer (glmnet/data): the one input layout,
+                               and tables (named columns) that convert into it
   core/*.rkt                   one module per family; marshal.rkt, path.rkt shared
   core/model.rkt               gen:glmnet-model: predict / coef / deviance-ratio on any result
   core/cv.rkt                  cross-validation (R's cv.glmnet) behind every family's *-cv
+  core/formula.rkt             formula front end: (~ y all) on a table -> any family,
+                               a formula-model with name-keyed coef and predict
   main.rkt                     public API (require glmnet)
   plot.rkt                     glmnet/plot: R's plot.glmnet / plot.cv.glmnet on plot-lib
                                (picts); not re-exported by main.rkt
@@ -84,6 +87,14 @@ different `α` (`parm`) and `λ`. Each new capability is shipped as one unit:
 2. **Add the Fortran C-API.** Extend `fortran/glmnet_capi.f90` with a
    `bind(C)` entry mapping clean C args -> the internal `elnet` call (set
    `ka`/`jd`/`vp`/`cl`/`flmin`/`ulam`, uncompress `ca`/`ia` -> dense `beta`).
+   An entry point with more than eight integer and pointer arguments takes its
+   integer scalars **by reference** (no `value`), and the raw binding passes
+   them as `(_ptr i _int)`: the extra arguments go on the stack, where Apple's
+   arm64 ABI packs 4-byte ints but gfortran reads 8-byte slots, which corrupted
+   arguments on macOS (PR #45; see the path section of `glmnet_capi.f90`). A new
+   or changed entry point bumps `glmnet_capi_abi_version`, the guard in
+   `glmnet/foreign.rkt` and `fortran/tests/test_precision.f90`, and the
+   committed candidates are refreshed from CI's catalog job.
 3. **Test the Fortran.** Add `fortran/tests/test_*.f90`: a tiny known dataset,
    assert outputs within tolerance, `error stop 1` on failure; register with
    `add_test` in `CMakeLists.txt`. Run `ctest` (`nix build .#native` or local
@@ -109,6 +120,33 @@ different `α` (`parm`) and `λ`. Each new capability is shipped as one unit:
 8. **Add the reference entry.** Document the new public procs and result struct
    in `scribblings/reference.scrbl` (contract matching `contract-out` + a live
    example each).
+9. **Register a new family everywhere the families are listed.** A family is
+   more than its single fit:
+   - `*-path`, its regularization path: a `glmnet_<family>_path` shim entry
+     (integer scalars by reference, step 2), its raw binding in
+     `foreign/raw/path.rkt`, and the fitter in its `core/` module, built on the
+     `support` submodule of `core/path.rkt` (`path-lambdas`, `finish-lambdas`,
+     `unpack-*`).
+   - `*-cv`, its cross-validation, through `cross-validate` in `core/cv.rkt`,
+     and the family's cases in `cv.rkt`: `measure-name`, `observation-loss`,
+     and `check-training-folds` when every fold's training data needs a class
+     or an event.
+   - `core/formula.rkt`: the `families` table (the fit, path and cv
+     procedures, the type measures with the default first, and whether
+     `#:intercept?` applies), `family/c`, and the response checks
+     (`response-form-problem` and `model-frame`).
+   - `core/model.rkt`: `row-transform` and `check-type` (what `#:type`
+     makes of the linear predictor), and for a family with one coefficient
+     vector per class or response, the grouped cases of `single-fit-path`,
+     `predict-rows` and `coefficient-namer` (and `path-num-predictors` in
+     `core/path.rkt`).
+   - `glmnet/plot.rkt`: `path-panels` for a family drawn as several panels.
+   - `main.rkt` re-exports the new `core/` module, and
+     `tests/docs-coverage-test.rkt` then fails until each export has a
+     reference entry.
+   - R parity: fixtures in `scripts/r-parity/gen-reference.R` and checks in
+     `glmnet/tests/parity-test.rkt`, and anything R does around the Fortran in
+     `fortran/vendor/NOTICE.md`.
 
 **Gate (all green before the next feature):**
 `raco test ./glmnet/` · `raco scribble --htmls …/glmnet.scrbl` renders with no
@@ -179,8 +217,15 @@ files; only the loose copies directly under `native-libs/` are git-ignored.
 
 ## Roadmap
 
-v1 = Phase 0 hello + OLS / ridge / lasso / elastic net (single-λ "solo" fits).
-Future arc (additive, no rework — the wrapper is already path-capable): full
-regularization path (`nlam>1`, `flmin<1`), cross-validation, sparse `spelnet`,
-and other GLM families (`lognet` logistic, `coxnet`, `fishnet`) — all already
-present in `vendor/`.
+Done: Phase 0 (toolchain + FFI spine); the six families of R glmnet 4.1
+(Gaussian, with OLS / ridge / lasso / elastic net, binomial, multinomial, Cox,
+Poisson and multi-response Gaussian) as single fits; and the R-style modelling
+arc #44: regularization paths (#10), the design-matrix layer (#35), the
+generic model interface (#25), cross-validation (#27), plots (#28) and the
+formula front end (#26).
+
+Next: the per-fit knobs, weights, `penalty.factor`, coefficient limits,
+offsets and `exclude` (#12); sparse input through `spelnet` / `splognet` /
+`spfishnet` (#11), already present in `vendor/`; the data-source adapters of
+the input-formats arc (#41); and parity fixtures from glmnet's example
+datasets (#17).

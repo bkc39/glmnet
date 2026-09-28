@@ -10,7 +10,8 @@
 ;; helpers, a regularization path (`*-path`) and cross-validation (`*-cv`, whose
 ;; shared machinery is core/cv.rkt). Every result type implements
 ;; `gen:glmnet-model` (core/model.rkt), so `predict`, `coef` and
-;; `deviance-ratio` work on any of them. `data.rkt` is the
+;; `deviance-ratio` work on any of them. core/formula.rkt is the formula front
+;; end, which fits any family from a table by column name. `data.rkt` is the
 ;; design-matrix layer every fitter reads its input through, and `foreign.rkt`
 ;; also re-exports the Phase 0 connectivity checks. The plots, plot.rkt, are
 ;; `(require glmnet/plot)` and are not re-exported here, so that fitting a
@@ -26,6 +27,7 @@
          "core/path.rkt"
          "core/model.rkt"
          "core/cv.rkt"
+         "core/formula.rkt"
          "foreign.rkt")
 
 (provide (all-from-out "data.rkt")
@@ -38,4 +40,5 @@
          (all-from-out "core/path.rkt")
          (all-from-out "core/model.rkt")
          (all-from-out "core/cv.rkt")
+         (all-from-out "core/formula.rkt")
          (all-from-out "foreign.rkt"))

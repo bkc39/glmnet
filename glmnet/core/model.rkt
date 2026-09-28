@@ -6,7 +6,9 @@
 ;; that view, and between two fitted lambdas they interpolate the coefficients
 ;; as R's predict.glmnet does with exact = FALSE. A cross-validated model (#27)
 ;; also names lambdas, 'lambda-min and 'lambda-1se, which `predict` and `coef`
-;; accept in place of a number.
+;; accept in place of a number. A model that names its predictors, such as a
+;; formula model (#26), gets name-keyed coefficients from `coef` and has
+;; `predict` read a table by those names.
 
 (require racket/contract
          racket/generic
@@ -16,7 +18,9 @@
          racket/vector
          "marshal.rkt"
          "path.rkt"
-         (submod "path.rkt" support))
+         (submod "path.rkt" support)
+         (only-in "../data.rkt" design-matrix? table?)
+         (only-in (submod "../data.rkt" support) select-table-columns))
 
 (define lambda-arg/c (or/c (>=/c 0) (and/c (listof (>=/c 0)) pair?)))
 (define lambda-name/c (or/c 'lambda-min 'lambda-1se))
@@ -26,18 +30,24 @@
   (glmnet-model->path glmnet-model)
   (glmnet-model-default-lambda glmnet-model)
   (glmnet-model-named-lambda glmnet-model name)
+  (glmnet-model-predictor-names glmnet-model)
+  (glmnet-model-response-names glmnet-model)
   (deviance-ratio glmnet-model)
   #:defaults
   ([glmnet-path?
     (define (glmnet-model->path p) p)
     (define (glmnet-model-default-lambda p) (vector->list (glmnet-path-lambda p)))
     (define (glmnet-model-named-lambda p name) #f)
+    (define (glmnet-model-predictor-names p) #f)
+    (define (glmnet-model-response-names p) #f)
     (define (deviance-ratio p) (glmnet-path-dev-ratio p))])
   #:fallbacks
   [(define/generic ->path glmnet-model->path)
    (define (glmnet-model-default-lambda m)
      (vector-ref (glmnet-path-lambda (->path m)) 0))
    (define (glmnet-model-named-lambda m name) #f)
+   (define (glmnet-model-predictor-names m) #f)
+   (define (glmnet-model-response-names m) #f)
    (define (deviance-ratio m)
      (vector-ref (glmnet-path-dev-ratio (->path m)) 0))])
 
@@ -54,9 +64,11 @@
         #:pre/name (model) "the model has at least one fitted λ" (fitted? model)
         [result lambda-arg/c])]
   [glmnet-model-named-lambda (-> glmnet-model? lambda-name/c (or/c #f (>=/c 0)))]
+  [glmnet-model-predictor-names (-> glmnet-model? (or/c #f (listof string?)))]
+  [glmnet-model-response-names (-> glmnet-model? (or/c #f (listof string?)))]
   [deviance-ratio (-> glmnet-model? (or/c real? (vectorof real? #:flat? #t)))]
   [predict
-   (->i ([model glmnet-model?] [X design-matrix/c])
+   (->i ([model glmnet-model?] [X (or/c design-matrix/c table?)])
         (#:type [type type/c] #:lambda [s (or/c lambda-arg/c lambda-name/c)])
         #:pre/name (model) "the model has at least one fitted λ" (fitted? model)
         [result list?])]
@@ -64,7 +76,7 @@
    (->i ([model glmnet-model?])
         (#:lambda [s (or/c lambda-arg/c lambda-name/c)])
         #:pre/name (model) "the model has at least one fitted λ" (fitted? model)
-        [result (or/c vector? (listof vector?))])]))
+        [result (or/c vector? list?)])]))
 
 ;; For the family modules only; not part of the public API.
 (module* support #f
@@ -191,13 +203,57 @@
        (vector-append (vector a) b))]
     [else (vector-append (vector a0) beta)]))
 
+;; The names a model gives its predictors, or #f if it names none. They must
+;; name each predictor of its path p once, since `coef` pairs them with the
+;; coefficients and `predict` reads the table's columns by them.
+(define (model-predictor-names who model p)
+  (define names (glmnet-model-predictor-names model))
+  (when names
+    (define n (path-num-predictors p))
+    (unless (= (length names) n)
+      (raise-arguments-error who "the model does not have one name per predictor"
+                             "predictor names" names "predictors" n))
+    (define dup (check-duplicates names))
+    (when dup
+      (raise-arguments-error who "the model gives two predictors the same name" "name" dup)))
+  names)
+
+;; For a model with named predictors, what turns coefficient-vector's result
+;; into association lists keyed as R's coef names its rows and list elements:
+;; "(Intercept)" and the predictor names, inside one list per class label
+;; (multinomial) or response name (multi-response; y1, y2, ... when the model
+;; names no responses). For any other model, `values`.
+(define (coefficient-namer who model p)
+  (define names (model-predictor-names who model p))
+  (cond
+    [(not names) values]
+    [else
+     (define rows (if (glmnet-path-intercepts p) (cons "(Intercept)" names) names))
+     (define (label v)
+       (for/list ([row (in-list rows)] [c (in-vector v)])
+         (cons row c)))
+     (define ((label-groups keys) vs)
+       (for/list ([key (in-list keys)] [v (in-vector vs)])
+         (cons key (label v))))
+     (define k (vector-length (vector-ref (glmnet-path-coefficients p) 0)))
+     (case (glmnet-path-family p)
+       [(multinomial) (label-groups (range k))]
+       [(mgaussian)
+        (define responses (glmnet-model-response-names model))
+        (when (and responses (not (= (length responses) k)))
+          (raise-arguments-error who "the model does not have one name per response"
+                                 "response names" responses "responses" k))
+        (label-groups (or responses (for/list ([r (in-range k)]) (format "y~a" (add1 r)))))]
+       [else label])]))
+
 (define (coef model #:lambda [s (glmnet-model-default-lambda model)])
   (define p (glmnet-model->path model))
   (define interpolate (lambda-interpolator (glmnet-path-lambda p)))
+  (define name (coefficient-namer 'coef model p))
   (at-lambdas (resolve-lambda 'coef model s)
               (lambda (s)
                 (define-values (a0 beta) (point-at p interpolate s))
-                (coefficient-vector a0 beta))))
+                (name (coefficient-vector a0 beta)))))
 
 ;; --- predict -------------------------------------------------------------------
 
@@ -251,13 +307,30 @@
         (for/list ([i (in-range n)])
           (transform (linear-predictor x i a0 beta))))))
 
+;; The new data X as a design matrix with one column per predictor of the
+;; model's path p: for a model with named predictors, the columns of the table
+;; X with those names, in the model's order; otherwise X itself, column for
+;; column.
+(define (model-matrix who model X p)
+  (define names (model-predictor-names who model p))
+  (cond
+    [names
+     (unless (table? X)
+       (raise-arguments-error who "the model's predictors are named, so X must be a table"
+                              "predictors" names "X" X))
+     (select-table-columns X names who)]
+    [(and (table? X) (not (design-matrix? X)))
+     (raise-arguments-error who "the model's predictors are not named, so X must be a design matrix"
+                            "X" X)]
+    [else (prediction-matrix X (path-num-predictors p) who)]))
+
 ;; `predict`, with `who` named in errors; the family prediction helpers are
 ;; this at a fixed type.
 (define (predict-as who model X type [s (glmnet-model-default-lambda model)])
   (define p (glmnet-model->path model))
   (define family (glmnet-path-family p))
   (check-type who family type)
-  (define x (prediction-matrix X (path-num-predictors p) who))
+  (define x (model-matrix who model X p))
   (define interpolate (lambda-interpolator (glmnet-path-lambda p)))
   (define transform (row-transform family type))
   (at-lambdas (resolve-lambda who model s)
