@@ -44,9 +44,10 @@ Before the solver runs, an argument of the wrong type, a ragged or empty
 matrix, a non-finite entry, or a response of the wrong length raises
 @racket[exn:fail:contract]; the message names the offending row and column or
 position. A fatal condition reported by glmnet
-raises @racket[exn:fail] with a readable message. If the solver reaches
-@racket[#:max-iters] without converging, the fit returns partial coefficients
-and logs a warning.
+raises @racket[exn:fail] with a readable message. So does a fit for which
+glmnet fits no @math{λ} at all, for example because it does not converge within
+@racket[#:max-iters] passes; the message names the procedure called and gives
+glmnet's reason. (R warns instead, and returns an empty model.)
 
 @section[#:tag "ref-data"]{Input data}
 
@@ -102,7 +103,8 @@ matrix can be passed to any number of fits.
   Builds a design matrix from a list of rows, one per observation. Every row
   must have the same length, and every entry must be a real, finite number.
   @racket[column-names], when given, names the columns: one distinct string or
-  symbol per column.
+  symbol per column. Names are compared as strings, so @racket["x"] and
+  @racket['x] are the same name.
 
   @examples[#:eval ev
   (define named (rows->design-matrix '((1 2) (3 4)) #:column-names '(age dose)))
@@ -110,7 +112,8 @@ matrix can be passed to any number of fits.
   (design-matrix-column-names named)
   (eval:error (rows->design-matrix '((1.0 2.0) (3.0 4.0) (5.0))))
   (eval:error (rows->design-matrix '((1.0 2.0) (3.0 +inf.0))))
-  (eval:error (rows->design-matrix '((1.0 2.0)) #:column-names '(a)))]}
+  (eval:error (rows->design-matrix '((1.0 2.0)) #:column-names '(a)))
+  (eval:error (rows->design-matrix '((1.0 2.0)) #:column-names '("x" x)))]}
 
 @defproc[(columns->design-matrix [columns (listof list?)]
                                  [#:column-names column-names
@@ -132,10 +135,10 @@ matrix can be passed to any number of fits.
                                                    #f])
          design-matrix?]{
   Builds a design matrix from @racket[v], an array already in the column-major
-  layout: element @math{(i, j)} is at index @math{i + j · nrows}. The length of
-  @racket[v] must be @racket[(* nrows ncols)] and every entry must be finite.
-  The design matrix holds a copy, so later changes to @racket[v] do not
-  affect it.
+  layout: element @math{(i, j)} is at index @math{i + j · nrows}. The contract
+  requires the length of @racket[v] to be @racket[(* nrows ncols)], and every
+  entry must be finite. The design matrix holds a copy, so later changes to
+  @racket[v] do not affect it.
 
   @examples[#:eval ev
   (require ffi/vector)
@@ -169,7 +172,9 @@ matrix can be passed to any number of fits.
                             [j exact-nonnegative-integer?])
          flonum?]{
   The entry in row @racket[i] and column @racket[j] of @racket[dm], counting
-  from 0.
+  from 0. The contract requires @racket[i] to be less than
+  @racket[(design-matrix-nrows dm)] and @racket[j] less than
+  @racket[(design-matrix-ncols dm)].
 
   @examples[#:eval ev
   (design-matrix-ref D 2 1)
@@ -316,10 +321,14 @@ fixed @racket[#:alpha]. See @secref["ex-ols"], @secref["ex-ridge"],
                     [#:max-iters max-iters exact-positive-integer? 100000])
          elnet-result?]{
   Fits a Gaussian elastic-net model of the response @racket[y], one real per
-  row of @racket[X], at a single @racket[lambda].
+  row of @racket[X], at a single @racket[lambda]. As in R, a constant
+  @racket[y] (all zero, when @racket[intercept?] is @racket[#f]) has nothing to
+  standardize and raises @racket[exn:fail]. The four models below call
+  @racket[elnet-fit], and its errors name the one called.
 
   @examples[#:eval ev
-  (elnet-fit X y #:alpha 0.5 #:lambda 0.5)]}
+  (elnet-fit X y #:alpha 0.5 #:lambda 0.5)
+  (eval:error (lasso X '(2.0 2.0 2.0 2.0 2.0 2.0) #:lambda 0.5))]}
 
 @defproc[(ols [X design-matrix/c]
               [y (and/c (listof real?) pair?)]
@@ -604,10 +613,13 @@ The @tech{Poisson family}: counts with a log link. See @secref["ex-poisson"].
                       [#:max-iters max-iters exact-positive-integer? 100000])
          poisson-result?]{
   Fits a Poisson elastic-net model of the non-negative response @racket[y],
-  which need not be integral.
+  which need not be integral. At least one value must be positive; an all-zero
+  response raises @racket[exn:fail] before fitting (R warns and returns an
+  empty model).
 
   @examples[#:eval ev
-  (poisson-fit X y #:lambda 0.5)]}
+  (poisson-fit X y #:lambda 0.5)
+  (eval:error (poisson-fit X '(0 0 0 0 0 0 0 0) #:lambda 0.5))]}
 
 @defproc[(poisson-predict-mean [fit poisson-result?]
                                [X design-matrix/c])
@@ -653,7 +665,10 @@ jointly under a grouped penalty. See @secref["ex-mgaussian"].
   Fits a multi-response Gaussian elastic-net model. @racket[Y] is a matrix with
   one row per observation and one column per response. With @racket[alpha]
   above zero, the grouped lasso keeps or drops each predictor for every
-  response at once.
+  response at once. A constant column is fitted by its intercept alone, but
+  when every column is constant (all zero, when @racket[intercept?] is
+  @racket[#f]) there is nothing to fit and the @exnraise[exn:fail], as for
+  @racket[elnet-fit].
 
   @examples[#:eval ev
   (mgaussian-fit X Y #:lambda 0.5)]}
@@ -681,12 +696,41 @@ made optional:
        @racket[#:nlambda] values from @math{λ_max}, where every coefficient is
        zero, down to @racket[#:lambda-min-ratio] times @math{λ_max}. The
        ratio defaults to @racket[0.01] when there are fewer observations than
-       predictors, and to @racket[1e-4] otherwise.}
- @item{Like R, the path stops early once the deviance ratio improves by less
-       than @racket[1e-5] or passes @racket[0.999], so it can hold fewer than
-       @racket[#:nlambda] values. The first value of an automatic sequence is
-       the extrapolation R's @tt{glmnet} reports.}
+       predictors, and to @racket[1e-4] otherwise; glmnet raises a ratio below
+       @racket[1e-6], including @racket[0], to @racket[1e-6]. The first value
+       of an automatic sequence is the extrapolation R's @tt{glmnet} reports.}
+ @item{A path can hold fewer @math{λ} than asked for, as in R. An automatic
+       sequence stops early once another @math{λ} would barely change the
+       fit; the rule depends on the family (below). A binomial or multinomial
+       path, automatic or not, stops where the fitted probabilities saturate
+       at 0 and 1. And any path ends where glmnet fails at one of its
+       @math{λ}, for example by not converging within @racket[#:max-iters]
+       passes: it keeps the @math{λ} before that one and logs a warning with
+       the topic @racket['glmnet] (shown with
+       @tt{PLTSTDERR="warning@"@"glmnet"}), where R warns. When glmnet fails at
+       the first @math{λ}, the fitter raises @racket[exn:fail] instead (R
+       returns an empty model).}
 ]
+
+glmnet's early-stopping rules apply only to an automatic sequence, and only
+from its fifth value on. It stops at the @math{λ} where, writing @math{D} for
+the deviance ratio:
+
+@itemlist[
+ @item{Gaussian: @math{D} gains less than @racket[1e-5] of its own value over
+       the previous @math{λ}, or exceeds @racket[0.999].}
+ @item{Multi-response Gaussian: the residual sum of squares falls by less than
+       @racket[1e-5] of its own value, or @math{D} exceeds @racket[0.999].}
+ @item{Binomial and multinomial: @math{D} gains less than @racket[1e-5] over
+       the previous @math{λ}, or exceeds @racket[0.999].}
+ @item{Poisson: @math{D} gains less than @racket[1e-4] of its own value over
+       the previous four @math{λ}, or exceeds @racket[0.999].}
+ @item{Cox: @math{D} gains less than @racket[1e-3] of its own value over the
+       previous four @math{λ}, or exceeds @racket[0.99].}
+]
+
+These are R's @tt{glmnet.control} defaults (@tt{fdev = 1e-5},
+@tt{devmax = 0.999}, @tt{mnlam = 5}) as each solver applies them.
 
 @defstruct*[glmnet-path ([family (or/c 'gaussian 'binomial 'multinomial 'cox 'poisson 'mgaussian)]
                          [lambda (vectorof real?)]
@@ -702,7 +746,9 @@ made optional:
   @itemlist[
    @item{@racket[intercepts] holds a real per @math{λ}, or a vector of one real
          per class or response for the multinomial and multi-response families.
-         It is @racket[#f] for Cox, which has no intercept.}
+         Multinomial intercepts are centred to sum to zero, as in
+         @racket[multinomial-result]. It is @racket[#f] for Cox, which has no
+         intercept.}
    @item{@racket[coefficients] holds a dense vector per @math{λ} with one entry
          per predictor, or a vector of such vectors (one per class or response).}
    @item{@racket[dev-ratio] is the fraction of null deviance explained.}
@@ -732,7 +778,7 @@ made optional:
                      [y (and/c (listof real?) pair?)]
                      [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) pair?)) #f]
                      [#:nlambda nlambda exact-positive-integer? 100]
-                     [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>/c 0) (</c 1))) #f]
+                     [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>=/c 0) (</c 1))) #f]
                      [#:alpha alpha (real-in 0 1) 1.0]
                      [#:standardize? standardize? boolean? #t]
                      [#:intercept? intercept? boolean? #t]
@@ -743,13 +789,15 @@ made optional:
 
   @examples[#:eval ev
   (vector-length (glmnet-path-lambda (elnet-path X y)))
-  (glmnet-path-df (elnet-path X y #:alpha 0.0 #:nlambda 5))]}
+  (glmnet-path-df (elnet-path X y #:alpha 0.0 #:nlambda 5))
+  (glmnet-path-lambda (elnet-path X y #:nlambda 5 #:lambda-min-ratio 0.1))
+  (eval:error (elnet-path X y #:lambda '(0.1) #:max-iters 1))]}
 
 @defproc[(logistic-path [X design-matrix/c]
                         [y (and/c (listof (or/c 0 1)) pair?)]
                         [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) pair?)) #f]
                         [#:nlambda nlambda exact-positive-integer? 100]
-                        [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>/c 0) (</c 1))) #f]
+                        [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>=/c 0) (</c 1))) #f]
                         [#:alpha alpha (real-in 0 1) 1.0]
                         [#:standardize? standardize? boolean? #t]
                         [#:intercept? intercept? boolean? #t]
@@ -765,7 +813,7 @@ made optional:
                            [y (and/c (listof exact-nonnegative-integer?) pair?)]
                            [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) pair?)) #f]
                            [#:nlambda nlambda exact-positive-integer? 100]
-                           [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>/c 0) (</c 1))) #f]
+                           [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>=/c 0) (</c 1))) #f]
                            [#:alpha alpha (real-in 0 1) 1.0]
                            [#:standardize? standardize? boolean? #t]
                            [#:intercept? intercept? boolean? #t]
@@ -783,7 +831,7 @@ made optional:
                    [statuses (and/c (listof (or/c 0 1)) pair?)]
                    [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) pair?)) #f]
                    [#:nlambda nlambda exact-positive-integer? 100]
-                   [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>/c 0) (</c 1))) #f]
+                   [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>=/c 0) (</c 1))) #f]
                    [#:alpha alpha (real-in 0 1) 1.0]
                    [#:standardize? standardize? boolean? #t]
                    [#:thresh thresh (>/c 0) 1e-7]
@@ -801,7 +849,7 @@ made optional:
                        [y (and/c (listof (>=/c 0)) pair?)]
                        [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) pair?)) #f]
                        [#:nlambda nlambda exact-positive-integer? 100]
-                       [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>/c 0) (</c 1))) #f]
+                       [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>=/c 0) (</c 1))) #f]
                        [#:alpha alpha (real-in 0 1) 1.0]
                        [#:standardize? standardize? boolean? #t]
                        [#:intercept? intercept? boolean? #t]
@@ -817,7 +865,7 @@ made optional:
                          [Y design-matrix/c]
                          [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) pair?)) #f]
                          [#:nlambda nlambda exact-positive-integer? 100]
-                         [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>/c 0) (</c 1))) #f]
+                         [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>=/c 0) (</c 1))) #f]
                          [#:alpha alpha (real-in 0 1) 1.0]
                          [#:standardize? standardize? boolean? #t]
                          [#:intercept? intercept? boolean? #t]
@@ -853,16 +901,22 @@ it passes on to each fit, and these:
        the largest must appear, and there must be at least 3.}
  @item{@racket[#:grouped?], R's @tt{grouped}, computes the error and its
        standard error from the per-fold means when true, and from the
-       per-observation losses otherwise. With fewer than 3 observations per
-       fold the folds are never grouped; @racket['auc] and @racket['C] are
-       always computed per fold; and the Cox deviance is grouped when a fold
-       has fewer than 10 observations. These adjustments, which R also makes,
-       log a warning.}
+       per-observation losses otherwise. When the folds average fewer than 3
+       observations, they are never grouped; @racket['auc] and @racket['C]
+       are always computed per fold; and when the folds average fewer than 10
+       observations, the Cox deviance is grouped. These adjustments, which R
+       also makes, log a warning.}
  @item{@racket[#:lambda] is as for the path fitter, but needs at least two
        values. Every fold's path is fitted at those values. Without it, each
        fold's path chooses its own sequence, as R's does, and is evaluated at
        the full-data path's values by interpolation.}
 ]
+
+The data are checked before any fold is fitted: the response must have what
+its family needs, and so must every fold's training data (each class, or an
+event). When a fit fails all the same, the error names the cross-validation
+procedure and says which fit failed: the one to all the data, or the one to
+the training data of a given held-out fold.
 
 @tabular[#:style 'boxed
          #:sep @hspace[2]
@@ -998,8 +1052,9 @@ carry the signal:
   deviance, @racket['class] the misclassification rate, @racket['auc] the area
   under the ROC curve of each fold, and @racket['mse] and @racket['mae] the
   squared and absolute differences between the 0/1 labels of both classes and
-  their predicted probabilities, summed over the two classes. With fewer than
-  10 observations per fold, @racket['auc] becomes @racket['deviance], as in R.
+  their predicted probabilities, summed over the two classes. When the folds
+  average fewer than 10 observations, @racket['auc] becomes
+  @racket['deviance], as in R. @racket[y] must hold both classes.
 
   @examples[#:eval ev
   (define labels (for/list ([v (in-list y60)]) (if (> v 1.0) 1 0)))
@@ -1053,13 +1108,24 @@ carry the signal:
   @racket['C] is Harrell's concordance index of each fold. Every fold's
   training data must contain an event.
 
+  A held-out fold's own deviance is undefined when the fold has no event, or
+  when its first event is among its last two observations in time order. R
+  stops then, and so does @racket[cox-cv], naming the fold. With
+  @racket[#:grouped? #t], the default, the fold's own deviance is not needed.
+
   @examples[#:eval ev
   (define times (for/list ([v (in-list y60)]) (exp (* -0.3 v))))
   (define statuses
     (for/list ([i (in-range 60)])
       (if (zero? (modulo i 5)) 0 1)))
   (cox-cv X60 times statuses)
-  (cox-cv X60 times statuses #:type-measure 'C)]}
+  (cox-cv X60 times statuses #:type-measure 'C)
+  (define thirds (for/list ([i (in-range 60)]) (modulo i 3)))
+  (define fold-0-censored
+    (for/list ([i (in-range 60)])
+      (if (zero? (modulo i 3)) 0 1)))
+  (eval:error
+   (cox-cv X60 times fold-0-censored #:fold-ids thirds #:grouped? #f))]}
 
 @defproc[(poisson-cv [X design-matrix/c]
                      [y (and/c (listof (>=/c 0)) pair?)]
@@ -1111,26 +1177,26 @@ carry the signal:
   (mgaussian-cv X60 Y60)]}
 
 @defproc[(random-fold-ids [n exact-positive-integer?]
-                          [nfolds exact-positive-integer? 10])
+                          [#:nfolds nfolds exact-positive-integer? 10])
          (listof exact-nonnegative-integer?)]{
   Assigns @racket[n] observations to @racket[nfolds] folds at random, as R's
   @tt{sample(rep(seq(nfolds), length = n))} does: the fold ids
   @racket[0], @racket[1], ..., @racket[(- nfolds 1)], @racket[0], ... are
   shuffled with @racket[current-pseudo-random-generator], so that the folds
-  differ in size by at most one. @racket[nfolds] must not exceed
-  @racket[n]. The cross-validation procedures call it when they are not
-  given @racket[#:fold-ids]; calling it directly gives folds to reuse across
-  calls.
+  differ in size by at most one. @racket[nfolds], given or by default, must
+  not exceed @racket[n]. The cross-validation procedures call it when they
+  are not given @racket[#:fold-ids]; calling it directly gives folds to reuse
+  across calls.
 
   @examples[#:eval ev
-  (random-fold-ids 10 3)
+  (random-fold-ids 10 #:nfolds 3)
   (define (draw)
     (parameterize ([current-pseudo-random-generator
                     (make-pseudo-random-generator)])
       (random-seed 1)
-      (random-fold-ids 10 3)))
+      (random-fold-ids 10 #:nfolds 3)))
   (equal? (draw) (draw))
-  (eval:error (random-fold-ids 3 5))]}
+  (eval:error (random-fold-ids 3 #:nfolds 5))]}
 
 @section[#:tag "ref-formula"]{Formulas}
 
@@ -1348,7 +1414,7 @@ predictors @racket["x1"] to @racket["x8"]:
                                  'gaussian]
                        [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) pair?)) #f]
                        [#:nlambda nlambda exact-positive-integer? 100]
-                       [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>/c 0) (</c 1))) #f]
+                       [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>=/c 0) (</c 1))) #f]
                        [#:alpha alpha (real-in 0 1) 1.0]
                        [#:standardize? standardize? boolean? #t]
                        [#:intercept? intercept? boolean? #t]
@@ -1377,7 +1443,7 @@ predictors @racket["x1"] to @racket["x8"]:
                      [#:grouped? grouped? boolean? #t]
                      [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) (property/c length (>=/c 2)))) #f]
                      [#:nlambda nlambda exact-positive-integer? 100]
-                     [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>/c 0) (</c 1))) #f]
+                     [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>=/c 0) (</c 1))) #f]
                      [#:alpha alpha (real-in 0 1) 1.0]
                      [#:standardize? standardize? boolean? #t]
                      [#:intercept? intercept? boolean? #t]
@@ -1434,6 +1500,11 @@ A model can also name its predictors, as a @racket[formula-model] does. Then
 @racket[coef] keys its coefficients by name, as R's @tt{coef} names its rows,
 and @racket[predict] takes a @tech{table} and reads the predictors from it by
 name.
+
+@racket[predict], @racket[coef] and @racket[glmnet-model-default-lambda] need
+a model with at least one fitted @math{λ}. A @racket[glmnet-path] built by
+hand can have none, and they reject such a model with a contract error that
+blames the caller.
 
 The examples in this section use a single fit and a path of the Gaussian
 family:
@@ -1644,22 +1715,35 @@ family:
   (coef path #:lambda 0.1)
   (coef path #:lambda 0.4)
   (coef path #:lambda 5.0)
-  (coef named-model)]}
+  (coef named-model)
+  (eval:error (coef (glmnet-path 'gaussian (vector) (vector) (vector)
+                                 (vector) (vector) 0)))]}
 
 @subsection[#:tag "ref-model-printing"]{Printing}
 
 A single fit prints on one line with its family, its @math{λ} (to four
 significant digits), its deviance ratio (to four decimal places) and the
 number of nonzero coefficients out of the number of predictors, counting a
-predictor once when it is nonzero for any class or response. A path prints as
-R's @tt{print.glmnet} table, with one row per fitted @math{λ}. A
-@racket[glmnet-cv] prints as R's @tt{print.cv.glmnet}: the name of its measure,
-then a row for each of @racket[glmnet-cv-lambda-min] and
+predictor once when it is nonzero for any class or response.
+
+A path prints R's @tt{print.glmnet} table line for line, without the
+@tt{Call:} line R prints above it. Each fitted @math{λ} has a row, numbered
+from 1, with @tt{Df}, the deviance ratio as a percentage rounded to two
+places (@tt{%Dev}), and @math{λ} to four significant digits (@tt{Lambda}).
+As in R, @tt{%Dev} and @tt{Lambda} are then rounded to about five significant
+digits of the column's largest value, so a @math{λ} far below the first can
+show as @racket[0], and each column is written with one number of decimals
+throughout, or in scientific notation when that is narrower.
+
+A @racket[glmnet-cv] prints as R's @tt{print.cv.glmnet}: the name of its
+measure, then a row for each of @racket[glmnet-cv-lambda-min] and
 @racket[glmnet-cv-lambda-1se] with that @math{λ}, its index, the
 cross-validated error, its standard error and the number of nonzero
 coefficients, the reals to four significant digits. A @racket[formula-model]
-prints as the result it holds, with its formula after the family. Printing
-does not change @racket[equal?], which compares results field by field.
+prints as the result it holds, with its formula after the family.
+
+Printing does not change @racket[equal?], which compares results field by
+field.
 
 @examples[#:eval ev
 (list fit clf)
@@ -1732,7 +1816,9 @@ cross-validated fit @racket[cv] of @secref["ref-cv"], and the formula model
                                 [#:width width exact-positive-integer? (plot-width)]
                                 [#:height height exact-positive-integer? (plot-height)]
                                 [#:title title (or/c #f string?) (plot-title)]
-                                [#:out-file out-file (or/c #f path-string?) #f])
+                                [#:out-file out-file
+                                            (or/c #f (and/c path-string? has-image-extension?))
+                                            #f])
          pict?]{
   Plots the coefficients of @racket[model]'s path against @racket[xvar], as R's
   @tt{plot.glmnet} does (see @secref["plot-path"]). For a
@@ -1757,16 +1843,24 @@ cross-validated fit @racket[cv] of @secref["ref-cv"], and the formula model
          pixels, and @racket[title] is its title.}
    @item{@racket[out-file], when given, names a file to which the plot is also
          written, in the format its extension names: @filepath{png},
-         @filepath{pdf}, @filepath{svg} or @filepath{eps}.}
+         @filepath{pdf}, @filepath{svg} or @filepath{eps}, in upper or lower
+         case. @racket[has-image-extension?] in the contract holds for exactly
+         those paths, so any other extension, or none, raises
+         @racket[exn:fail:contract] before anything is drawn.}
   ]
 
   An error is raised if every coefficient is zero at every @math{λ}, as there
-  is then nothing to plot.
+  is then nothing to plot. A @math{λ} of @racket[0] has no position on a
+  log @math{λ} axis and is left out: the curves, and their labels, end at the
+  smallest positive @math{λ}. If every @math{λ} of the path is @racket[0], an
+  error is raised for a log @math{λ} axis, as R's @tt{plot} stops too; the
+  path can still be plotted against the L1 norm or the deviance ratio.
 
   @examples[#:eval ev
   (plot-coefficient-path path #:xvar 'norm #:label '("x1" "x2" "x3")
                          #:width 400 #:height 300 #:title "Lasso path")
-  (eval:error (plot-coefficient-path (elnet-path X y #:lambda '(10.0 5.0))))]}
+  (eval:error (plot-coefficient-path (elnet-path X y #:lambda '(10.0 5.0))))
+  (eval:error (plot-coefficient-path (elnet-path X y #:lambda '(0.0))))]}
 
 @defproc[(coefficient-path-renderers [model (or/c glmnet-path? glmnet-cv? formula-model?)]
                                      [#:xvar xvar (or/c 'lambda 'norm 'dev) 'lambda]
@@ -1797,7 +1891,9 @@ cross-validated fit @racket[cv] of @secref["ref-cv"], and the formula model
                   [#:width width exact-positive-integer? (plot-width)]
                   [#:height height exact-positive-integer? (plot-height)]
                   [#:title title (or/c #f string?) (plot-title)]
-                  [#:out-file out-file (or/c #f path-string?) #f])
+                  [#:out-file out-file
+                              (or/c #f (and/c path-string? has-image-extension?))
+                              #f])
          pict?]{
   Plots the cross-validation curve of @racket[cv] against
   @racket[sign-lambda] times @math{log λ}, as R's @tt{plot.cv.glmnet} does (see

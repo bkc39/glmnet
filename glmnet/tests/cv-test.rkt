@@ -63,7 +63,7 @@
   ;; --- folds -------------------------------------------------------------------
 
   (test-case "random-fold-ids: every fold, sizes as even as possible"
-    (define ids (random-fold-ids 23 5))
+    (define ids (random-fold-ids 23 #:nfolds 5))
     (check-equal? (length ids) 23)
     (check-equal? (sort (remove-duplicates ids) <) '(0 1 2 3 4))
     (check-equal? (for/list ([f (in-range 5)]) (count (lambda (i) (= i f)) ids))
@@ -74,13 +74,21 @@
     (define (draw seed)
       (parameterize ([current-pseudo-random-generator (make-pseudo-random-generator)])
         (random-seed seed)
-        (random-fold-ids 40 4)))
+        (random-fold-ids 40 #:nfolds 4)))
     (check-equal? (draw 7) (draw 7))
     (check-not-equal? (draw 7) (draw 8)))
 
   (test-case "random-fold-ids needs no more folds than observations"
-    (check-contract-error (lambda () (random-fold-ids 3 5))
-                          #rx"^random-fold-ids: there are more folds than observations"))
+    (check-contract-error (lambda () (random-fold-ids 3 #:nfolds 5))
+                          #rx"^random-fold-ids: contract violation"
+                          #rx"there are more folds than observations\n folds: 5\n observations: 3"
+                          #rx"blaming: .*cv-test\\.rkt")
+    (check-contract-error (lambda () (random-fold-ids 5))
+                          #rx"there are more folds than observations\n folds: 10\n observations: 5"))
+
+  (test-case "random-fold-ids takes the number of folds as #:nfolds, as every *-cv does"
+    (check-equal? (length (remove-duplicates (random-fold-ids 12 #:nfolds 4))) 4)
+    (check-exn exn:fail:contract? (lambda () (random-fold-ids 12 4))))
 
   (test-case "a CV result records its folds; random folds are reproducible"
     (check-equal? (glmnet-cv-fold-ids (elnet-cv X y #:fold-ids folds)) folds)
@@ -213,8 +221,41 @@
                   (regexp-match? #rx"logistic-cv: fewer than 10 observations per fold" m))))
 
   (test-case "fewer than 10 observations per fold: the Cox deviance is grouped"
-    (check-equal? (cox-cv X times statuses #:fold-ids folds #:grouped? #f)
-                  (cox-cv X times statuses #:fold-ids folds)))
+    (define-values (ungrouped messages)
+      (warnings-of (lambda () (cox-cv X times statuses #:fold-ids folds #:grouped? #f))))
+    (check-equal? ungrouped (cox-cv X times statuses #:fold-ids folds))
+    (check-true (for/or ([m (in-list messages)])
+                  (regexp-match? #rx"cox-cv: fewer than 10 observations per fold; the Cox deviance is grouped"
+                                 m))))
+
+  ;; Ten observations in each of three folds, so that the Cox deviance can be
+  ;; ungrouped, with every time distinct. Fold 0 holds rows 0, 3, ..., 27, in
+  ;; time order; R's cv.glmnet stops on the first two of these status vectors,
+  ;; and not on the third.
+  (define fold-of-3 (for/list ([i (in-range n)]) (modulo i 3)))
+  (define distinct-times (for/list ([i (in-range n)]) (+ 1.0 i)))
+  (define (fold-0-events . rows)
+    (for/list ([i (in-range n)])
+      (if (or (positive? (modulo i 3)) (memv i rows)) 1 0)))
+
+  (test-case "ungrouped Cox deviance: a held-out fold without an event stops, as in R"
+    (check-contract-error
+     (lambda () (cox-cv X distinct-times (fold-0-events) #:fold-ids fold-of-3 #:grouped? #f))
+     #rx"^cox-cv: a held-out fold has no event, so its deviance is undefined without grouping"
+     #rx"held-out fold: 0")
+    (check-true (glmnet-cv? (cox-cv X distinct-times (fold-0-events) #:fold-ids fold-of-3))))
+
+  (test-case "ungrouped Cox deviance: a first event among a fold's last two observations stops"
+    (for ([row (in-list '(24 27))])
+      (check-contract-error
+       (lambda () (cox-cv X distinct-times (fold-0-events row) #:fold-ids fold-of-3 #:grouped? #f))
+       #rx"^cox-cv: the first event of a held-out fold is among its last two observations"
+       #rx"held-out fold: 0"))
+    (define third-last (cox-cv X distinct-times (fold-0-events 21) #:fold-ids fold-of-3 #:grouped? #f))
+    (check-true (for/and ([v (in-vector (glmnet-cv-cvm third-last))]) (rational? v)))
+    (check-not-equal? (glmnet-cv-cvm third-last)
+                      (glmnet-cv-cvm (cox-cv X distinct-times (fold-0-events 21)
+                                             #:fold-ids fold-of-3))))
 
   ;; --- losses ----------------------------------------------------------------
 
@@ -278,6 +319,34 @@
     (define ds (for/vector ([s (in-list statuses)]) (exact->inexact s)))
     (define xs (for/vector ([row (in-list X)]) (exact->inexact (exact-round (third row)))))
     (check-= (concordance ts ds xs) (brute-force-concordance ts ds xs) 1e-15))
+
+  (test-case "concordance with many ties in the times and in x"
+    (define m 200)
+    (define ts (for/vector ([i (in-range m)]) (exact->inexact (modulo (* 7 i) 13))))
+    (define ds (for/vector ([i (in-range m)]) (if (zero? (modulo i 3)) 0.0 1.0)))
+    (define xs (for/vector ([i (in-range m)]) (exact->inexact (modulo (* 5 i) 4))))
+    (check-= (concordance ts ds xs) (brute-force-concordance ts ds xs) 1e-15))
+
+  (test-case "concordance of 20000 observations: every pair concordant, discordant or tied"
+    (define m 20000)
+    (define ts (for/vector ([i (in-range m)]) (exact->inexact (quotient i 2))))
+    (define ds (for/vector ([i (in-range m)]) (if (zero? (modulo i 5)) 0.0 1.0)))
+    ;; Larger for every later time, and for a censored time than for an event
+    ;; at the same time.
+    (define xs (for/vector ([t (in-vector ts)] [d (in-vector ds)]) (+ t (* 0.5 (- 1.0 d)))))
+    (check-= (concordance ts ds xs) 1.0 1e-15)
+    (check-= (concordance ts ds (for/vector ([x (in-vector xs)]) (- x))) 0.0 1e-15)
+    (check-= (concordance ts ds (make-vector m 3.0)) 0.5 1e-15))
+
+  (test-case "the Cox deviance of 20000 observations at beta = 0, two events at each time"
+    (define m 20000)
+    (define response (for/vector ([i (in-range m)]) (cons (exact->inexact (quotient i 2)) 1.0)))
+    (define x (rows->design-matrix (for/list ([i (in-range m)]) (list (sin (exact->inexact i))))))
+    (define deviance (cox-deviance x (range m) response))
+    ;; At beta = 0 the risk set at the j-th time (from 0) holds m - 2j observations.
+    (check-= (deviance #(0.0))
+             (* 2 (for/sum ([j (in-range (quotient m 2))]) (* 2 (- (log (- m (* 2 j))) (log 2)))))
+             1e-6))
 
   (test-case "the Cox deviance is 2 (lsat - loglik) with Breslow's partial likelihood"
     (define beta #(0.1 -0.2 0.3))
@@ -380,10 +449,19 @@
     (check-contract-error (lambda () (elnet-cv X y #:fold-ids (cdr folds)))
                           #rx"^elnet-cv: fold-ids does not have one entry per row of X")
     (check-contract-error (lambda () (elnet-cv X y #:fold-ids (map (lambda (f) (modulo f 2)) folds)))
-                          #rx"^elnet-cv: cross-validation needs at least 3 folds")
+                          #rx"^elnet-cv: contract violation;\n cross-validation needs at least 3 folds"
+                          #rx"the #:fold-ids argument"
+                          #rx"blaming: .*cv-test\\.rkt")
     (check-contract-error (lambda () (elnet-cv X y #:fold-ids (map (lambda (f) (* 2 f)) folds)))
-                          #rx"^elnet-cv: a fold has no observations")
+                          #rx"^elnet-cv: contract violation;\n a fold has no observations"
+                          #rx"cover 0 to 8\n  expected: an observation in fold 1\n"
+                          #rx"the #:fold-ids argument")
     (check-contract-error (lambda () (elnet-cv X y #:fold-ids (cons -1 (cdr folds)))) #rx"elnet-cv"))
+
+  (test-case "a huge fold id is rejected without a vector of that size"
+    (check-contract-error (lambda () (elnet-cv X y #:fold-ids (cons (expt 10 12) (cdr folds))))
+                          #rx"^elnet-cv: contract violation;\n a fold has no observations"
+                          #rx"cover 0 to 1000000000000\n  expected: an observation in fold 5\n"))
 
   (test-case "#:nfolds: at least 3, and no more than the observations"
     (check-contract-error (lambda () (elnet-cv X y #:nfolds 2)) #rx"elnet-cv")
@@ -413,6 +491,38 @@
     (define one-fold-events (for/list ([f (in-list folds)]) (if (= f 4) 1 0)))
     (check-contract-error (lambda () (cox-cv X times one-fold-events #:fold-ids folds))
                           #rx"^cox-cv: the training data of a fold has no event"))
+
+  (test-case "the classes are checked by the CV procedure, not by its path fitter"
+    (check-exn #rx"^logistic-cv: class 1 has no observations; y needs both 0 and 1"
+               (lambda () (logistic-cv X (make-list n 0) #:fold-ids folds)))
+    (check-exn #rx"^multinomial-cv: class 1 has no observations"
+               (lambda () (multinomial-cv X (for/list ([i (in-range n)]) (* 2 (modulo i 2)))
+                                          #:fold-ids folds)))
+    (check-exn #rx"^multinomial-cv: multinomial needs at least 2 classes"
+               (lambda () (multinomial-cv X (make-list n 0) #:fold-ids folds))))
+
+  (test-case "a fit that fails is reported by the CV procedure, with its fold"
+    ;; With every time distinct, the Cox fit stops when its data's first event
+    ;; is among its last two observations: here, only the training data of
+    ;; folds 2 and 3 (rows 27 and 29 are the events).
+    (define late-events (for/list ([i (in-range n)]) (if (memv i '(27 29)) 1 0)))
+    (check-exn #rx"^cox-cv: fitting the training data of held-out fold 2: Cox initialization numerical error"
+               (lambda () (cox-cv X distinct-times late-events #:fold-ids folds)))
+    (check-exn #rx"^cox-cv: fitting all the data: Cox initialization numerical error"
+               (lambda () (cox-cv X distinct-times (for/list ([i (in-range n)]) (if (= i 29) 1 0))
+                                  #:fold-ids folds))))
+
+  (test-case "a constant Gaussian response is an error naming the CV procedure, as R stops"
+    (check-exn #rx"^elnet-cv: fitting all the data: y is constant; gaussian glmnet fails at standardization step"
+               (lambda () (elnet-cv X (make-list n 2.0) #:fold-ids folds)))
+    (check-exn #rx"^elnet-cv: fitting all the data: y is constant"
+               (lambda () (elnet-cv X (make-list n 0.0) #:fold-ids folds #:intercept? #f)))
+    (check-exn #rx"^elnet-cv: fitting the training data of held-out fold 4: y is constant"
+               (lambda ()
+                 (elnet-cv X (for/list ([f (in-list folds)]) (if (= f 4) 5.0 2.0))
+                           #:fold-ids folds)))
+    (check-exn #rx"^mgaussian-cv: fitting all the data: y is constant"
+               (lambda () (mgaussian-cv X (make-list n '(1.0 2.0)) #:fold-ids folds))))
 
   (test-case "data errors name the CV procedure"
     (check-contract-error (lambda () (elnet-cv X (cdr y)))

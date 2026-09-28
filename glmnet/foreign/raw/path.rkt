@@ -10,8 +10,11 @@
 ;; for the K-column families at j + ni*(k + K*m). Integer scalars go by reference
 ;; (see the path section of glmnet_capi.f90 for the arm64 macOS reason).
 
-(require ffi/unsafe
+(require (for-syntax racket/base
+                     syntax/parse)
+         ffi/unsafe
          ffi/vector
+         syntax/parse/define
          "library.rkt")
 
 (provide glmnet-elnet-path/raw
@@ -21,16 +24,22 @@
          glmnet-fishnet-path/raw
          glmnet-mgaussian-path/raw)
 
-;; Gaussian, binomial and Poisson share one shape: one intercept and one
-;; coefficient column per lambda. Returns (values lmu nlp jerr).
-(define-syntax-rule (define-single-response-path name c-id)
+;; Gaussian, binomial and Poisson have one intercept and one coefficient column
+;; per lambda. With #:groups, multinomial and multi-response Gaussian take the
+;; extra argument k and have K of each (K = classes or responses); y is then the
+;; K-column response for mgaussian, the 0..K-1 labels for multinomial. Returns
+;; (values lmu nlp jerr).
+(define-syntax-parse-rule (define-response-path name:id c-id:id
+                            (~optional (~and groups #:groups)))
+  #:with (k ...) (if (attribute groups) #'(k) #'())
   (define-glmnet name
-    (_fun (alpha no ni x y nlam flmin ulam standardize intercept thresh maxit
+    (_fun (alpha no ni k ... x y nlam flmin ulam standardize intercept thresh maxit
                  intercept-out beta-out dev-out lambda-out)
           ::
           (alpha         : _double)
           (no            : (_ptr i _int))
           (ni            : (_ptr i _int))
+          (k             : (_ptr i _int)) ...
           (x             : _f64vector)
           (y             : _f64vector)
           (nlam          : (_ptr i _int))
@@ -51,44 +60,11 @@
           -> (values lmu-o nlp-o jerr-o))
     #:c-id c-id))
 
-(define-single-response-path glmnet-elnet-path/raw glmnet_elnet_path)
-(define-single-response-path glmnet-lognet-path/raw glmnet_lognet_path)
-(define-single-response-path glmnet-fishnet-path/raw glmnet_fishnet_path)
-
-;; Multinomial and multi-response Gaussian: K intercepts and K coefficient
-;; columns per lambda (K = classes or responses). y is the K-column response for
-;; mgaussian, the 0..K-1 labels for multinomial. Returns (values lmu nlp jerr).
-(define-syntax-rule (define-multi-response-path name c-id)
-  (define-glmnet name
-    (_fun (alpha no ni k x y nlam flmin ulam standardize intercept thresh maxit
-                 intercept-out beta-out dev-out lambda-out)
-          ::
-          (alpha         : _double)
-          (no            : (_ptr i _int))
-          (ni            : (_ptr i _int))
-          (k             : (_ptr i _int))
-          (x             : _f64vector)
-          (y             : _f64vector)
-          (nlam          : (_ptr i _int))
-          (flmin         : _double)
-          (ulam          : _f64vector)
-          (standardize   : (_ptr i _int))
-          (intercept     : (_ptr i _int))
-          (thresh        : _double)
-          (maxit         : (_ptr i _int))
-          (lmu-o         : (_ptr o _int))
-          (intercept-out : _f64vector)
-          (beta-out      : _f64vector)
-          (dev-out       : _f64vector)
-          (lambda-out    : _f64vector)
-          (nlp-o         : (_ptr o _int))
-          (jerr-o        : (_ptr o _int))
-          -> _void
-          -> (values lmu-o nlp-o jerr-o))
-    #:c-id c-id))
-
-(define-multi-response-path glmnet-multinomial-path/raw glmnet_multinomial_path)
-(define-multi-response-path glmnet-mgaussian-path/raw glmnet_mgaussian_path)
+(define-response-path glmnet-elnet-path/raw glmnet_elnet_path)
+(define-response-path glmnet-lognet-path/raw glmnet_lognet_path)
+(define-response-path glmnet-fishnet-path/raw glmnet_fishnet_path)
+(define-response-path glmnet-multinomial-path/raw glmnet_multinomial_path #:groups)
+(define-response-path glmnet-mgaussian-path/raw glmnet_mgaussian_path #:groups)
 
 ;; Cox: no intercept, and the response is a time plus a status. Returns
 ;; (values lmu nlp jerr).

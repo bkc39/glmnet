@@ -14,6 +14,7 @@
          racket/contract
          racket/format
          racket/list
+         racket/match
          racket/math
          racket/path
          file/convertible
@@ -51,7 +52,6 @@
 (define sign-lambda/c (or/c -1 1))
 (define label/c (or/c boolean? design-matrix? (listof (or/c string? symbol?))))
 (define type-coef/c (or/c 'coef '2norm))
-(define out-file/c (or/c #f path-string?))
 
 (provide
  (contract-out
@@ -91,7 +91,13 @@
            label-runs
            keep-apart
            path-panels
-           panel-y-label))
+           panel-coefficients
+           panel-df
+           panel-y-label
+           x-positions
+           approx-f
+           count-ticks
+           label-positions))
 
 ;; --- R's conventions ---------------------------------------------------------
 
@@ -251,6 +257,20 @@
   (lambda (j)
     (if names (~a (list-ref names j)) (number->string (add1 j)))))
 
+;; The predictors, counting from 0, that are nonzero at some lambda.
+(define (ever-nonzero betas)
+  (for/list ([j (in-range (vector-length (vector-ref betas 0)))]
+             #:when (for/or ([beta (in-vector betas)]) (not (zero? (vector-ref beta j)))))
+    j))
+
+;; For the lambdas whose x is finite, those a log axis can show, the pairs of
+;; that x and the lambda's entry of `per-lambda`, in path order.
+(define (finite-points xs per-lambda)
+  (for/list ([x (in-list xs)]
+             [v (in-vector per-lambda)]
+             #:when (finite? x))
+    (cons x v)))
+
 ;; The path or cross-validated path a model holds: the model itself, or a
 ;; formula model's fit, which must satisfy `kind?`.
 (define (model-fit who model kind? what)
@@ -281,17 +301,10 @@
 (define (panel-renderers who pnl xs label labels-right?)
   (define betas (panel-coefficients pnl))
   (define n (vector-length (vector-ref betas 0)))
-  (define which
-    (for/list ([j (in-range n)]
-               #:when (for/or ([beta (in-vector betas)]) (not (zero? (vector-ref beta j)))))
-      j))
+  (define which (ever-nonzero betas))
   (when (and (pair? which) (null? (cdr which)))
     (log-warning "~a: 1 or less nonzero coefficients; the plot is not meaningful" who))
-  (define points
-    (for/list ([x (in-list xs)]
-               [beta (in-vector betas)]
-               #:when (finite? x))
-      (cons x beta)))
+  (define points (finite-points xs betas))
   (define curves
     (for/list ([j (in-list which)]
                [i (in-naturals)])
@@ -300,19 +313,31 @@
              #:color (list-ref curve-colors (modulo i (length curve-colors))))))
   (define labels
     (cond
-      [(and label (pair? points))
+      [label
        (define name (label-names who label n))
-       (define end
-         (apply (if labels-right? max min) (map car points)))
-       (define last-beta (vector-ref betas (sub1 (vector-length betas))))
-       (for/list ([j (in-list which)])
-         (point-label (vector end (vector-ref last-beta j))
-                      (name j)
+       (for/list ([j+position (in-list (label-positions pnl xs labels-right?))])
+         (point-label (cdr j+position)
+                      (name (car j+position))
                       #:anchor (if labels-right? 'left 'right)
                       #:size (curve-label-size)
                       #:point-size 0))]
       [else '()]))
   (append curves labels))
+
+;; Where plotCoef puts the label of each predictor that is nonzero at some
+;; lambda, as (j . #(x y)) pairs: at the right-hand end of the x axis, or the
+;; left for log lambda, level with the predictor's coefficient at the last
+;; lambda drawn.
+(define (label-positions pnl xs labels-right?)
+  (define betas (panel-coefficients pnl))
+  (define points (finite-points xs betas))
+  (cond
+    [(null? points) '()]
+    [else
+     (define end (apply (if labels-right? max min) (map car points)))
+     (define last-beta (cdr (last points)))
+     (for/list ([j (in-list (ever-nonzero betas))])
+       (cons j (vector end (vector-ref last-beta j))))]))
 
 (define (curve-label-size) (* 3/4 (plot-font-size)))
 
@@ -332,18 +357,21 @@
   (panel-renderers who (list-ref panels response) (x-positions p xvar sign-lambda)
                    (model-label model label) (labels-right? xvar sign-lambda)))
 
+;; plotCoef's approx.f: the counts along the top are read off the path from
+;; the lambda to the right of a position (f = 1), except for log lambda, whose
+;; count is read from the left (f = 0).
+(define (approx-f xvar sign-lambda)
+  (if (and (eq? xvar 'lambda) (= sign-lambda 1)) 0 1))
+
 ;; The top axis of a coefficient plot, as plotCoef draws it: at the positions
 ;; of the bottom axis's ticks, the count read off the path by R's approx with
-;; method "constant", taking the count of the lambda to the right of a
-;; position except for log lambda, whose count is read to the left.
+;; method "constant" and `f`.
 (define (count-ticks xs counts f)
-  (define finite-points
-    (for/list ([x (in-list xs)] [c (in-vector counts)] #:when (finite? x))
-      (cons x c)))
+  (define points (finite-points xs counts))
   (cond
-    [(null? finite-points) no-ticks]
+    [(null? points) no-ticks]
     [else
-     (define count-at (constant-approx (map car finite-points) (map cdr finite-points) f))
+     (define count-at (constant-approx (map car points) (map cdr points) f))
      ;; plot-lib merges neighbouring ticks that have the same label, and only
      ;; draws the labels of major ticks. Each minor tick gets a different blank
      ;; label, so that two major ticks with the same count stay apart.
@@ -365,12 +393,15 @@
                                #:title [title (plot-title)]
                                #:out-file [out-file #f])
   (define who 'plot-coefficient-path)
-  (define kind (and out-file (image-kind who out-file)))
   (define p (model-path who model))
   (define label* (model-label model label))
   (define xs (x-positions p xvar sign-lambda))
+  (unless (ormap finite? xs)
+    (raise-arguments-error who "every λ of the path is 0, which has no place on a log λ axis"
+                           "λ values" (vector->list (glmnet-path-lambda p))
+                           "xvar" xvar))
   (define right? (labels-right? xvar sign-lambda))
-  (define f (if (and (eq? xvar 'lambda) (= sign-lambda 1)) 0 1))
+  (define f (approx-f xvar sign-lambda))
   (define-values (x-min x-max) (padded-range xs))
   (define pictures
     (for*/list ([pnl (in-list (path-panels p type-coef (glmnet-model-response-names model)))]
@@ -398,7 +429,7 @@
     (raise-arguments-error who "every coefficient is zero at every λ, so there is nothing to plot"
                            "λ values" (vector-length (glmnet-path-lambda p))))
   (define picture (apply vl-append pictures))
-  (when out-file (write-image picture out-file kind))
+  (when out-file (write-image picture out-file))
   picture)
 
 ;; The width in pixels of the widest curve label.
@@ -454,11 +485,12 @@
       (list (x-of l) m up lo)))
   (append
    (list (error-bars (for/list ([row (in-list rows)])
-                       (define-values (x m up lo) (apply values row))
+                       (match-define (list x _ up lo) row)
                        (vector x (/ (+ up lo) 2) (/ (- up lo) 2)))
                      #:color cv-bar-color)
          (points (for/list ([row (in-list rows)])
-                   (vector (car row) (cadr row)))
+                   (match-define (list x m _ _) row)
+                   (vector x m))
                  #:sym 'fullcircle
                  #:color cv-point-color
                  #:fill-color cv-point-color
@@ -512,9 +544,7 @@
                  #:height [height (plot-height)]
                  #:title [title (plot-title)]
                  #:out-file [out-file #f])
-  (define who 'plot-cv)
-  (define cv (model-fit who model glmnet-cv? "a cross-validated path"))
-  (define kind (and out-file (image-kind who out-file)))
+  (define cv (model-fit 'plot-cv model glmnet-cv? "a cross-validated path"))
   (define renderers (cv-renderers cv #:sign-lambda sign-lambda))
   (define xs
     (for/list ([l (in-vector (glmnet-cv-lambda cv))])
@@ -540,7 +570,7 @@
                       (lambda (s) (text-width s (plot-font-size)))
                       (lambda (x) (vector-ref (->dc (vector x 0)) 0))
                       (text-width "m" (plot-font-size)))))
-  (when out-file (write-image picture out-file kind))
+  (when out-file (write-image picture out-file))
   picture)
 
 ;; --- files -------------------------------------------------------------------
@@ -548,18 +578,21 @@
 (define image-kinds
   '(("png" . png-bytes) ("pdf" . pdf-bytes) ("svg" . svg-bytes) ("eps" . eps-bytes)))
 
-;; The convert format for the file's extension.
-(define (image-kind who out-file)
+;; The convert format for the file's extension, or #f if there is none.
+(define (image-kind out-file)
   (define ext (path-get-extension out-file))
   (define kind
     (and ext (assoc (string-downcase (bytes->string/utf-8 (subbytes ext 1) #\?)) image-kinds)))
-  (unless kind
-    (raise-arguments-error who "the output file's extension is not .png, .pdf, .svg or .eps"
-                           "out-file" out-file))
-  (cdr kind))
+  (and kind (cdr kind)))
 
-(define (write-image picture out-file kind)
+;; Whether a path's extension, in any case, is .png, .pdf, .svg or .eps.
+(define (has-image-extension? out-file)
+  (and (image-kind out-file) #t))
+
+(define out-file/c (or/c #f (and/c path-string? has-image-extension?)))
+
+(define (write-image picture out-file)
   (call-with-output-file out-file
-    (lambda (out) (write-bytes (convert picture kind) out))
+    (lambda (out) (write-bytes (convert picture (image-kind out-file)) out))
     #:exists 'truncate/replace)
   (void))

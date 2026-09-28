@@ -270,6 +270,18 @@
   (test-case "an error from the family's procedure names the formula procedure"
     (check-exn #rx"^formula-cv: fold-ids does not have one entry per row of the table\n  length of fold-ids: 3\n  rows of the table: 6"
                (lambda () (formula-cv (~ k a b) (labelled '(0 1 0 1 1 1)) #:fold-ids '(0 1 2))))
+    ;; More folds than rows, the default of 10 included, is the caller's error,
+    ;; named for formula-cv; it must not blame formula.rkt.
+    (define (too-many-folds? n)
+      (lambda (e)
+        (and (exn:fail:contract? e)
+             (not (exn:fail:contract:blame? e))
+             (regexp-match?
+              (pregexp (format "^formula-cv: there are more folds than observations\n  folds: ~a\n  observations: 6" n))
+              (exn-message e)))))
+    (check-exn (too-many-folds? 10) (lambda () (formula-cv (~ k a b) (labelled '(0 1 0 1 1 1)))))
+    (check-exn (too-many-folds? 7)
+               (lambda () (formula-cv (~ k a b) (labelled '(0 1 0 1 1 1)) #:nfolds 7)))
     (check-exn #rx"^formula-fit: at least one observation must be an event"
                (lambda () (formula-fit (~ (surv a k) b) (labelled '(0 0 0 0 0 0))
                                        #:family 'cox #:lambda 0.1)))
@@ -409,7 +421,7 @@
   (test-case "a formula model prints as its fit, with the formula after the family"
     (check-regexp-match #rx"^#<glmnet:gaussian \\(~ Employed all\\) λ=0.5 dev=0.9[0-9]+ nz=[0-9]/6>$"
                         (format "~a" gfit))
-    (check-regexp-match #rx"^#<glmnet-path:gaussian \\(~ Employed \\(- all Year\\)\\)\n  Df"
+    (check-regexp-match #rx"^#<glmnet-path:gaussian \\(~ Employed \\(- all Year\\)\\)\n +Df"
                         (format "~a" gpath))
     (check-regexp-match #rx"^#<glmnet-cv:gaussian \\(~ Employed all\\) Mean-Squared Error\n"
                         (format "~a" (formula-cv (~ Employed all) longley

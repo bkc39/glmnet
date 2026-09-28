@@ -6,9 +6,8 @@
 
 (define collection "glmnet")
 (define version "0.1")
-;; net-lib provides net/url, used by private/demo-utils.rkt (the parity/demo
-;; dataset loaders). It ships with the main Racket distribution, so the catalog
-;; resolves it trivially; main.rkt itself stays base-only.
+;; private/demo-utils.rkt (the parity/demo dataset loaders) uses net/url, which
+;; is part of base, not net-lib; main.rkt itself stays base-only.
 ;; scribble-lib is a RUN dependency, not build-only: the examples/NN-*.rkt files
 ;; are #lang scribble/lp2 literate programs that ship as compiled collection
 ;; modules (lp-included by the docs, required by examples/test/*.rkt), so their
@@ -16,7 +15,7 @@
 ;; catalog's `raco setup --check-pkg-deps` flags it under deps, not build-deps.
 ;; draw-lib, pict-lib and plot-lib are for glmnet/plot (plot.rkt), which main.rkt
 ;; does not re-export, so `(require glmnet)` does not load them.
-(define deps '("base" "draw-lib" "net-lib" "pict-lib" "plot-lib" "scribble-lib"))
+(define deps '("base" "draw-lib" "pict-lib" "plot-lib" "scribble-lib"))
 ;; at-exp-lib provides scribble/reader, which tests/docs-coverage-test.rkt uses
 ;; to read the manual's sources. pict-doc and plot-doc are for the manual's
 ;; links into their documentation; plot-gui-lib provides `plot`, the module

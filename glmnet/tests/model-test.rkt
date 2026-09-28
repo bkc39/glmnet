@@ -160,6 +160,24 @@
     (check-equal? (predict binomial (rows->design-matrix Xl) #:type 'response)
                   (predict binomial Xl #:type 'response)))
 
+  (test-case "a model with no fitted lambda is rejected, blaming the caller"
+    (define empty-path (glmnet-path 'gaussian (vector) (vector) (vector) (vector) (vector) 0))
+    (struct unfitted ()
+      #:methods gen:glmnet-model
+      [(define (glmnet-model->path m) (glmnet-path 'cox (vector) #f (vector) (vector) (vector) 0))])
+    (define (check-unfitted who thunk)
+      (check-contract-error thunk
+                            (pregexp (format "^~a: contract violation" who))
+                            #rx"the model has at least one fitted λ"
+                            #rx"blaming: [^\n]*model-test[.]rkt"))
+    (for ([m (list empty-path (unfitted))])
+      (check-unfitted "coef" (lambda () (coef m)))
+      (check-unfitted "coef" (lambda () (coef m #:lambda 0.1)))
+      (check-unfitted "predict" (lambda () (predict m '((1.0 2.0)))))
+      (check-unfitted "predict" (lambda () (predict m '((1.0 2.0)) #:lambda 0.1)))
+      (check-unfitted "glmnet-model-default-lambda" (lambda () (glmnet-model-default-lambda m))))
+    (check-equal? (deviance-ratio empty-path) #()))
+
   (test-case "errors name the procedure that was called"
     (check-contract-error (lambda () (predict gaussian '((1.0 2.0))))
                           #rx"^predict: X does not have one column per coefficient")
@@ -273,6 +291,14 @@
                   (vector-append (vector (vector-ref (glmnet-path-intercepts p) 1))
                                  (vector-ref (glmnet-path-coefficients p) 1))))
 
+  (test-case "when every fitted lambda is the same, any lambda gives the first point"
+    (define p (elnet-path X y #:lambda '(0.1 0.1)))
+    (define first-point
+      (vector-append (vector (vector-ref (glmnet-path-intercepts p) 0))
+                     (vector-ref (glmnet-path-coefficients p) 0)))
+    (check-equal? (coef p #:lambda 0.05) first-point)
+    (check-equal? (coef p #:lambda 5.0) first-point))
+
   (test-case "multinomial and Cox paths interpolate every class and have the right shape"
     (define mp (multinomial-path Xm ym #:nlambda 10))
     (define s (* 0.5 (+ (vector-ref (glmnet-path-lambda mp) 3) (vector-ref (glmnet-path-lambda mp) 4))))
@@ -293,14 +319,50 @@
     (check-regexp-match #rx"^#<glmnet:cox λ=0.1 " (format "~a" cox))
     (check-equal? (format "~a" (ols X y)) "#<glmnet:gaussian λ=0 dev=1.0000 nz=3/3>"))
 
-  (test-case "a path prints R's Df, %Dev and Lambda table"
-    (define p (multinomial-path Xm ym #:nlambda 5))
-    (define lines (regexp-split #rx"\n" (format "~a" p)))
-    (check-equal? (first lines) "#<glmnet-path:multinomial")
-    (check-regexp-match #rx"^ +Df +%Dev +Lambda$" (second lines))
-    (check-equal? (length lines) (+ 2 (vector-length (glmnet-path-lambda p))))
-    (check-regexp-match #rx"^ +0 +0[.]00 +0[.]4557$" (third lines))
-    (check-regexp-match #rx"e-05>$" (last lines)))
+  ;; The expected tables are R's print.glmnet output, without its Call: line,
+  ;; for the same fit or the same df, dev.ratio and lambda values.
+  (test-case "a path prints R's print.glmnet table, row numbers included"
+    (check-equal? (format "~a" (multinomial-path Xm ym #:nlambda 5))
+                  (string-append "#<glmnet-path:multinomial\n"
+                                 "  Df  %Dev  Lambda\n"
+                                 "1  0  0.00 0.45570\n"
+                                 "2  2 91.78 0.04557\n"
+                                 "3  2 99.14 0.00456\n"
+                                 "4  2 99.91 0.00046\n"
+                                 "5  2 99.99 0.00005>")))
+
+  (define (synthetic-path df dev lambda)
+    (define n (length lambda))
+    (glmnet-path 'gaussian (list->vector lambda) (make-vector n 0.0) (make-vector n (vector 0.0))
+                 (list->vector dev) (list->vector df) 0))
+
+  (test-case "each column is formatted as R formats it"
+    (check-equal? (format "~a" (synthetic-path (range 11)
+                                               (for/list ([k 11]) (/ k 10.0))
+                                               (for/list ([k 11]) (expt 0.5 k))))
+                  (string-append "#<glmnet-path:gaussian\n"
+                                 "   Df %Dev  Lambda\n"
+                                 "1   0    0 1.00000\n"
+                                 "2   1   10 0.50000\n"
+                                 "3   2   20 0.25000\n"
+                                 "4   3   30 0.12500\n"
+                                 "5   4   40 0.06250\n"
+                                 "6   5   50 0.03125\n"
+                                 "7   6   60 0.01562\n"
+                                 "8   7   70 0.00781\n"
+                                 "9   8   80 0.00391\n"
+                                 "10  9   90 0.00195\n"
+                                 "11 10  100 0.00098>"))
+    (check-equal? (format "~a" (synthetic-path '(11 24) '(0.4378 0.8267) '(1.165e-04 6.6e-08)))
+                  (string-append "#<glmnet-path:gaussian\n"
+                                 "  Df  %Dev    Lambda\n"
+                                 "1 11 43.78 1.165e-04\n"
+                                 "2 24 82.67 6.600e-08>"))
+    (check-equal? (format "~a" (synthetic-path '(0 3) '(0.0 0.123456) '(123456.7 0.5)))
+                  (string-append "#<glmnet-path:gaussian\n"
+                                 "  Df  %Dev Lambda\n"
+                                 "1  0  0.00 123500\n"
+                                 "2  3 12.35      0>")))
 
   (test-case "results are still transparent: equal? and match see their fields"
     (check-equal? (lasso X y #:lambda 0.05) gaussian)

@@ -26,6 +26,7 @@
   (require rackunit
            json
            racket/list
+           racket/match
            racket/runtime-path
            glmnet
            (file "../private/demo-utils.rkt"))
@@ -56,7 +57,12 @@
           "linnerud"   (~ (weight waist pulse) all)))
 
   (define (golden-formula g) (hash-ref dataset-formulas (hash-ref g 'dataset)))
-  (define (golden-table g) (load-table (hash-ref g 'dataset)))
+  ;; The table of a golden's dataset; `nobs` restricts it to the first nobs rows.
+  (define (golden-table g)
+    (define full (load-table (hash-ref g 'dataset)))
+    (match (hash-ref g 'nobs #f)
+      [#f full]
+      [n (for/list ([column (in-list full)]) (cons (car column) (take (cdr column) n)))]))
   (define (golden-family g) (string->symbol (hash-ref g 'family)))
 
   ;; absolute tolerance with a relative fallback for large magnitudes
@@ -110,21 +116,27 @@
     (define ctol (hash-ref tols 'coef))
     (define ptol (hash-ref tols 'pred))
     (define preds (hash-ref gen 'predict_s))
-    (for ([got (in-list (coef model #:lambda s))]
+    (define coefs (coef model #:lambda s))
+    (check-equal? (length coefs) (length (hash-ref gen 'coef_s)) "coef: number of s")
+    (for ([got (in-list coefs)]
           [expected (in-list (hash-ref gen 'coef_s))]
           [i (in-naturals)])
       (check-nested-close got expected ctol (format "coef[s ~a]" i)))
     (for ([(type all-expected) (in-hash preds)])
-      (for ([got (in-list (predict model X #:type type #:lambda s))]
+      (define all-got (predict model X #:type type #:lambda s))
+      (check-equal? (length all-got) (length all-expected) (format "predict ~a: number of s" type))
+      (for ([got (in-list all-got)]
             [expected (in-list all-expected)]
             [etas (in-list (hash-ref preds 'link))]
             [i (in-naturals)])
         (define msg (format "predict ~a[s ~a]" type i))
-        (if (eq? type 'class)
-            (for ([c (in-list got)] [e (in-list expected)] [eta (in-list etas)] [row (in-naturals)]
-                  #:when (decisive? eta ptol))
-              (check-equal? c e (format "~a[row ~a]" msg row)))
-            (check-nested-close got expected ptol msg)))))
+        (cond
+          [(eq? type 'class)
+           (check-equal? (length got) (length expected) (format "~a: row count" msg))
+           (for ([c (in-list got)] [e (in-list expected)] [eta (in-list etas)] [row (in-naturals)]
+                 #:when (decisive? eta ptol))
+             (check-equal? c e (format "~a[row ~a]" msg row)))]
+          [else (check-nested-close got expected ptol msg)]))))
 
   ;; A formula model's coef, one entry per s, against R's: the names R gives
   ;; its rows and list elements (`names`, the golden's coef_names), and its
@@ -147,47 +159,71 @@
          (check-equal? (map car got) rows (format "~a: row names" msg))
          (check-vec-close (map cdr got) expected tol msg)])))
 
-  ;; The path a path or predict golden describes, fitted as R fits it.
+  ;; The lines of a path's printed table, without the #<glmnet-path:family
+  ;; line before it and the > after it.
+  (define (printed-table p)
+    (define s (format "~a" p))
+    (cdr (regexp-split #rx"\n" (substring s 0 (sub1 (string-length s))))))
+
+  ;; The dataset of a path or predict golden; `nobs` restricts it to the first
+  ;; nobs observations.
+  (define (golden-dataset g)
+    (define full (load-dataset (hash-ref g 'dataset)))
+    (match (hash-ref g 'nobs #f)
+      [#f full]
+      [n (for/list ([column (in-list full)]) (take column n))]))
+
+  ;; The path a path or predict golden describes, fitted as R fits it. A golden
+  ;; may fix #:nlambda and #:lambda-min-ratio.
   (define (fit-golden-path g ds)
     (define family (hash-ref g 'family))
     (define alpha  (hash-ref g 'alpha))
     (define thresh (hash-ref g 'thresh))
     (define lambda (hash-ref g 'lambda_user #f))
+    (define nlambda (hash-ref g 'nlambda 100))
+    (define ratio  (hash-ref g 'lambda_min_ratio #f))
     (define X      (first ds))
+    (define (fit path-proc . data)
+      (keyword-apply path-proc '(#:alpha #:lambda #:lambda-min-ratio #:nlambda #:thresh)
+                     (list alpha lambda ratio nlambda thresh)
+                     X data))
     (case family
-      [("gaussian")    (elnet-path X (second ds) #:alpha alpha #:lambda lambda #:thresh thresh)]
-      [("binomial")    (logistic-path X (second ds) #:alpha alpha #:lambda lambda #:thresh thresh)]
-      [("multinomial") (multinomial-path X (second ds) #:alpha alpha #:lambda lambda #:thresh thresh)]
-      [("poisson")     (poisson-path X (second ds) #:alpha alpha #:lambda lambda #:thresh thresh)]
-      [("cox")         (cox-path X (second ds) (third ds) #:alpha alpha #:lambda lambda
-                             #:thresh thresh)]
-      [("mgaussian")   (mgaussian-path X (second ds) #:alpha alpha #:lambda lambda
-                                       #:thresh thresh)]))
+      [("gaussian")    (fit elnet-path (second ds))]
+      [("binomial")    (fit logistic-path (second ds))]
+      [("multinomial") (fit multinomial-path (second ds))]
+      [("poisson")     (fit poisson-path (second ds))]
+      [("cox")         (fit cox-path (second ds) (third ds))]
+      [("mgaussian")   (fit mgaussian-path (second ds))]))
 
   ;; predict and coef along a path (#25), at s on, between, above and below
-  ;; the fitted lambdas.
+  ;; the fitted lambdas, and the path's printed table.
   (define (run-predict-golden g)
-    (define ds (load-dataset (hash-ref g 'dataset)))
+    (define ds (golden-dataset g))
     (define p  (fit-golden-path g ds))
     (define tols (hash-ref (hash-ref g 'meta) 'tolerances))
     (test-case (hash-ref g 'id)
-      (check-generic p (first ds) g tols))
+      (check-generic p (first ds) g tols)
+      (check-equal? (printed-table p) (hash-ref g 'print) "printed table"))
     (test-case (format "~a (formula)" (hash-ref g 'id))
       (define fp (formula-path (golden-formula g) (golden-table g)
                                #:family (golden-family g) #:alpha (hash-ref g 'alpha)
-                               #:lambda (hash-ref g 'lambda_user #f) #:thresh (hash-ref g 'thresh)))
+                               #:lambda (hash-ref g 'lambda_user #f)
+                               #:nlambda (hash-ref g 'nlambda 100)
+                               #:lambda-min-ratio (hash-ref g 'lambda_min_ratio #f)
+                               #:thresh (hash-ref g 'thresh)))
       (check-named-coef (coef fp #:lambda (hash-ref g 's)) (hash-ref g 'coef_s)
                         (hash-ref g 'coef_names) (hash-ref tols 'coef))))
 
   ;; A regularization path (#10): R's lambda sequence (or the user's), where it
-  ;; stops, and the fit at every lambda.
+  ;; stops, and the fit at every lambda. A golden may fix #:nlambda and
+  ;; #:lambda-min-ratio, and `nobs` restricts it to the first nobs observations.
   (define (run-path-golden g)
     (define id     (hash-ref g 'id))
     (define tols   (hash-ref (hash-ref g 'meta) 'tolerances))
     (define ctol   (hash-ref tols 'coef))
     (define itol   (hash-ref tols 'intercept))
     (define dtol   (hash-ref tols 'dev_ratio))
-    (define p      (fit-golden-path g (load-dataset (hash-ref g 'dataset))))
+    (define p      (fit-golden-path g (golden-dataset g)))
     (define expected-lambda (hash-ref g 'lambda_path))
     (test-case id
       (check-equal? (vector-length (glmnet-path-lambda p)) (length expected-lambda)
