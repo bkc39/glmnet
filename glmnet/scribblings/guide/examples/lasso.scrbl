@@ -76,6 +76,21 @@ intercept alone, which is the mean of the response:
 (elnet-result-intercept (lasso X y #:lambda 2.5))
 ]
 
+@racket[plot-coefficient-path], from @racketmodname[glmnet/plot], draws the
+same path as R's @tt{plot(fit, label = TRUE)} does (@secref["plot-path"]):
+one curve per predictor against @math{−log λ}, so that the largest @math{λ} is
+at the left, with the count of nonzero coefficients along the top:
+
+@examples[#:eval ev #:label #f
+(require glmnet/plot)
+(plot-coefficient-path path #:label #t)
+]
+
+Read from the left, the plot is the table read from the top: @math{x₁} enters
+at @math{λ = 1}, @math{x₂} at @math{λ = 0.2}, and @math{x₃} only at the
+smallest @math{λ}, @math{0.01}, with a coefficient too small to lift its curve
+visibly off zero, although the count along the top reaches 3.
+
 @section[#:tag "ex-lasso-cv"]{Choosing λ by cross-validation}
 
 Six observations without noise are no test of @math{λ}: with no noise to
@@ -105,6 +120,18 @@ Both choices keep @math{x₁} and @math{x₂} and drop @math{x₃}. @racket[coef
 defaults to @tech{lambda-1se}, the larger @math{λ}, whose coefficients are
 shrunk further from the true @math{2} and @math{−1} in exchange for a model the
 data cannot tell apart from the best one.
+
+@racket[plot-cv] draws the cross-validated error as R's @tt{plot(cvfit)} does
+(@secref["plot-cv"]):
+
+@examples[#:eval ev #:label #f
+(plot-cv cv)
+]
+
+The red points are the error at each @math{λ}, with bars one standard error
+either side, and the dotted lines mark @tech{lambda-min}, at the right, and
+@tech{lambda-1se}, at the left. From @tech{lambda-1se} rightwards every
+point lies within one standard error of the smallest error.
 
 @section[#:tag "ex-lasso-when"]{When to use it}
 
