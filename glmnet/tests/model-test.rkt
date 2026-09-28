@@ -160,6 +160,24 @@
     (check-equal? (predict binomial (rows->design-matrix Xl) #:type 'response)
                   (predict binomial Xl #:type 'response)))
 
+  (test-case "a model with no fitted lambda is rejected, blaming the caller"
+    (define empty-path (glmnet-path 'gaussian (vector) (vector) (vector) (vector) (vector) 0))
+    (struct unfitted ()
+      #:methods gen:glmnet-model
+      [(define (glmnet-model->path m) (glmnet-path 'cox (vector) #f (vector) (vector) (vector) 0))])
+    (define (check-unfitted who thunk)
+      (check-contract-error thunk
+                            (pregexp (format "^~a: contract violation" who))
+                            #rx"the model has at least one fitted λ"
+                            #rx"blaming: [^\n]*model-test[.]rkt"))
+    (for ([m (list empty-path (unfitted))])
+      (check-unfitted "coef" (lambda () (coef m)))
+      (check-unfitted "coef" (lambda () (coef m #:lambda 0.1)))
+      (check-unfitted "predict" (lambda () (predict m '((1.0 2.0)))))
+      (check-unfitted "predict" (lambda () (predict m '((1.0 2.0)) #:lambda 0.1)))
+      (check-unfitted "glmnet-model-default-lambda" (lambda () (glmnet-model-default-lambda m))))
+    (check-equal? (deviance-ratio empty-path) #()))
+
   (test-case "errors name the procedure that was called"
     (check-contract-error (lambda () (predict gaussian '((1.0 2.0))))
                           #rx"^predict: X does not have one column per coefficient")

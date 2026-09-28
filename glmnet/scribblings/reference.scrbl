@@ -779,6 +779,11 @@ R's rule (its @tt{exact = FALSE}, the default):
        every @math{s}.}
 ]
 
+@racket[predict], @racket[coef] and @racket[glmnet-model-default-lambda] need
+a model with at least one fitted @math{λ}. A @racket[glmnet-path] built by
+hand can have none, and they reject such a model with a contract error that
+blames the caller.
+
 The examples in this section use a single fit and a path of the Gaussian
 family:
 
@@ -909,7 +914,9 @@ family:
   (coef fit)
   (coef path #:lambda 0.1)
   (coef path #:lambda 0.4)
-  (coef path #:lambda 5.0)]}
+  (coef path #:lambda 5.0)
+  (eval:error (coef (glmnet-path 'gaussian (vector) (vector) (vector)
+                                 (vector) (vector) 0)))]}
 
 @subsection[#:tag "ref-model-printing"]{Printing}
 

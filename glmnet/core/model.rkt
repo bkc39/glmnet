@@ -35,17 +35,29 @@
    (define (deviance-ratio m)
      (vector-ref (glmnet-path-dev-ratio (->path m)) 0))])
 
+(define (fitted? model)
+  (positive? (vector-length (glmnet-path-lambda (glmnet-model->path model)))))
+
 (provide
  gen:glmnet-model
  glmnet-model?
  (contract-out
   [glmnet-model->path (-> glmnet-model? glmnet-path?)]
-  [glmnet-model-default-lambda (-> glmnet-model? lambda-arg/c)]
+  [glmnet-model-default-lambda
+   (->i ([model glmnet-model?])
+        #:pre/name (model) "the model has at least one fitted λ" (fitted? model)
+        [result lambda-arg/c])]
   [deviance-ratio (-> glmnet-model? (or/c real? (vectorof real? #:flat? #t)))]
   [predict
-   (->* (glmnet-model? design-matrix/c) (#:type type/c #:lambda lambda-arg/c) list?)]
+   (->i ([model glmnet-model?] [X design-matrix/c])
+        (#:type [type type/c] #:lambda [s lambda-arg/c])
+        #:pre/name (model) "the model has at least one fitted λ" (fitted? model)
+        [result list?])]
   [coef
-   (->* (glmnet-model?) (#:lambda lambda-arg/c) (or/c vector? (listof vector?)))]))
+   (->i ([model glmnet-model?])
+        (#:lambda [s lambda-arg/c])
+        #:pre/name (model) "the model has at least one fitted λ" (fitted? model)
+        [result (or/c vector? (listof vector?))])]))
 
 ;; For the family modules only; not part of the public API.
 (module* support #f
