@@ -19,6 +19,7 @@
   (require rackunit
            json
            racket/list
+           racket/match
            racket/runtime-path
            glmnet
            (file "../private/demo-utils.rkt"))
@@ -62,29 +63,38 @@
         (+ acc (* c (exact->inexact x))))))
 
   ;; A regularization path (#10): R's lambda sequence (or the user's), where it
-  ;; stops, and the fit at every lambda.
+  ;; stops, and the fit at every lambda. A golden may fix #:nlambda and
+  ;; #:lambda-min-ratio, and `nobs` restricts it to the first nobs observations.
   (define (run-path-golden g)
     (define id     (hash-ref g 'id))
     (define family (hash-ref g 'family))
     (define alpha  (hash-ref g 'alpha))
     (define thresh (hash-ref g 'thresh))
     (define lambda (hash-ref g 'lambda_user #f))
+    (define nlambda (hash-ref g 'nlambda 100))
+    (define ratio  (hash-ref g 'lambda_min_ratio #f))
     (define tols   (hash-ref (hash-ref g 'meta) 'tolerances))
     (define ctol   (hash-ref tols 'coef))
     (define itol   (hash-ref tols 'intercept))
     (define dtol   (hash-ref tols 'dev_ratio))
-    (define ds     (load-dataset (hash-ref g 'dataset)))
+    (define ds
+      (let ([full (load-dataset (hash-ref g 'dataset))])
+        (match (hash-ref g 'nobs #f)
+          [#f full]
+          [n (for/list ([column (in-list full)]) (take column n))])))
     (define X      (first ds))
+    (define (fit path-proc . data)
+      (keyword-apply path-proc '(#:alpha #:lambda #:lambda-min-ratio #:nlambda #:thresh)
+                     (list alpha lambda ratio nlambda thresh)
+                     X data))
     (define p
       (case family
-        [("gaussian")    (elnet-path X (second ds) #:alpha alpha #:lambda lambda #:thresh thresh)]
-        [("binomial")    (logistic-path X (second ds) #:alpha alpha #:lambda lambda #:thresh thresh)]
-        [("multinomial") (multinomial-path X (second ds) #:alpha alpha #:lambda lambda #:thresh thresh)]
-        [("poisson")     (poisson-path X (second ds) #:alpha alpha #:lambda lambda #:thresh thresh)]
-        [("cox")         (cox-path X (second ds) (third ds) #:alpha alpha #:lambda lambda
-                               #:thresh thresh)]
-        [("mgaussian")   (mgaussian-path X (second ds) #:alpha alpha #:lambda lambda
-                                         #:thresh thresh)]))
+        [("gaussian")    (fit elnet-path (second ds))]
+        [("binomial")    (fit logistic-path (second ds))]
+        [("multinomial") (fit multinomial-path (second ds))]
+        [("poisson")     (fit poisson-path (second ds))]
+        [("cox")         (fit cox-path (second ds) (third ds))]
+        [("mgaussian")   (fit mgaussian-path (second ds))]))
     (define expected-lambda (hash-ref g 'lambda_path))
     (test-case id
       (check-equal? (vector-length (glmnet-path-lambda p)) (length expected-lambda)
@@ -100,9 +110,7 @@
             (for ([c (in-vector coefs)] [e (in-list expected)] [k (in-naturals)])
               (check-vec-close (vector->list c) e ctol (format "coef[lambda ~a, group ~a]" m k)))
             (check-vec-close (vector->list coefs) expected ctol (format "coef[lambda ~a]" m))))
-      ;; Multinomial intercepts are identified only up to a common shift, which
-      ;; the softmax absorbs; R centres them, glmnet's Fortran does not.
-      (when (and (glmnet-path-intercepts p) (not (equal? family "multinomial")))
+      (when (glmnet-path-intercepts p)
         (for ([a0 (in-vector (glmnet-path-intercepts p))]
               [expected (in-list (hash-ref g 'intercepts_path))]
               [m (in-naturals)])
@@ -152,9 +160,8 @@
          (define r (multinomial-fit X y #:lambda lambda #:alpha alpha #:thresh thresh))
          (check-close (multinomial-result-lambda r) (hash-ref g 'lambda_used) 1e-12 "lambda")
          (check-close (multinomial-result-dev-ratio r) (hash-ref g 'dev_ratio) dtol "dev-ratio")
-         ;; Probabilities are the parameterization-invariant target. The raw
-         ;; per-class intercepts differ from R by a uniform shift (the symmetric
-         ;; multinomial param), which softmax absorbs -- so we skip them.
+         (check-vec-close (vector->list (multinomial-result-intercepts r))
+                          (hash-ref g 'intercepts) itol "intercepts")
          (check-mat-close (multinomial-predict-proba r X) (hash-ref g 'probabilities) ptol "proba")
          (for ([k (in-naturals)] [ck (in-list (hash-ref g 'coefficients))])
            (check-vec-close (vector->list (vector-ref (multinomial-result-coefficients r) k))

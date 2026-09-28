@@ -141,6 +141,15 @@
   (test-case "negative lambda is a contract error"
     (check-exn exn:fail:contract? (lambda () (elnet-fit X y #:lambda -1.0))))
 
+  (test-case "a constant response is rejected as R rejects it, naming the procedure called"
+    (check-exn #rx"^lasso: y is constant; gaussian glmnet fails at standardization step"
+               (lambda () (lasso X '(2.0 2.0 2.0 2.0 2.0) #:lambda 0.1)))
+    (check-exn #rx"^elnet-fit: y is constant"
+               (lambda () (elnet-fit X '(0 0 0 0 0) #:lambda 0.1 #:intercept? #f))))
+
+  (test-case "without an intercept a constant nonzero response still fits"
+    (check-true (elnet-result? (ridge X '(2.0 2.0 2.0 2.0 2.0) #:lambda 0.1 #:intercept? #f))))
+
   (test-case "alpha outside [0,1] is a contract error"
     (check-exn exn:fail:contract?
                (lambda () (elnet-fit X y #:lambda 0.1 #:alpha 2.0)))))

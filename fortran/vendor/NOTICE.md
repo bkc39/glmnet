@@ -28,15 +28,27 @@ The Gaussian no-intercept fix (#33) is part of upstream since R glmnet 3.0-3.
 
 ## Behaviour R adds around the Fortran
 
-R's R-level wrappers do some work before calling the Fortran. What our shim (`../glmnet_capi.f90`) and the Racket layer reproduce:
+R's R-level wrappers do some work before and after calling the Fortran. What our shim (`../glmnet_capi.f90`) and the Racket side reproduce:
 
-- **Cox ties.** R's `coxnet` wrapper (`R/coxnet.R`) nudges censored times up by `100 * .Machine$double.eps`, so that a subject censored at an event time stays in that event's risk set. `glmnet_coxnet_solo` does the same (#21). Without it, tied data gives fits that differ from R's.
+- **Cox ties.** R's `coxnet` wrapper (`R/coxnet.R`) nudges censored times up by `100 * .Machine$double.eps`, so that a subject censored at an event time stays in that event's risk set. `glmnet_coxnet_path`, which `glmnet_coxnet_solo` calls, does the same (#21). Without it, tied data gives fits that differ from R's.
+- **`lmu = 0`.** R passes `lmu = integer(1)`, that is 0, into the Fortran, which returns without setting it when it fails at the first lambda. Every `glmnet_<family>_path` sets `lmu = 0` (and `nlp = 0`) before the call.
+- **The lambda sequence (paths, #10).** A user `lambda` is fitted largest first, as R's `rev(sort(lambda))`. Without one, `lambda.min.ratio` defaults to 0.01 when there are fewer observations than predictors and to 1e-4 otherwise, as in R's `glmnet()`; the Fortran raises a ratio below 1e-6 (R's `glmnet.control(eps)`) to 1e-6, so 0 is accepted, as in R. In automatic mode the Fortran reports the first lambda as a sentinel, and `fix.lam` (`R/fix.lam.R`) replaces it with `exp(2 log lambda[2] - log lambda[3])` when at least three lambdas were fitted; `core/path.rkt` does the same.
+- **Multinomial intercepts.** The K intercepts are identified only up to a common shift. R's `coef()` reports them centred to sum to zero at each lambda (`getcoef.multinomial`, `center.intercept = TRUE`); `multinomial-fit` and `multinomial-path` centre them too. Probabilities are unchanged.
+- **Constant Gaussian response.** R's `elnet` wrapper stops with "y is constant; gaussian glmnet fails at standardization step" when the null deviance is zero; `elnet-fit` (and so `ols`, `ridge`, `lasso`, `elastic-net`) and `elnet-path` raise the same message.
 - **Missing and non-finite values.** R's `glmnet()` stops with "x has missing values" when `any(is.na(x))`, which includes `NaN`, and a non-finite Gaussian `y` or a `NaN` Poisson `y` makes it stop with "missing value where TRUE/FALSE needed". The Racket design-matrix layer (`glmnet/data.rkt`, #35) rejects a `NaN` or an infinity in `x`, in any response and in the new data of every prediction helper before the shim is called, and names its position. That is stricter than R 4.1.10 in three cases:
   - **An infinite `x`** in the Gaussian, binomial, multinomial, Poisson and multi-response Gaussian families. R passes it to its solver without an error and returns a fit in which that column's coefficient is 0: `glmnet(x, y, lambda = 0)` with one `Inf` in `x` returns coefficients. For Cox there is no difference, because R stops with "NA/NaN/Inf in foreign function call".
   - **An infinite Poisson count.** R warns that convergence was not reached at the first λ (error code −1) and returns an empty model, every coefficient 0. Without a `lambda`, it then stops with an internal error ("number of columns of matrices must match").
   - **Non-finite new data in a prediction.** R's `predict()` does not check `newx`. A row with a `NaN`, `NA` or infinite value predicts `NaN`, `NA` or ±`Inf`, unless every such value falls in a column whose coefficient is 0: the sparse product skips that column, and the prediction is finite. The prediction helpers raise an error instead.
 
   Where R also stops, only the message differs: an infinite Cox time, and a non-finite multi-response `Y`, for which R warns about convergence and then fails with "length of 'dimnames' [2] not equal to array extent".
+
+## Where we differ from R
+
+- **No lambda fitted.** When the Fortran fits no lambda at all (`lmu = 0`, for example convergence not reached at the first lambda within `maxit`), R warns and returns an empty model. Every single fit and every path fitter here raises `exn:fail` instead, naming the procedure called and glmnet's reason (R's `jerr` message).
+- **A partial path.** When a path fails at a later lambda, R warns and returns the lambdas before it; so do we, but the warning is a Racket log message at level `warning` with the topic `glmnet`, which the default error display does not show.
+- **Constant test.** R compares its computed null deviance with zero, which rounding can miss; we test the values themselves (all equal, or all zero without an intercept).
+- **Constant multi-response `Y`.** R's `mgaussian` wrapper has no constant check: a `Y` with one constant column fits normally (so here too), but when every column is constant the Fortran does not converge and R fails with an internal `dimnames` error. `mgaussian-fit` and `mgaussian-path` raise the Gaussian "y is constant" error instead.
+- **All-zero Poisson response.** R's `fishnet` warns that convergence was not reached at the first lambda and returns an empty model. `poisson-fit` and `poisson-path` raise before fitting ("the response has no positive count").
 
 ## Build notes
 

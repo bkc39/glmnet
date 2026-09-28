@@ -46,7 +46,9 @@ it. That is the characteristic ridge behaviour: shrink, never select.
 
 @section[#:tag "ex-ridge-path"]{The shrinkage path}
 
-Refitting over a range of @math{λ} traces how the coefficients shrink:
+@racket[elnet-path] with @racket[#:alpha 0.0] fits the ridge penalty over a
+list of @math{λ} in one call, largest first (@secref["concepts-path"]), and
+traces how the coefficients shrink:
 
 @examples[#:eval ev #:label #f
 (define (round3 x)
@@ -54,16 +56,16 @@ Refitting over a range of @math{λ} traces how the coefficients shrink:
 (define (rounded v)
   (for/list ([b (in-vector v)])
     (round3 b)))
-(for ([lam (in-list '(0.01 0.1 1.0 10.0 100.0))])
-  (define fit (ridge X y #:lambda lam))
-  (printf "λ = ~a: β₀ = ~a, β = ~a\n"
-          lam
-          (round3 (elnet-result-intercept fit))
-          (rounded (elnet-result-coefficients fit))))
+(define path (elnet-path X y #:alpha 0.0 #:lambda '(0.01 0.1 1.0 10.0 100.0)))
+(for ([lam (in-vector (glmnet-path-lambda path))]
+      [a0 (in-vector (glmnet-path-intercepts path))]
+      [beta (in-vector (glmnet-path-coefficients path))])
+  (printf "λ = ~a: β₀ = ~a, β = ~a\n" lam (round3 a0) (rounded beta)))
 ]
 
-Every coefficient heads toward zero and none reaches it, while the intercept
-heads toward the mean of @racket[y], which is @racket[4.5]. Along the way the
+Read upward, as @math{λ} grows, every coefficient heads toward zero and none
+reaches it, while the intercept heads toward the mean of @racket[y], which is
+@racket[4.5]. Along the way the
 coefficient on @math{x₂} changes sign. As @math{λ} grows, each ridge coefficient
 approaches a scaled-down copy of its predictor's covariance with the response,
 taken on its own; @math{x₂} rises with @math{x₁}, so on its own it is

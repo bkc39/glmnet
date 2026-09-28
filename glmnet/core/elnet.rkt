@@ -89,6 +89,7 @@
   (define no (design-matrix-nrows x))
   (define ni (design-matrix-ncols x))
   (define yv (as-response y no who "y"))
+  (check-response-varies (list y) intercept? who)
   (define beta (make-f64vector ni 0.0))
   (define-values (intercept rsq lam nlp jerr)
     (glmnet-elnet-solo/raw (exact->inexact alpha) no ni (design-matrix-data x) yv
@@ -198,6 +199,7 @@
   (define no (design-matrix-nrows x))
   (define ni (design-matrix-ncols x))
   (define yv (as-response y no 'elnet-path "y"))
+  (check-response-varies (list y) intercept? 'elnet-path)
   (define-values (nlam flmin ulam)
     (path-lambdas lambda nlambda lambda-min-ratio no ni))
   (define a0 (make-f64vector nlam 0.0))
@@ -210,7 +212,7 @@
                            (if standardize? 1 0) (if intercept? 1 0)
                            (exact->inexact thresh) max-iters
                            a0 beta dev alm))
-  (check-jerr jerr 'elnet-path)
+  (check-jerr jerr 'elnet-path lmu)
   (define coefficients (unpack-columns beta ni lmu))
   (glmnet-path 'gaussian (finish-lambdas alm lmu (not lambda))
                (unpack-vector a0 lmu) coefficients (unpack-vector dev lmu)

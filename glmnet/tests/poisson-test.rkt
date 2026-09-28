@@ -60,6 +60,10 @@
     (check-exn exn:fail:contract?
                (lambda () (poisson-fit '((1.0) (2.0)) '(1 -1) #:lambda 0.05))))
 
+  (test-case "an all-zero response is rejected before fitting"
+    (check-exn #rx"^poisson-fit: the response has no positive count"
+               (lambda () (poisson-fit X '(0 0 0 0 0 0 0 0) #:lambda 0.1))))
+
   (test-case "alpha outside [0,1] is a contract error"
     (check-exn exn:fail:contract?
                (lambda () (poisson-fit X y #:lambda 0.05 #:alpha 2.0))))

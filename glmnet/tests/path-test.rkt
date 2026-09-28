@@ -6,6 +6,7 @@
 (module+ test
   (require rackunit
            racket/list
+           racket/match
            glmnet)
 
   (define X '((1.0 2.0  1.0)
@@ -120,6 +121,115 @@
           [want (in-vector (mgaussian-result-coefficients r))])
       (check-vector= got want warm-start-tol)))
 
+  (test-case "multinomial: intercepts are centred at every lambda, as R's coef() reports them"
+    (define Xm '((1.0 1.0) (2.0 1.0) (1.0 2.0) (2.0 2.0) (5.0 1.0) (6.0 1.0)
+                 (5.0 2.0) (6.0 2.0) (3.0 5.0) (4.0 5.0) (3.0 6.0) (4.0 6.0)))
+    (define ym '(0 0 0 0 1 1 1 1 2 2 2 2))
+    (define p (multinomial-path Xm ym #:lambda '(0.1 0.01) #:thresh 1e-12))
+    (for ([a0 (in-vector (glmnet-path-intercepts p))])
+      (check-= (for/sum ([a (in-vector a0)]) a) 0.0 1e-12))
+    (define r (multinomial-fit Xm ym #:lambda 0.01 #:thresh 1e-12))
+    (check-vector= (vector-ref (glmnet-path-intercepts p) 1) (multinomial-result-intercepts r)
+                   warm-start-tol))
+
+  ;; --- the lambda-min-ratio ------------------------------------------------------
+
+  ;; Five lambdas are too few for glmnet to stop early, so the automatic
+  ;; sequence runs geometrically from lambda_max to ratio * lambda_max, and the
+  ;; last lambda is ratio^(3/4) times the second.
+  (define (last-over-second p)
+    (define lams (glmnet-path-lambda p))
+    (/ (vector-ref lams 4) (vector-ref lams 1)))
+
+  (test-case "an explicit #:lambda-min-ratio sets the end of the automatic sequence"
+    (check-= (last-over-second (elnet-path X y #:nlambda 5 #:lambda-min-ratio 0.1))
+             (expt 0.1 3/4) 1e-9))
+
+  (test-case "the default ratio is 1e-4, or 0.01 with fewer observations than predictors"
+    (check-= (last-over-second (elnet-path X y #:nlambda 5)) (expt 1e-4 3/4) 1e-9)
+    (define Xw '((1.0 2.0 1.0 0.5 3.0) (2.0 1.0 4.0 1.5 2.0) (3.0 4.0 9.0 0.2 1.0)))
+    (check-= (last-over-second (elnet-path Xw '(1.0 4.0 3.0) #:nlambda 5)) (expt 0.01 3/4) 1e-9))
+
+  (test-case "a ratio of 0 is glmnet's floor of 1e-6, as in R"
+    (check-equal? (glmnet-path-lambda (elnet-path X y #:nlambda 5 #:lambda-min-ratio 0))
+                  (glmnet-path-lambda (elnet-path X y #:nlambda 5 #:lambda-min-ratio 1e-6))))
+
+  ;; --- when glmnet stops -------------------------------------------------------
+
+  (define Yg '((1.0 2.0) (3.0 1.0) (2.0 5.0) (6.0 4.0) (5.0 5.0) (8.0 9.0)))
+  (define Xc '((0.5 1.0) (1.0 2.0) (1.5 1.0) (2.0 2.0) (2.5 1.0) (3.0 2.0) (3.5 1.0) (4.0 2.0)))
+  (define tc '(12.0 10.0 11.0 8.0 6.0 7.0 4.0 3.0))
+  (define sc '(0 0 0 1 1 1 1 1))
+  (define yp '(1 2 2 3 4 6 8 11 1 2 3 4))
+  (define ym3 '(0 0 1 1 2 2 0 1 2 0 1 2))
+
+  ;; With #:max-iters 1 every family gives up at the first lambda, so glmnet fits
+  ;; none; each fitter raises, naming itself. Without the shim's lmu = 0, the
+  ;; path fitters read past their buffers ("invalid memory reference").
+  (define no-lambda-cases
+    (list (list 'elnet-path (lambda () (elnet-path X y #:lambda '(0.001) #:max-iters 1)))
+          (list 'logistic-path (lambda () (logistic-path Xl yl #:lambda '(0.001) #:max-iters 1)))
+          (list 'multinomial-path (lambda () (multinomial-path Xl ym3 #:lambda '(0.001) #:max-iters 1)))
+          (list 'cox-path (lambda () (cox-path Xc tc sc #:lambda '(0.001) #:max-iters 1)))
+          (list 'poisson-path (lambda () (poisson-path Xl yp #:lambda '(0.001) #:max-iters 1)))
+          (list 'mgaussian-path (lambda () (mgaussian-path X Yg #:lambda '(0.001) #:max-iters 1)))
+          (list 'elnet-fit (lambda () (elnet-fit X y #:lambda 0.001 #:max-iters 1)))
+          (list 'lasso (lambda () (lasso X y #:lambda 0.001 #:max-iters 1)))
+          (list 'logistic-fit (lambda () (logistic-fit Xl yl #:lambda 0.001 #:max-iters 1)))
+          (list 'multinomial-fit (lambda () (multinomial-fit Xl ym3 #:lambda 0.001 #:max-iters 1)))
+          (list 'cox-fit (lambda () (cox-fit Xc tc sc #:lambda 0.001 #:max-iters 1)))
+          (list 'poisson-fit (lambda () (poisson-fit Xl yp #:lambda 0.001 #:max-iters 1)))
+          (list 'mgaussian-fit (lambda () (mgaussian-fit X Yg #:lambda 0.001 #:max-iters 1)))))
+
+  (for ([c (in-list no-lambda-cases)])
+    (define who (car c))
+    (test-case (format "~a raises when glmnet fits no lambda" who)
+      (check-exn (regexp (format "^~a: glmnet fitted no lambda: convergence was not reached at the first lambda.*#:max-iters" who))
+                 (cadr c))))
+
+  (define (glmnet-warnings thunk)
+    (define receiver (make-log-receiver (current-logger) 'warning 'glmnet))
+    (define result (thunk))
+    (values result
+            (let loop ()
+              (match (sync/timeout 0 receiver)
+                [#f '()]
+                [(vector _ message _ _) (cons message (loop))]))))
+
+  (test-case "a path that fails partway keeps the lambdas before it and logs a warning"
+    (define-values (p warnings)
+      (glmnet-warnings (lambda () (elnet-path X y #:lambda '(0.5 0.1 0.001) #:max-iters 1))))
+    (check-equal? (glmnet-path-lambda p) #(0.5))
+    (check-equal? (vector-length (glmnet-path-coefficients p)) 1)
+    (check-match warnings
+                 (list (regexp #rx"elnet-path: the path stops after 1 lambda: convergence was not reached at lambda number 2"))))
+
+  (test-case "a fatal glmnet error raises from a path"
+    (check-exn #rx"^elnet-path: all used predictors have zero variance"
+               (lambda () (elnet-path '((1.0 2.0) (1.0 2.0) (1.0 2.0)) '(1.0 2.0 4.0)))))
+
+  (test-case "a constant Gaussian response is rejected, as R rejects it"
+    (define msg #rx"y is constant; gaussian glmnet fails at standardization step")
+    (check-exn msg (lambda () (elnet-path X (make-list 6 2.0))))
+    (check-exn msg (lambda () (elnet-path X (make-list 6 0.0) #:intercept? #f)))
+    (check-exn msg (lambda () (mgaussian-path X (make-list 6 '(2.0 3.0)))))
+    (check-exn #rx"^elnet-path: " (lambda () (elnet-path X (make-list 6 2.0))))
+    (check-exn #rx"^mgaussian-path: " (lambda () (mgaussian-path X (make-list 6 '(2.0 3.0))))))
+
+  (test-case "a constant response without an intercept, or one constant column of Y, still fits"
+    (check-true (< 2 (vector-length (glmnet-path-lambda (elnet-path X (make-list 6 2.0) #:intercept? #f)))))
+    (define p (mgaussian-path X (for/list ([v (in-list y)]) (list v 3.0)) #:lambda '(1.0 0.1)))
+    (for ([a0 (in-vector (glmnet-path-intercepts p))]
+          [coefs (in-vector (glmnet-path-coefficients p))])
+      (check-= (vector-ref a0 1) 3.0 1e-12)
+      (check-true (for/and ([b (in-vector (vector-ref coefs 1))]) (zero? b)))))
+
+  (test-case "an all-zero Poisson response is rejected up front"
+    (check-exn #rx"^poisson-path: the response has no positive count"
+               (lambda () (poisson-path Xl (make-list 12 0))))
+    (check-exn #rx"^poisson-path: the response has no positive count"
+               (lambda () (poisson-path Xl (make-list 12 0) #:lambda '(1.0 0.1)))))
+
   ;; --- contracts -----------------------------------------------------------------
 
   (test-case "a negative lambda is a contract error"
@@ -128,6 +238,6 @@
   (test-case "an empty lambda list is a contract error"
     (check-exn exn:fail:contract? (lambda () (elnet-path X y #:lambda '()))))
 
-  (test-case "lambda-min-ratio must lie strictly between 0 and 1"
+  (test-case "lambda-min-ratio must lie in [0, 1)"
     (check-exn exn:fail:contract? (lambda () (elnet-path X y #:lambda-min-ratio 1.0)))
-    (check-exn exn:fail:contract? (lambda () (elnet-path X y #:lambda-min-ratio 0)))))
+    (check-exn exn:fail:contract? (lambda () (elnet-path X y #:lambda-min-ratio -0.1)))))

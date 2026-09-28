@@ -82,7 +82,9 @@ what you want when missing a class-1 case costs more than a false alarm.
 These two classes are @emph{linearly separable}: a line in the
 @math{(x₁, x₂)} plane splits them perfectly. Unpenalized logistic regression has
 no finite solution on such data, because making the coefficients larger always
-fits a little better. The penalty is what keeps the fit well defined:
+fits a little better. The penalty is what keeps the fit well defined, as
+@racket[logistic-path] shows by fitting a list of @math{λ} in one call, largest
+first (@secref["concepts-path"]):
 
 @examples[#:eval ev #:label #f
 (define (round3 x)
@@ -90,18 +92,24 @@ fits a little better. The penalty is what keeps the fit well defined:
 (define (rounded v)
   (for/list ([b (in-vector v)])
     (round3 b)))
-(for ([lam (in-list '(0.0 0.001 0.01 0.04 0.1 0.3))])
-  (define fit (logistic-fit X y #:lambda lam))
-  (printf "λ = ~a: β = ~a, dev-ratio = ~a\n"
-          lam
-          (rounded (logistic-result-coefficients fit))
-          (round3 (logistic-result-dev-ratio fit))))
+(define path (logistic-path X y #:lambda '(0.0 0.001 0.01 0.04 0.1 0.3)))
+(for ([lam (in-vector (glmnet-path-lambda path))]
+      [beta (in-vector (glmnet-path-coefficients path))]
+      [dev (in-vector (glmnet-path-dev-ratio path))])
+  (printf "λ = ~a: β = ~a, dev-ratio = ~a\n" lam (rounded beta) (round3 dev)))
 ]
 
 At @math{λ = 0} the solver returns large coefficients, the noise predictor among
 them, with a deviance ratio of essentially 1: the model has memorized the
-training labels. Even a small penalty removes the noise and keeps the
-coefficients finite. On harder data, glmnet can instead fail with an error
+training labels. With no finite optimum, which large coefficients it returns
+depends on where it starts. The path starts from its fit at @math{λ = 0.001};
+a single fit starts from zero and returns different ones:
+
+@examples[#:eval ev #:label #f
+(rounded (logistic-result-coefficients (logistic-fit X y #:lambda 0.0)))
+]
+
+Even a small penalty removes the noise and keeps the coefficients finite. On harder data, glmnet can instead fail with an error
 saying a class probability collapsed; a larger @racket[#:lambda] fixes that too.
 
 @section[#:tag "ex-logistic-when"]{When to use it}

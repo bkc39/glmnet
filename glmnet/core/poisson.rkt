@@ -59,11 +59,17 @@
 
 ;; Poisson adds the 8888 (negative response counts) fatal code on top of the
 ;; shared cases in `check-jerr`.
-(define (check-poisson-jerr jerr who)
+(define (check-poisson-jerr jerr who [lmu #f])
   (cond
     [(= jerr 8888)
      (error who "response counts must be non-negative (jerr=8888)")]
-    [else (check-jerr jerr who)]))
+    [else (check-jerr jerr who lmu)]))
+
+;; With no positive count the null model's log mean is -inf and glmnet cannot
+;; converge (R warns and returns an empty model).
+(define (check-some-count y who)
+  (unless (for/or ([v (in-list y)]) (positive? v))
+    (error who "the response has no positive count; Poisson needs at least one y > 0")))
 
 ;; --- public API ------------------------------------------------------------
 
@@ -78,6 +84,7 @@
   (define no (design-matrix-nrows x))
   (define ni (design-matrix-ncols x))
   (define yv (as-response y no 'poisson-fit "y"))
+  (check-some-count y 'poisson-fit)
   (define beta (make-f64vector ni 0.0))
   (define-values (intercept dev-ratio lam nlp jerr)
     (glmnet-fishnet-solo/raw (exact->inexact alpha) no ni (design-matrix-data x) yv
@@ -114,6 +121,7 @@
   (define no (design-matrix-nrows x))
   (define ni (design-matrix-ncols x))
   (define yv (as-response y no 'poisson-path "y"))
+  (check-some-count y 'poisson-path)
   (define-values (nlam flmin ulam)
     (path-lambdas lambda nlambda lambda-min-ratio no ni))
   (define a0 (make-f64vector nlam 0.0))
@@ -126,7 +134,7 @@
                              (if standardize? 1 0) (if intercept? 1 0)
                              (exact->inexact thresh) max-iters
                              a0 beta dev alm))
-  (check-poisson-jerr jerr 'poisson-path)
+  (check-poisson-jerr jerr 'poisson-path lmu)
   (define coefficients (unpack-columns beta ni lmu))
   (glmnet-path 'poisson (finish-lambdas alm lmu (not lambda))
                (unpack-vector a0 lmu) coefficients (unpack-vector dev lmu)
