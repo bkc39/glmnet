@@ -788,11 +788,11 @@ it passes on to each fit, and these:
        the largest must appear, and there must be at least 3.}
  @item{@racket[#:grouped?], R's @tt{grouped}, computes the error and its
        standard error from the per-fold means when true, and from the
-       per-observation losses otherwise. With fewer than 3 observations per
-       fold the folds are never grouped; @racket['auc] and @racket['C] are
-       always computed per fold; and the Cox deviance is grouped when a fold
-       has fewer than 10 observations. These adjustments, which R also makes,
-       log a warning.}
+       per-observation losses otherwise. When the folds average fewer than 3
+       observations, they are never grouped; @racket['auc] and @racket['C]
+       are always computed per fold; and when the folds average fewer than 10
+       observations, the Cox deviance is grouped. These adjustments, which R
+       also makes, log a warning.}
  @item{@racket[#:lambda] is as for the path fitter, but needs at least two
        values. Every fold's path is fitted at those values. Without it, each
        fold's path chooses its own sequence, as R's does, and is evaluated at
