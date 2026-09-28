@@ -221,6 +221,7 @@
                         #:max-iters [max-iters 100000])
   (define x (as-design-matrix X 'multinomial-cv "X"))
   (as-response y (design-matrix-nrows x) 'multinomial-cv "y")
+  (labels->num-classes y 'multinomial-cv)
   (define labels (list->vector y))
   (define (fit x y)
     (multinomial-path x y

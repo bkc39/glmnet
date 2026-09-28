@@ -89,6 +89,13 @@
 (define (binary-label? v) (and (real? v) (or (= v 0) (= v 1))))
 (define binary-response/c (and/c (listof binary-label?) pair?))
 
+;; Cross-validation fits every fold to data with both classes, so the data must
+;; have both.
+(define (check-both-classes y who)
+  (for ([c (in-list '(0 1))])
+    (unless (for/or ([v (in-list y)]) (= v c))
+      (error who "class ~a has no observations; y needs both 0 and 1" c))))
+
 ;; Logistic adds the 8000/9000 (a class probability collapsed -- e.g. perfect
 ;; separation) and 90000 (coefficient-bound non-convergence) fatal codes on top
 ;; of the shared cases in `check-jerr`.
@@ -193,6 +200,7 @@
   (define x (as-design-matrix X 'logistic-cv "X"))
   (define ys
     (list->vector (f64vector->list (as-response y (design-matrix-nrows x) 'logistic-cv "y"))))
+  (check-both-classes y 'logistic-cv)
   (define (fit x y)
     (logistic-path x y
                    #:lambda lambda #:nlambda nlambda #:lambda-min-ratio lambda-min-ratio

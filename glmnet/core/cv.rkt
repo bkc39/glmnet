@@ -462,7 +462,7 @@
   (define n (design-matrix-nrows x))
   (define folds (resolve-folds who n nfolds fold-ids))
   (define k (add1 (for/fold ([m 0]) ([f (in-vector folds)]) (max m f))))
-  (define path (fit-all))
+  (define path (fitting who "fitting all the data" fit-all))
   (define family (glmnet-path-family path))
   (check-training-folds who family response folds k)
   (define held-out
@@ -487,7 +487,10 @@
     (check-held-out-events who response held-out))
   (define fold-paths
     (for/vector #:length k ([f (in-range k)])
-      (fit-rows (for/list ([g (in-vector folds)] [i (in-naturals)] #:unless (= g f)) i))))
+      (fitting who (format "fitting the training data of held-out fold ~a" f)
+               (lambda ()
+                 (fit-rows (for/list ([g (in-vector folds)] [i (in-naturals)] #:unless (= g f))
+                             i))))))
   (define-values (raw weights counts grouped-raw?)
     (cond
       [(eq? family 'cox)
@@ -546,6 +549,18 @@
              measure* (measure-name family measure*) path
              lambda-min lambda-1se index-min index-1se
              (vector->list folds)))
+
+;; Calls fit, and raises a failure again under the name of the procedure the
+;; user called, with `what` in place of the path fitter's name.
+(define (fitting who what fit)
+  (with-handlers ([exn:fail?
+                   (lambda (e)
+                     (define message
+                       (format "~a: ~a: ~a" who what
+                               (regexp-replace #rx"^[^ :\n]+-path: " (exn-message e) "")))
+                     (raise ((if (exn:fail:contract? e) exn:fail:contract exn:fail)
+                             message (exn-continuation-marks e))))])
+    (fit)))
 
 ;; Per lambda, per observation, the link prediction of the fold path that did
 ;; not see the observation, at the full-data lambdas: R's buildPredmat with

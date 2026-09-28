@@ -799,6 +799,12 @@ it passes on to each fit, and these:
        the full-data path's values by interpolation.}
 ]
 
+The data are checked before any fold is fitted: the response must have what
+its family needs, and so must every fold's training data (each class, or an
+event). When a fit fails all the same, the error names the cross-validation
+procedure and says which fit failed: the one to all the data, or the one to
+the training data of a given held-out fold.
+
 @tabular[#:style 'boxed
          #:sep @hspace[2]
          #:row-properties '(bottom-border ())
@@ -933,8 +939,9 @@ carry the signal:
   deviance, @racket['class] the misclassification rate, @racket['auc] the area
   under the ROC curve of each fold, and @racket['mse] and @racket['mae] the
   squared and absolute differences between the 0/1 labels of both classes and
-  their predicted probabilities, summed over the two classes. With fewer than
-  10 observations per fold, @racket['auc] becomes @racket['deviance], as in R.
+  their predicted probabilities, summed over the two classes. When the folds
+  average fewer than 10 observations, @racket['auc] becomes
+  @racket['deviance], as in R. @racket[y] must hold both classes.
 
   @examples[#:eval ev
   (define labels (for/list ([v (in-list y60)]) (if (> v 1.0) 1 0)))

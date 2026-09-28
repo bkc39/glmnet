@@ -492,6 +492,26 @@
     (check-contract-error (lambda () (cox-cv X times one-fold-events #:fold-ids folds))
                           #rx"^cox-cv: the training data of a fold has no event"))
 
+  (test-case "the classes are checked by the CV procedure, not by its path fitter"
+    (check-exn #rx"^logistic-cv: class 1 has no observations; y needs both 0 and 1"
+               (lambda () (logistic-cv X (make-list n 0) #:fold-ids folds)))
+    (check-exn #rx"^multinomial-cv: class 1 has no observations"
+               (lambda () (multinomial-cv X (for/list ([i (in-range n)]) (* 2 (modulo i 2)))
+                                          #:fold-ids folds)))
+    (check-exn #rx"^multinomial-cv: multinomial needs at least 2 classes"
+               (lambda () (multinomial-cv X (make-list n 0) #:fold-ids folds))))
+
+  (test-case "a fit that fails is reported by the CV procedure, with its fold"
+    ;; With every time distinct, the Cox fit stops when its data's first event
+    ;; is among its last two observations: here, only the training data of
+    ;; folds 2 and 3 (rows 27 and 29 are the events).
+    (define late-events (for/list ([i (in-range n)]) (if (memv i '(27 29)) 1 0)))
+    (check-exn #rx"^cox-cv: fitting the training data of held-out fold 2: Cox initialization numerical error"
+               (lambda () (cox-cv X distinct-times late-events #:fold-ids folds)))
+    (check-exn #rx"^cox-cv: fitting all the data: Cox initialization numerical error"
+               (lambda () (cox-cv X distinct-times (for/list ([i (in-range n)]) (if (= i 29) 1 0))
+                                  #:fold-ids folds))))
+
   (test-case "data errors name the CV procedure"
     (check-contract-error (lambda () (elnet-cv X (cdr y)))
                           #rx"^elnet-cv: y does not have one entry per row of X")
