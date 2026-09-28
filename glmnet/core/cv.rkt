@@ -24,8 +24,10 @@
  (struct-out glmnet-cv)
  (contract-out
   [random-fold-ids
-   (->* (exact-positive-integer?) (exact-positive-integer?)
-        (listof exact-nonnegative-integer?))]))
+   (->i ([n exact-positive-integer?])
+        (#:nfolds [nfolds exact-positive-integer?])
+        #:pre/desc (n nfolds) (folds-within n nfolds)
+        [_ (listof exact-nonnegative-integer?)])]))
 
 ;; For the family modules and the unit tests only; not part of the public API.
 (module* support #f
@@ -68,7 +70,6 @@
        dev))])
 
 (define nfolds/c (and/c exact-integer? (>=/c 3)))
-(define fold-ids/c (or/c #f (and/c (listof exact-nonnegative-integer?) pair?)))
 (define cv-lambda-sequence/c
   (or/c #f (and/c (listof (>=/c 0)) (property/c length (>=/c 2)))))
 
@@ -79,13 +80,20 @@
 
 ;; --- folds -------------------------------------------------------------------
 
+(define default-nfolds 10)
+
+;; random-fold-ids's precondition: no more folds than observations.
+(define (folds-within n nfolds)
+  (define k (if (unsupplied-arg? nfolds) default-nfolds nfolds))
+  (or (<= k n)
+      (list "there are more folds than observations"
+            (format "folds: ~a" k)
+            (format "observations: ~a" n))))
+
 ;; n fold ids, as R's sample(rep(seq(nfolds), length = n)) makes them: the ids
 ;; 0, 1, ..., nfolds - 1, 0, 1, ... shuffled with the current pseudo-random
 ;; generator.
-(define (random-fold-ids n [nfolds 10])
-  (when (> nfolds n)
-    (raise-arguments-error 'random-fold-ids "there are more folds than observations"
-                           "folds" nfolds "observations" n))
+(define (random-fold-ids n #:nfolds [nfolds default-nfolds])
   (define ids (for/vector #:length n ([i (in-range n)]) (modulo i nfolds)))
   (for ([i (in-range (sub1 n) 0 -1)])
     (define j (random (add1 i)))
@@ -94,6 +102,38 @@
     (vector-set! ids j t))
   (vector->list ids))
 
+;; A #:fold-ids argument: #f, or fold ids from 0 that use every fold up to the
+;; largest, of which there are at least 3. Only ids below the number of
+;; observations are tallied, so a huge id costs no memory: with more folds than
+;; observations, one of those ids is necessarily missing.
+(define fold-ids/c
+  (and/c (or/c #f (and/c (listof exact-nonnegative-integer?) pair?))
+         (flat-contract-with-explanation
+          (lambda (ids)
+            (define k (and ids (add1 (apply max ids))))
+            (define (missing-fold)
+              (define present (make-vector (min k (length ids)) #f))
+              (for ([f (in-list ids)] #:when (< f (vector-length present)))
+                (vector-set! present f #t))
+              (for/first ([p (in-vector present)] [f (in-naturals)] #:unless p) f))
+            (cond
+              [(not ids) #t]
+              [(< k 3)
+               (lambda (blame)
+                 (raise-blame-error blame ids
+                                    '("cross-validation needs at least 3 folds"
+                                      expected: "fold ids from 0 to at least 2" given: "~e")
+                                    ids))]
+              [(missing-fold)
+               => (lambda (f)
+                    (lambda (blame)
+                      (raise-blame-error blame ids
+                                         '("a fold has no observations; fold ids must cover 0 to ~a"
+                                           expected: "an observation in fold ~a" given: "~e")
+                                         (sub1 k) f ids)))]
+              [else #t]))
+          #:name 'fold-ids-covering-every-fold)))
+
 ;; The fold of each of the n observations, as a vector.
 (define (resolve-folds who n nfolds fold-ids)
   (cond
@@ -101,23 +141,12 @@
      (unless (= (length fold-ids) n)
        (raise-arguments-error who "fold-ids does not have one entry per row of X"
                               "length of fold-ids" (length fold-ids) "rows of X" n))
-     (define k (add1 (apply max fold-ids)))
-     (when (< k 3)
-       (raise-arguments-error who "cross-validation needs at least 3 folds" "folds" k))
-     (define sizes (make-vector k 0))
-     (for ([f (in-list fold-ids)])
-       (vector-set! sizes f (add1 (vector-ref sizes f))))
-     (for ([size (in-vector sizes)]
-           [f (in-naturals)]
-           #:when (zero? size))
-       (raise-arguments-error who "a fold has no observations; fold ids must cover 0..k-1"
-                              "fold" f "k" k))
      (list->vector fold-ids)]
     [else
      (when (> nfolds n)
        (raise-arguments-error who "there are more folds than observations"
                               "folds" nfolds "observations" n))
-     (list->vector (random-fold-ids n nfolds))]))
+     (list->vector (random-fold-ids n #:nfolds nfolds))]))
 
 ;; Each fold's training data (every other fold) must be data the family can
 ;; fit: both classes for the binomial, every class for the multinomial, and an

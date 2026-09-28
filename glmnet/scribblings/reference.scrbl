@@ -1046,26 +1046,26 @@ carry the signal:
   (mgaussian-cv X60 Y60)]}
 
 @defproc[(random-fold-ids [n exact-positive-integer?]
-                          [nfolds exact-positive-integer? 10])
+                          [#:nfolds nfolds exact-positive-integer? 10])
          (listof exact-nonnegative-integer?)]{
   Assigns @racket[n] observations to @racket[nfolds] folds at random, as R's
   @tt{sample(rep(seq(nfolds), length = n))} does: the fold ids
   @racket[0], @racket[1], ..., @racket[(- nfolds 1)], @racket[0], ... are
   shuffled with @racket[current-pseudo-random-generator], so that the folds
-  differ in size by at most one. @racket[nfolds] must not exceed
-  @racket[n]. The cross-validation procedures call it when they are not
-  given @racket[#:fold-ids]; calling it directly gives folds to reuse across
-  calls.
+  differ in size by at most one. @racket[nfolds], given or by default, must
+  not exceed @racket[n]. The cross-validation procedures call it when they
+  are not given @racket[#:fold-ids]; calling it directly gives folds to reuse
+  across calls.
 
   @examples[#:eval ev
-  (random-fold-ids 10 3)
+  (random-fold-ids 10 #:nfolds 3)
   (define (draw)
     (parameterize ([current-pseudo-random-generator
                     (make-pseudo-random-generator)])
       (random-seed 1)
-      (random-fold-ids 10 3)))
+      (random-fold-ids 10 #:nfolds 3)))
   (equal? (draw) (draw))
-  (eval:error (random-fold-ids 3 5))]}
+  (eval:error (random-fold-ids 3 #:nfolds 5))]}
 
 @section[#:tag "ref-model"]{Generic model interface}
 

@@ -63,7 +63,7 @@
   ;; --- folds -------------------------------------------------------------------
 
   (test-case "random-fold-ids: every fold, sizes as even as possible"
-    (define ids (random-fold-ids 23 5))
+    (define ids (random-fold-ids 23 #:nfolds 5))
     (check-equal? (length ids) 23)
     (check-equal? (sort (remove-duplicates ids) <) '(0 1 2 3 4))
     (check-equal? (for/list ([f (in-range 5)]) (count (lambda (i) (= i f)) ids))
@@ -74,13 +74,21 @@
     (define (draw seed)
       (parameterize ([current-pseudo-random-generator (make-pseudo-random-generator)])
         (random-seed seed)
-        (random-fold-ids 40 4)))
+        (random-fold-ids 40 #:nfolds 4)))
     (check-equal? (draw 7) (draw 7))
     (check-not-equal? (draw 7) (draw 8)))
 
   (test-case "random-fold-ids needs no more folds than observations"
-    (check-contract-error (lambda () (random-fold-ids 3 5))
-                          #rx"^random-fold-ids: there are more folds than observations"))
+    (check-contract-error (lambda () (random-fold-ids 3 #:nfolds 5))
+                          #rx"^random-fold-ids: contract violation"
+                          #rx"there are more folds than observations\n folds: 5\n observations: 3"
+                          #rx"blaming: .*cv-test\\.rkt")
+    (check-contract-error (lambda () (random-fold-ids 5))
+                          #rx"there are more folds than observations\n folds: 10\n observations: 5"))
+
+  (test-case "random-fold-ids takes the number of folds as #:nfolds, as every *-cv does"
+    (check-equal? (length (remove-duplicates (random-fold-ids 12 #:nfolds 4))) 4)
+    (check-exn exn:fail:contract? (lambda () (random-fold-ids 12 4))))
 
   (test-case "a CV result records its folds; random folds are reproducible"
     (check-equal? (glmnet-cv-fold-ids (elnet-cv X y #:fold-ids folds)) folds)
@@ -380,10 +388,19 @@
     (check-contract-error (lambda () (elnet-cv X y #:fold-ids (cdr folds)))
                           #rx"^elnet-cv: fold-ids does not have one entry per row of X")
     (check-contract-error (lambda () (elnet-cv X y #:fold-ids (map (lambda (f) (modulo f 2)) folds)))
-                          #rx"^elnet-cv: cross-validation needs at least 3 folds")
+                          #rx"^elnet-cv: contract violation;\n cross-validation needs at least 3 folds"
+                          #rx"the #:fold-ids argument"
+                          #rx"blaming: .*cv-test\\.rkt")
     (check-contract-error (lambda () (elnet-cv X y #:fold-ids (map (lambda (f) (* 2 f)) folds)))
-                          #rx"^elnet-cv: a fold has no observations")
+                          #rx"^elnet-cv: contract violation;\n a fold has no observations"
+                          #rx"cover 0 to 8\n  expected: an observation in fold 1\n"
+                          #rx"the #:fold-ids argument")
     (check-contract-error (lambda () (elnet-cv X y #:fold-ids (cons -1 (cdr folds)))) #rx"elnet-cv"))
+
+  (test-case "a huge fold id is rejected without a vector of that size"
+    (check-contract-error (lambda () (elnet-cv X y #:fold-ids (cons (expt 10 12) (cdr folds))))
+                          #rx"^elnet-cv: contract violation;\n a fold has no observations"
+                          #rx"cover 0 to 1000000000000\n  expected: an observation in fold 5\n"))
 
   (test-case "#:nfolds: at least 3, and no more than the observations"
     (check-contract-error (lambda () (elnet-cv X y #:nfolds 2)) #rx"elnet-cv")
