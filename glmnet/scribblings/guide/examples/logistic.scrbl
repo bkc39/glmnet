@@ -39,10 +39,12 @@ Class 1 has high @math{x₁} and low @math{x₂}, class 0 the reverse, and
 @examples[#:eval ev #:label #f
 (define fit (logistic-fit X y #:lambda 0.04))
 fit
+(coef fit)
 ]
 
-The coefficients are on the log-odds scale. @math{x₁} raises the odds of class
-1 and @math{x₂} lowers them; the noise predictor is exactly @racket[0.0].
+@racket[coef] lists the intercept and then the coefficients, all on the
+log-odds scale. @math{x₁} raises the odds of class 1 and @math{x₂} lowers
+them; the noise predictor is exactly @racket[0.0].
 Exponentiating a coefficient gives an @emph{odds ratio}, the factor by which
 one more unit of the predictor multiplies the odds of class 1:
 
@@ -57,11 +59,14 @@ the logistic analogue of @math{R²}.
 @section[#:tag "ex-logistic-predict"]{Predicting}
 
 @racket[logistic-predict-proba] returns the class-1 probability for each row;
-@racket[logistic-predict] thresholds it into a label:
+@racket[logistic-predict] thresholds it into a label. The first is
+@racket[predict] with @racket[#:type 'response]; at its default threshold, the
+second agrees with @racket[#:type 'class]:
 
 @examples[#:eval ev #:label #f
 (logistic-predict-proba fit X)
 (equal? (logistic-predict fit X) y)
+(equal? (predict fit X #:type 'class) y)
 ]
 
 Every training point is classified correctly. The threshold defaults to

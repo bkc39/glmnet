@@ -41,8 +41,8 @@ covering all the responses together.
 
 @section[#:tag "ex-mgaussian-predict"]{Predicting}
 
-@racket[mgaussian-predict] returns one list per row, with one prediction per
-response:
+@racket[mgaussian-predict], which is @racket[predict] with its defaults,
+returns one list per row, with one prediction per response:
 
 @examples[#:eval ev #:label #f
 (mgaussian-predict fit '((7.0 1.0) (8.0 2.0)))

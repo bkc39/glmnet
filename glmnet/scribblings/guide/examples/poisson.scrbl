@@ -28,10 +28,11 @@ The counts grow roughly like @math{exp(0.3 x₁)}; @math{x₂} is noise:
 @examples[#:eval ev #:label #f
 (define fit (poisson-fit X y #:lambda 0.2))
 fit
+(coef fit)
 ]
 
-@math{β₁} is close to the @racket[0.3] the counts were built around, and the
-noise coefficient is exactly @racket[0.0]. The coefficients are on the log
+After the intercept, @math{β₁} is close to the @racket[0.3] the counts were
+built around, and the noise coefficient is exactly @racket[0.0]. The coefficients are on the log
 scale; exponentiated, @math{β₁} is a @emph{rate ratio}, the factor by which one
 more unit of @math{x₁} multiplies the expected count:
 
@@ -42,7 +43,8 @@ more unit of @math{x₁} multiplies the expected count:
 @section[#:tag "ex-poisson-predict"]{Predicting}
 
 @racket[poisson-predict-mean] applies the log link and returns the fitted mean
-for each row. Next to the observed counts:
+for each row; it is @racket[predict] with @racket[#:type 'response]. Next to
+the observed counts:
 
 @examples[#:eval ev #:label #f
 (for/list ([mu (in-list (poisson-predict-mean fit X))]

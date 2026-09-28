@@ -6,7 +6,10 @@
 ;; fixture and R's reference intercept / coefficients / dev.ratio / predictions
 ;; (scripts/r-parity/gen-reference.R generates them with R glmnet). We load the
 ;; same committed dataset, fit the matching family, and check we agree within the
-;; tolerances recorded in the golden's `meta`.
+;; tolerances recorded in the golden's `meta`. Path goldens (kind "path", #10)
+;; hold R's whole regularization path; predict goldens (kind "predict", #25) and
+;; the `generic` entry of each single-fit golden hold R's coef(fit, s) and
+;; predict(fit, newx, s, type) for the generic interface.
 ;;
 ;; Goldens are generated on demand, never committed: the Nix `checks.parity` gate
 ;; regenerates them with the pinned R glmnet and points GLMNET_PARITY_GOLDENS at
@@ -62,39 +65,111 @@
       (for/fold ([acc intercept]) ([c (in-vector coefs)] [x (in-list row)])
         (+ acc (* c (exact->inexact x))))))
 
-  ;; A regularization path (#10): R's lambda sequence (or the user's), where it
-  ;; stops, and the fit at every lambda. A golden may fix #:nlambda and
-  ;; #:lambda-min-ratio, and `nobs` restricts it to the first nobs observations.
-  (define (run-path-golden g)
-    (define id     (hash-ref g 'id))
+  ;; compare nested lists (or vectors) of reals element-wise
+  (define (check-nested-close got expected tol msg)
+    (cond
+      [(list? expected)
+       (define got* (if (vector? got) (vector->list got) got))
+       (check-equal? (length got*) (length expected) (format "~a: length mismatch" msg))
+       (for ([g (in-list got*)] [e (in-list expected)] [i (in-naturals)])
+         (check-nested-close g e tol (format "~a[~a]" msg i)))]
+      [else (check-close got expected tol msg)]))
+
+  ;; Whether R's class for a row, given R's linear predictor(s) there, is
+  ;; further from a tie than the prediction tolerance can move it. Only then
+  ;; must our class agree.
+  (define (decisive? eta tol)
+    (cond
+      [(list? eta)
+       (define sorted (sort eta >))
+       (> (- (first sorted) (second sorted))
+          (* 2 tol (+ 1 (apply max (map abs eta)))))]
+      [else (> (abs eta) (* 2 tol (+ 1 (abs eta))))]))
+
+  ;; The generic interface (#25): `coef` and `predict` of every type at each s
+  ;; of `gen`, against R's coef(fit, s) and predict(fit, newx, s, type).
+  (define (check-generic model X gen tols)
+    (define s    (hash-ref gen 's))
+    (define ctol (hash-ref tols 'coef))
+    (define ptol (hash-ref tols 'pred))
+    (define preds (hash-ref gen 'predict_s))
+    (define coefs (coef model #:lambda s))
+    (check-equal? (length coefs) (length (hash-ref gen 'coef_s)) "coef: number of s")
+    (for ([got (in-list coefs)]
+          [expected (in-list (hash-ref gen 'coef_s))]
+          [i (in-naturals)])
+      (check-nested-close got expected ctol (format "coef[s ~a]" i)))
+    (for ([(type all-expected) (in-hash preds)])
+      (define all-got (predict model X #:type type #:lambda s))
+      (check-equal? (length all-got) (length all-expected) (format "predict ~a: number of s" type))
+      (for ([got (in-list all-got)]
+            [expected (in-list all-expected)]
+            [etas (in-list (hash-ref preds 'link))]
+            [i (in-naturals)])
+        (define msg (format "predict ~a[s ~a]" type i))
+        (cond
+          [(eq? type 'class)
+           (check-equal? (length got) (length expected) (format "~a: row count" msg))
+           (for ([c (in-list got)] [e (in-list expected)] [eta (in-list etas)] [row (in-naturals)]
+                 #:when (decisive? eta ptol))
+             (check-equal? c e (format "~a[row ~a]" msg row)))]
+          [else (check-nested-close got expected ptol msg)]))))
+
+  ;; The lines of a path's printed table, without the #<glmnet-path:family
+  ;; line before it and the > after it.
+  (define (printed-table p)
+    (define s (format "~a" p))
+    (cdr (regexp-split #rx"\n" (substring s 0 (sub1 (string-length s))))))
+
+  ;; The dataset of a path or predict golden; `nobs` restricts it to the first
+  ;; nobs observations.
+  (define (golden-dataset g)
+    (define full (load-dataset (hash-ref g 'dataset)))
+    (match (hash-ref g 'nobs #f)
+      [#f full]
+      [n (for/list ([column (in-list full)]) (take column n))]))
+
+  ;; The path a path or predict golden describes, fitted as R fits it. A golden
+  ;; may fix #:nlambda and #:lambda-min-ratio.
+  (define (fit-golden-path g ds)
     (define family (hash-ref g 'family))
     (define alpha  (hash-ref g 'alpha))
     (define thresh (hash-ref g 'thresh))
     (define lambda (hash-ref g 'lambda_user #f))
     (define nlambda (hash-ref g 'nlambda 100))
     (define ratio  (hash-ref g 'lambda_min_ratio #f))
-    (define tols   (hash-ref (hash-ref g 'meta) 'tolerances))
-    (define ctol   (hash-ref tols 'coef))
-    (define itol   (hash-ref tols 'intercept))
-    (define dtol   (hash-ref tols 'dev_ratio))
-    (define ds
-      (let ([full (load-dataset (hash-ref g 'dataset))])
-        (match (hash-ref g 'nobs #f)
-          [#f full]
-          [n (for/list ([column (in-list full)]) (take column n))])))
     (define X      (first ds))
     (define (fit path-proc . data)
       (keyword-apply path-proc '(#:alpha #:lambda #:lambda-min-ratio #:nlambda #:thresh)
                      (list alpha lambda ratio nlambda thresh)
                      X data))
-    (define p
-      (case family
-        [("gaussian")    (fit elnet-path (second ds))]
-        [("binomial")    (fit logistic-path (second ds))]
-        [("multinomial") (fit multinomial-path (second ds))]
-        [("poisson")     (fit poisson-path (second ds))]
-        [("cox")         (fit cox-path (second ds) (third ds))]
-        [("mgaussian")   (fit mgaussian-path (second ds))]))
+    (case family
+      [("gaussian")    (fit elnet-path (second ds))]
+      [("binomial")    (fit logistic-path (second ds))]
+      [("multinomial") (fit multinomial-path (second ds))]
+      [("poisson")     (fit poisson-path (second ds))]
+      [("cox")         (fit cox-path (second ds) (third ds))]
+      [("mgaussian")   (fit mgaussian-path (second ds))]))
+
+  ;; predict and coef along a path (#25), at s on, between, above and below
+  ;; the fitted lambdas, and the path's printed table.
+  (define (run-predict-golden g)
+    (define ds (golden-dataset g))
+    (define p  (fit-golden-path g ds))
+    (test-case (hash-ref g 'id)
+      (check-generic p (first ds) g (hash-ref (hash-ref g 'meta) 'tolerances))
+      (check-equal? (printed-table p) (hash-ref g 'print) "printed table")))
+
+  ;; A regularization path (#10): R's lambda sequence (or the user's), where it
+  ;; stops, and the fit at every lambda. A golden may fix #:nlambda and
+  ;; #:lambda-min-ratio, and `nobs` restricts it to the first nobs observations.
+  (define (run-path-golden g)
+    (define id     (hash-ref g 'id))
+    (define tols   (hash-ref (hash-ref g 'meta) 'tolerances))
+    (define ctol   (hash-ref tols 'coef))
+    (define itol   (hash-ref tols 'intercept))
+    (define dtol   (hash-ref tols 'dev_ratio))
+    (define p      (fit-golden-path g (golden-dataset g)))
     (define expected-lambda (hash-ref g 'lambda_path))
     (test-case id
       (check-equal? (vector-length (glmnet-path-lambda p)) (length expected-lambda)
@@ -131,6 +206,12 @@
     (define ptol   (hash-ref tols 'pred))
     (define ds     (load-dataset (hash-ref g 'dataset)))
     (define X (first ds))
+    (define (check-generic-single r)
+      (define gen (hash-ref g 'generic))
+      (check-generic r X gen tols)
+      (check-nested-close (coef r) (first (hash-ref gen 'coef_s)) ctol "coef, default lambda")
+      (check-nested-close (predict r X) (first (hash-ref (hash-ref gen 'predict_s) 'link))
+                          ptol "predict, default type and lambda"))
     (test-case id
       (cond
         [(string=? family "gaussian")
@@ -144,7 +225,9 @@
          (check-close (elnet-result-r-squared r) (hash-ref g 'dev_ratio) dtol "dev-ratio")
          (check-vec-close (linear-predictions (elnet-result-intercept r)
                                               (elnet-result-coefficients r) X)
-                          (hash-ref g 'predictions) ptol "predictions")]
+                          (hash-ref g 'predictions) ptol "predictions")
+         (check-vec-close (elnet-predict r X) (hash-ref g 'predictions) ptol "elnet-predict")
+         (check-generic-single r)]
         [(string=? family "binomial")
          (define y (second ds))
          (define r (logistic-fit X y #:lambda lambda #:alpha alpha #:thresh thresh))
@@ -154,7 +237,8 @@
                           (hash-ref g 'coefficients) ctol "coef")
          (check-close (logistic-result-dev-ratio r) (hash-ref g 'dev_ratio) dtol "dev-ratio")
          (check-vec-close (logistic-predict-proba r X)
-                          (hash-ref g 'predictions) ptol "proba")]
+                          (hash-ref g 'predictions) ptol "proba")
+         (check-generic-single r)]
         [(string=? family "multinomial")
          (define y (second ds))
          (define r (multinomial-fit X y #:lambda lambda #:alpha alpha #:thresh thresh))
@@ -165,7 +249,8 @@
          (check-mat-close (multinomial-predict-proba r X) (hash-ref g 'probabilities) ptol "proba")
          (for ([k (in-naturals)] [ck (in-list (hash-ref g 'coefficients))])
            (check-vec-close (vector->list (vector-ref (multinomial-result-coefficients r) k))
-                            ck ctol (format "coef[class ~a]" k)))]
+                            ck ctol (format "coef[class ~a]" k)))
+         (check-generic-single r)]
         [(string=? family "poisson")
          (define y (second ds))
          (define r (poisson-fit X y #:lambda lambda #:alpha alpha #:thresh thresh))
@@ -174,7 +259,8 @@
          (check-vec-close (vector->list (poisson-result-coefficients r))
                           (hash-ref g 'coefficients) ctol "coef")
          (check-close (poisson-result-dev-ratio r) (hash-ref g 'dev_ratio) dtol "dev-ratio")
-         (check-vec-close (poisson-predict-mean r X) (hash-ref g 'predictions) ptol "predict-mean")]
+         (check-vec-close (poisson-predict-mean r X) (hash-ref g 'predictions) ptol "predict-mean")
+         (check-generic-single r)]
         [(string=? family "cox")
          (define times (second ds))
          (define statuses (third ds))
@@ -184,7 +270,8 @@
                           (hash-ref g 'coefficients) ctol "coef")
          (check-close (cox-result-dev-ratio r) (hash-ref g 'dev_ratio) dtol "dev-ratio")
          (check-vec-close (cox-linear-predictor r X)
-                          (hash-ref g 'linear_predictor) ptol "linear-predictor")]
+                          (hash-ref g 'linear_predictor) ptol "linear-predictor")
+         (check-generic-single r)]
         [(string=? family "mgaussian")
          (define Y (second ds))
          (define r (mgaussian-fit X Y #:lambda lambda #:alpha alpha #:thresh thresh))
@@ -195,7 +282,8 @@
            (check-vec-close (vector->list (vector-ref (mgaussian-result-coefficients r) k))
                             ck ctol (format "coef[response ~a]" k)))
          (check-close (mgaussian-result-r-squared r) (hash-ref g 'r_squared) dtol "r-squared")
-         (check-mat-close (mgaussian-predict r X) (hash-ref g 'predictions) ptol "predictions")]
+         (check-mat-close (mgaussian-predict r X) (hash-ref g 'predictions) ptol "predictions")
+         (check-generic-single r)]
         [else (fail (format "~a: unhandled family ~a" id family))])))
 
   (define explicit-goldens?
@@ -213,9 +301,10 @@
     [(pair? golden-files)
      (for ([path (in-list golden-files)])
        (define g (call-with-input-file path read-json))
-       (if (equal? (hash-ref g 'kind #f) "path")
-           (run-path-golden g)
-           (run-golden g)))]
+       (case (hash-ref g 'kind #f)
+         [("path")    (run-path-golden g)]
+         [("predict") (run-predict-golden g)]
+         [else        (run-golden g)]))]
     [explicit-goldens?
      ;; The CI gate sets GLMNET_PARITY_GOLDENS; an empty dir there means R
      ;; generation failed -- a real error.

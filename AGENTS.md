@@ -21,6 +21,7 @@ glmnet/                        Racket collection
   foreign.rkt                  contracted wrappers + load-time precision guard
   data.rkt                     design-matrix layer (glmnet/data): the one input layout
   core/*.rkt                   one module per family; marshal.rkt, path.rkt shared
+  core/model.rkt               gen:glmnet-model: predict / coef / deviance-ratio on any result
   main.rkt                     public API (require glmnet)
   examples/NN-*.rkt            #lang scribble/lp2 literate examples (run-example)
   examples/test/NN-*.rkt       companion runners + rackunit harnesses
@@ -79,7 +80,9 @@ different `α` (`parm`) and `λ`. Each new capability is shipped as one unit:
    `define-glmnet` (`_f64vector`/`_s32vector` buffers, `(_ptr o …)` scalar outs;
    no allocator/finalizer — these are pure calls). Add a contracted wrapper in
    `core/` (inputs through the design-matrix layer, `data.rkt`, via
-   `core/marshal.rkt`; `jerr` check; result struct).
+   `core/marshal.rkt`; `jerr` check; a result struct that implements
+   `gen:glmnet-model` from `core/model.rkt`, so `predict`, `coef` and printing
+   work on it; prediction helpers are `predict` at a fixed `#:type`).
 5. **Test the Racket binding.** `glmnet/tests/*-test.rkt` rackunit: round-trip vs
    closed-form / known values, `jerr` error surfacing, shape-mismatch contract
    errors.
