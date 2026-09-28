@@ -5,13 +5,14 @@
 
 @title[#:tag "formulas" #:style 'toc]{Formulas and named data}
 
-The procedures of the previous chapters take a @tech{design matrix} and a
-separate @tech{response}, and their coefficients are known by position. Data
-usually arrives as a table of named columns instead, one of which is the
-response. The formula front end fits a model from such a table: a
-@tech{formula} names the response and the predictors, and the fitted model
-keeps the names, so that its coefficients are keyed by name and it predicts
-from a new table by matching columns by name. The same three procedures fit
+The family procedures, such as @racket[elnet-fit] and @racket[logistic-path],
+take a @tech{design matrix} and a separate @tech{response}, and their
+coefficients are known by position. Data usually arrives as a table of named
+columns instead, one of which is the response. The formula front end, which
+@secref["gs-formulas"] and @secref["concepts-named"] introduce, fits a model
+from such a table: a @tech{formula} names the response and the predictors, and
+the fitted model keeps the names, so that its coefficients are keyed by name
+and it predicts from a new table by matching columns by name. The same three procedures fit
 every family: @racket[formula-fit] at one @math{λ}, @racket[formula-path] along
 a @tech{regularization path} and @racket[formula-cv] with cross-validation.
 
@@ -28,8 +29,7 @@ A @tech{table} is any of these:
 @itemlist[
  @item{an association list of @racket[(name . column)] pairs;}
  @item{a hash from name to column;}
- @item{a @racket[design-matrix?] with column names, such as a frame
-       converted by an adapter.}
+ @item{a @racket[design-matrix?] with column names.}
 ]
 
 A name is a string or a symbol, and a column a list or vector of reals. Names
@@ -88,7 +88,8 @@ columns, such as an identifier or a label.
 A @tech{formula} is written with @racket[~], as R writes @tt{y ~ x1 + x2}:
 the response, then the predictor terms. @racket[~] quotes its body, so the
 column names are written as identifiers, or as strings when they are not
-identifiers:
+identifiers or are words of the formula language (@racket[all],
+@racket[surv], @racket[+] and @racket[-]):
 
 @examples[#:eval ev #:label #f
 (~ bp age dose)
