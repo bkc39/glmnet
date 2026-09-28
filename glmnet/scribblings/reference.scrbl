@@ -36,9 +36,10 @@ The fit procedures share their argument conventions:
 Before the solver runs, an argument of the wrong type raises
 @racket[exn:fail:contract], and rows or responses of mismatched length raise
 @racket[exn:fail]. A fatal condition reported by glmnet
-raises @racket[exn:fail] with a readable message. If the solver reaches
-@racket[#:max-iters] without converging, the fit returns partial coefficients
-and logs a warning.
+raises @racket[exn:fail] with a readable message. So does a fit for which
+glmnet fits no @math{λ} at all, for example because it does not converge within
+@racket[#:max-iters] passes; the message names the procedure called and gives
+glmnet's reason. (R warns instead, and returns an empty model.)
 
 @section[#:tag "ref-gaussian"]{Gaussian models}
 
@@ -75,10 +76,14 @@ fixed @racket[#:alpha]. See @secref["ex-ols"], @secref["ex-ridge"],
                     [#:max-iters max-iters exact-positive-integer? 100000])
          elnet-result?]{
   Fits a Gaussian elastic-net model of the response @racket[y], one real per
-  row of @racket[X], at a single @racket[lambda].
+  row of @racket[X], at a single @racket[lambda]. As in R, a constant
+  @racket[y] (all zero, when @racket[intercept?] is @racket[#f]) has nothing to
+  standardize and raises @racket[exn:fail]. The four models below call
+  @racket[elnet-fit], and its errors name the one called.
 
   @examples[#:eval ev
-  (elnet-fit X y #:alpha 0.5 #:lambda 0.5)]}
+  (elnet-fit X y #:alpha 0.5 #:lambda 0.5)
+  (eval:error (lasso X '(2.0 2.0 2.0 2.0 2.0 2.0) #:lambda 0.5))]}
 
 @defproc[(ols [X (and/c (listof (listof real?)) pair?)]
               [y (and/c (listof real?) pair?)]
@@ -213,8 +218,9 @@ labels. See @secref["ex-multinomial"].
             #:transparent]{
   A fitted @math{K}-class model. @racket[intercepts] holds one real per class
   and @racket[coefficients] one coefficient vector per class, each with one
-  entry per predictor. @racket[dev-ratio] is the fraction of null deviance
-  explained.
+  entry per predictor. The intercepts are determined only up to a common
+  shift, which the softmax absorbs; like R's @tt{coef}, they are centred to sum
+  to zero. @racket[dev-ratio] is the fraction of null deviance explained.
 
   @examples[#:eval ev
   (define X '((1.0 1.0) (2.0 1.0) (5.0 1.0) (6.0 1.0) (3.0 5.0) (4.0 6.0)))
@@ -346,10 +352,13 @@ The @tech{Poisson family}: counts with a log link. See @secref["ex-poisson"].
                       [#:max-iters max-iters exact-positive-integer? 100000])
          poisson-result?]{
   Fits a Poisson elastic-net model of the non-negative response @racket[y],
-  which need not be integral.
+  which need not be integral. At least one value must be positive; an all-zero
+  response raises @racket[exn:fail] before fitting (R warns and returns an
+  empty model).
 
   @examples[#:eval ev
-  (poisson-fit X y #:lambda 0.5)]}
+  (poisson-fit X y #:lambda 0.5)
+  (eval:error (poisson-fit X '(0 0 0 0 0 0 0 0) #:lambda 0.5))]}
 
 @defproc[(poisson-predict-mean [fit poisson-result?]
                                [X (and/c (listof (listof real?)) pair?)])
@@ -394,7 +403,10 @@ jointly under a grouped penalty. See @secref["ex-mgaussian"].
   Fits a multi-response Gaussian elastic-net model. @racket[Y] is a matrix with
   one row per observation and one column per response. With @racket[alpha]
   above zero, the grouped lasso keeps or drops each predictor for every
-  response at once.
+  response at once. A constant column is fitted by its intercept alone, but
+  when every column is constant (all zero, when @racket[intercept?] is
+  @racket[#f]) there is nothing to fit and the @exnraise[exn:fail], as for
+  @racket[elnet-fit].
 
   @examples[#:eval ev
   (mgaussian-fit X Y #:lambda 0.5)]}
@@ -421,12 +433,41 @@ made optional:
        @racket[#:nlambda] values from @math{λ_max}, where every coefficient is
        zero, down to @racket[#:lambda-min-ratio] times @math{λ_max}. The
        ratio defaults to @racket[0.01] when there are fewer observations than
-       predictors, and to @racket[1e-4] otherwise.}
- @item{Like R, the path stops early once the deviance ratio improves by less
-       than @racket[1e-5] or passes @racket[0.999], so it can hold fewer than
-       @racket[#:nlambda] values. The first value of an automatic sequence is
-       the extrapolation R's @tt{glmnet} reports.}
+       predictors, and to @racket[1e-4] otherwise; glmnet raises a ratio below
+       @racket[1e-6], including @racket[0], to @racket[1e-6]. The first value
+       of an automatic sequence is the extrapolation R's @tt{glmnet} reports.}
+ @item{A path can hold fewer @math{λ} than asked for, as in R. An automatic
+       sequence stops early once another @math{λ} would barely change the
+       fit; the rule depends on the family (below). A binomial or multinomial
+       path, automatic or not, stops where the fitted probabilities saturate
+       at 0 and 1. And any path ends where glmnet fails at one of its
+       @math{λ}, for example by not converging within @racket[#:max-iters]
+       passes: it keeps the @math{λ} before that one and logs a warning with
+       the topic @racket['glmnet] (shown with
+       @tt{PLTSTDERR="warning@"@"glmnet"}), where R warns. When glmnet fails at
+       the first @math{λ}, the fitter raises @racket[exn:fail] instead (R
+       returns an empty model).}
 ]
+
+glmnet's early-stopping rules apply only to an automatic sequence, and only
+from its fifth value on. It stops at the @math{λ} where, writing @math{D} for
+the deviance ratio:
+
+@itemlist[
+ @item{Gaussian: @math{D} gains less than @racket[1e-5] of its own value over
+       the previous @math{λ}, or exceeds @racket[0.999].}
+ @item{Multi-response Gaussian: the residual sum of squares falls by less than
+       @racket[1e-5] of its own value, or @math{D} exceeds @racket[0.999].}
+ @item{Binomial and multinomial: @math{D} gains less than @racket[1e-5] over
+       the previous @math{λ}, or exceeds @racket[0.999].}
+ @item{Poisson: @math{D} gains less than @racket[1e-4] of its own value over
+       the previous four @math{λ}, or exceeds @racket[0.999].}
+ @item{Cox: @math{D} gains less than @racket[1e-3] of its own value over the
+       previous four @math{λ}, or exceeds @racket[0.99].}
+]
+
+These are R's @tt{glmnet.control} defaults (@tt{fdev = 1e-5},
+@tt{devmax = 0.999}, @tt{mnlam = 5}) as each solver applies them.
 
 @defstruct*[glmnet-path ([family (or/c 'gaussian 'binomial 'multinomial 'cox 'poisson 'mgaussian)]
                          [lambda (vectorof real?)]
@@ -442,7 +483,9 @@ made optional:
   @itemlist[
    @item{@racket[intercepts] holds a real per @math{λ}, or a vector of one real
          per class or response for the multinomial and multi-response families.
-         It is @racket[#f] for Cox, which has no intercept.}
+         Multinomial intercepts are centred to sum to zero, as in
+         @racket[multinomial-result]. It is @racket[#f] for Cox, which has no
+         intercept.}
    @item{@racket[coefficients] holds a dense vector per @math{λ} with one entry
          per predictor, or a vector of such vectors (one per class or response).}
    @item{@racket[dev-ratio] is the fraction of null deviance explained.}
@@ -465,7 +508,7 @@ made optional:
                      [y (and/c (listof real?) pair?)]
                      [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) pair?)) #f]
                      [#:nlambda nlambda exact-positive-integer? 100]
-                     [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>/c 0) (</c 1))) #f]
+                     [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>=/c 0) (</c 1))) #f]
                      [#:alpha alpha (real-in 0 1) 1.0]
                      [#:standardize? standardize? boolean? #t]
                      [#:intercept? intercept? boolean? #t]
@@ -476,13 +519,15 @@ made optional:
 
   @examples[#:eval ev
   (vector-length (glmnet-path-lambda (elnet-path X y)))
-  (glmnet-path-df (elnet-path X y #:alpha 0.0 #:nlambda 5))]}
+  (glmnet-path-df (elnet-path X y #:alpha 0.0 #:nlambda 5))
+  (glmnet-path-lambda (elnet-path X y #:nlambda 5 #:lambda-min-ratio 0.1))
+  (eval:error (elnet-path X y #:lambda '(0.1) #:max-iters 1))]}
 
 @defproc[(logistic-path [X (and/c (listof (listof real?)) pair?)]
                         [y (and/c (listof (or/c 0 1)) pair?)]
                         [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) pair?)) #f]
                         [#:nlambda nlambda exact-positive-integer? 100]
-                        [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>/c 0) (</c 1))) #f]
+                        [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>=/c 0) (</c 1))) #f]
                         [#:alpha alpha (real-in 0 1) 1.0]
                         [#:standardize? standardize? boolean? #t]
                         [#:intercept? intercept? boolean? #t]
@@ -498,7 +543,7 @@ made optional:
                            [y (and/c (listof exact-nonnegative-integer?) pair?)]
                            [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) pair?)) #f]
                            [#:nlambda nlambda exact-positive-integer? 100]
-                           [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>/c 0) (</c 1))) #f]
+                           [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>=/c 0) (</c 1))) #f]
                            [#:alpha alpha (real-in 0 1) 1.0]
                            [#:standardize? standardize? boolean? #t]
                            [#:intercept? intercept? boolean? #t]
@@ -516,7 +561,7 @@ made optional:
                    [statuses (and/c (listof (or/c 0 1)) pair?)]
                    [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) pair?)) #f]
                    [#:nlambda nlambda exact-positive-integer? 100]
-                   [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>/c 0) (</c 1))) #f]
+                   [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>=/c 0) (</c 1))) #f]
                    [#:alpha alpha (real-in 0 1) 1.0]
                    [#:standardize? standardize? boolean? #t]
                    [#:thresh thresh (>/c 0) 1e-7]
@@ -534,7 +579,7 @@ made optional:
                        [y (and/c (listof (>=/c 0)) pair?)]
                        [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) pair?)) #f]
                        [#:nlambda nlambda exact-positive-integer? 100]
-                       [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>/c 0) (</c 1))) #f]
+                       [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>=/c 0) (</c 1))) #f]
                        [#:alpha alpha (real-in 0 1) 1.0]
                        [#:standardize? standardize? boolean? #t]
                        [#:intercept? intercept? boolean? #t]
@@ -550,7 +595,7 @@ made optional:
                          [Y (and/c (listof (listof real?)) pair?)]
                          [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) pair?)) #f]
                          [#:nlambda nlambda exact-positive-integer? 100]
-                         [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>/c 0) (</c 1))) #f]
+                         [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>=/c 0) (</c 1))) #f]
                          [#:alpha alpha (real-in 0 1) 1.0]
                          [#:standardize? standardize? boolean? #t]
                          [#:intercept? intercept? boolean? #t]

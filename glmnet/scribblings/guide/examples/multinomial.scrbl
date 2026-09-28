@@ -42,7 +42,9 @@ Only differences between the classes' linear predictors matter: adding the same
 vector to every class's coefficients leaves the softmax unchanged. glmnet
 resolves that ambiguity with the penalty, which prefers the smallest
 coefficients, so the class-0 and class-1 weights on @math{x₁} come out
-nearly equal and opposite rather than, say, zero and twice as large.
+nearly equal and opposite rather than, say, zero and twice as large. The
+intercepts are not penalized; as R's @tt{coef} does, the fit centres them to
+sum to zero.
 
 @section[#:tag "ex-multinomial-predict"]{Predicting}
 

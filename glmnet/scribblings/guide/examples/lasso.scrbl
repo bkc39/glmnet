@@ -51,8 +51,8 @@ To list the predictors a fit kept:
 @section[#:tag "ex-lasso-path"]{The selection path}
 
 @racket[elnet-path] fits a list of @math{λ} in one call, largest first
-(@secref["concepts-path"]). Read upward, each larger @math{λ} removes
-another predictor:
+(@secref["concepts-path"]). Read upward, raising @math{λ} removes predictors
+one at a time:
 
 @examples[#:eval ev #:label #f
 (define (round3 x)
