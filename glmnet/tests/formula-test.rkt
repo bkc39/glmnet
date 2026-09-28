@@ -10,6 +10,7 @@
 
 (module+ test
   (require rackunit
+           (only-in racket/contract exn:fail:contract:blame?)
            racket/generic
            racket/list
            syntax/macro-testing
@@ -41,8 +42,8 @@
 
   ;; --- equal to the matrix fits ------------------------------------------------
 
-  (define-syntax-rule (check-same formula-call matrix-call)
-    (check-equal? (formula-model-fit formula-call) matrix-call))
+  (define (check-same model matrix-fit)
+    (check-equal? (formula-model-fit model) matrix-fit))
 
   (test-case "Gaussian: the fit, path and CV of the matrix procedures"
     (define f (~ Employed all))
@@ -163,7 +164,13 @@
   (test-case "a column named after a word of the language is written as a string"
     (define t (list (cons "all" '(1 2 3)) (cons "surv" '(3 1 2)) (cons "+" '(0 1 0))))
     (check-equal? (formula-predictor-names (~ "all" "surv" "+") t) '("surv" "+"))
-    (check-equal? (formula-predictor-names (~ "all" all) t) '("surv" "+")))
+    (check-equal? (formula-predictor-names (~ "all" all) t) '("surv" "+"))
+    (check-exn #rx"~: all is a word of the formula language; write a column with this name as a string, \"all\""
+               (lambda () (convert-compile-time-error (~ all x))))
+    (check-exn #rx"~: surv is a word of the formula language.*\"surv\""
+               (lambda () (convert-compile-time-error (~ y a surv))))
+    (check-exn #rx"~: [+] is a word of the formula language.*\"[+]\""
+               (lambda () (convert-compile-time-error (~ + x)))))
 
   (test-case "errors: unknown columns, the response as a predictor, nothing selected"
     (define (names f) (formula-predictor-names f letters))
@@ -187,7 +194,6 @@
     (check-exn #rx"expected one of these literal symbols"
                (lambda () (convert-compile-time-error (~ y (* a b)))))
     (check-exn #rx"expected more terms" (lambda () (convert-compile-time-error (~ y (- all)))))
-    (check-exn #rx"expected a column name" (lambda () (convert-compile-time-error (~ all x))))
     (check-exn #rx"expected more terms starting with a column name"
                (lambda () (convert-compile-time-error (~ (surv t) all))))
     (check-exn #rx"expected a predictor term"
@@ -197,16 +203,39 @@
     (check-exn exn:fail:contract? (lambda () (make-formula '(surv t) 'x)))
     (check-exn exn:fail:contract? (lambda () (make-formula 'y))))
 
-  (test-case "the response must suit the family"
-    (check-exn #rx"Cox family needs a \\(surv time status\\) response"
+  ;; A contract error that blames the caller, with a message matching rx.
+  (define ((blame-matching rx) e)
+    (and (exn:fail:contract:blame? e) (regexp-match? rx (exn-message e))))
+
+  (test-case "the form of the response must suit #:family, a contract on the formula"
+    (check-exn (blame-matching
+                #rx"formula-fit: contract violation;\n the Cox family needs a \\(surv time status\\) response\n  expected: a formula with a \\(surv time status\\) response, for the cox family\n  given: \\(~ time all\\)\n  in: the f argument")
                (lambda () (formula-fit (~ time all) veteran #:family 'cox #:lambda 0.1)))
-    (check-exn #rx"\\(surv time status\\) response is for the Cox family"
-               (lambda () (formula-fit (~ (surv time status) all) veteran #:lambda 0.1)))
-    (check-exn #rx"\\(surv time status\\) response is for the Cox family"
-               (lambda () (formula-fit (~ (surv time status) all) veteran #:family 'mgaussian
+    (check-exn (blame-matching
+                #rx"formula-path: .*\\(surv time status\\) response is for the Cox family.*for the gaussian family")
+               (lambda () (formula-path (~ (surv time status) all) veteran)))
+    (check-exn (blame-matching #rx"formula-cv: .*\\(surv time status\\) response is for the Cox family")
+               (lambda () (formula-cv (~ (surv time status) all) veteran #:family 'mgaussian)))
+    (check-exn (blame-matching
+                #rx"several columns is for the mgaussian family.*for the binomial family")
+               (lambda () (formula-fit (~ (weight waist) all) linnerud #:family 'binomial
                                        #:lambda 0.1)))
-    (check-exn #rx"several columns is for the mgaussian family"
-               (lambda () (formula-fit (~ (weight waist) all) linnerud #:lambda 0.1)))
+    (check-exn (blame-matching #rx"expected: formula\\?\n  given: '\\(~ y all\\)")
+               (lambda () (formula-fit '(~ y all) linnerud #:lambda 0.1)))
+    (check-exn (blame-matching #rx"in: the family argument")
+               (lambda () (formula-fit (~ y a) letters #:family 'logistic #:lambda 0.1))))
+
+  (test-case "the type measure must be one of the family's, a contract on #:type-measure"
+    (check-exn (blame-matching
+                #rx"formula-cv: contract violation;\n the gaussian family has no such type measure\n  expected: #f or one of '\\(mse deviance mae\\)\n  given: 'auc\n  in: the type-measure argument")
+               (lambda () (formula-cv (~ Employed all) longley #:type-measure 'auc)))
+    (check-exn (blame-matching #rx"the binomial family has no such type measure.*given: 'C")
+               (lambda () (formula-cv (~ diagnosis all) wdbc #:family 'binomial #:type-measure 'C)))
+    (check-exn (blame-matching #rx"the cox family has no such type measure.*given: 'auc")
+               (lambda () (formula-cv (~ (surv time status) all) veteran #:family 'cox
+                                      #:type-measure 'auc))))
+
+  (test-case "the response values must suit the family"
     (check-exn #rx"binomial response must be 0 or 1.*column: \"y\".*row: 1.*value: 2.0"
                (lambda () (formula-fit (~ y a b) letters #:family 'binomial #:lambda 0.1)))
     (check-exn #rx"multinomial response must be a class label.*column: \"x\""
@@ -221,11 +250,34 @@
                (lambda () (formula-fit (~ (surv y c) a) letters #:family 'cox #:lambda 0.1)))
     (check-exn #rx"different lengths"
                (lambda () (formula-fit (~ y a) (list (cons "y" '(1 2)) (cons "a" '(1 2 3)))
-                                       #:lambda 0.1)))
-    (check-exn #rx"no such type measure.*'auc"
-               (lambda () (formula-cv (~ Employed all) longley #:type-measure 'auc)))
-    (check-exn exn:fail:contract?
-               (lambda () (formula-fit (~ y a) letters #:family 'logistic #:lambda 0.1))))
+                                       #:lambda 0.1))))
+
+  (define (labelled labels)
+    (list (cons "k" labels) (cons "a" '(1 2 3 4 5 6)) (cons "b" '(2 1 4 3 6 5))))
+
+  (test-case "multinomial class labels run from 0 with none missing, checked by name"
+    (check-exn #rx"formula-fit: a multinomial response must use every class label from 0 to its largest\n  column: \"k\"\n  missing label: 0\n  largest label: 3"
+               (lambda () (formula-fit (~ k a b) (labelled '(1 2 3 1 2 3))
+                                       #:family 'multinomial #:lambda 0.1)))
+    (check-exn #rx"formula-path: .*every class label.*missing label: 1\n  largest label: 2"
+               (lambda () (formula-path (~ k a b) (labelled '(0 2 0 2 0 2)) #:family 'multinomial)))
+    (check-exn #rx"formula-cv: .*every class label.*missing label: 2\n  largest label: 1000000000000"
+               (lambda () (formula-cv (~ k a b) (labelled '(0 1 0 1 0 1e12)) #:family 'multinomial)))
+    (check-exn #rx"formula-fit: a multinomial response needs at least two classes\n  column: \"k\""
+               (lambda () (formula-fit (~ k a b) (labelled '(0 0 0 0 0 0))
+                                       #:family 'multinomial #:lambda 0.1))))
+
+  (test-case "an error from the family's procedure names the formula procedure"
+    (check-exn #rx"^formula-cv: fold-ids does not have one entry per row of the table\n  length of fold-ids: 3\n  rows of the table: 6"
+               (lambda () (formula-cv (~ k a b) (labelled '(0 1 0 1 1 1)) #:fold-ids '(0 1 2))))
+    (check-exn #rx"^formula-fit: at least one observation must be an event"
+               (lambda () (formula-fit (~ (surv a k) b) (labelled '(0 0 0 0 0 0))
+                                       #:family 'cox #:lambda 0.1)))
+    (define constant (list (cons "y" '(1 2 3 4 5 6)) (cons "k" '(1 1 1 1 1 1))))
+    (check-exn #rx"^formula-path: all used predictors have zero variance"
+               (lambda () (formula-path (~ y k) constant #:lambda '(0.1))))
+    (check-exn #rx"^formula-cv: .*all used predictors have zero variance"
+               (lambda () (formula-cv (~ y k) constant #:nfolds 3))))
 
   ;; --- name-keyed results -----------------------------------------------------------
 

@@ -1164,7 +1164,8 @@ A formula selects its columns from a table as follows:
 
 Names are compared as strings. A column whose name is @racket[all],
 @racket[surv], @racket[+] or @racket[-] is written as a string, such as
-@racket["all"].
+@racket["all"]; written as an identifier, the name is a syntax error that
+says so.
 
 The examples in this section use the 60 observations of
 @secref["ref-cv"] as a table, with the response @racket["y"] and the
@@ -1205,7 +1206,8 @@ predictors @racket["x1"] to @racket["x8"]:
   (~ (surv time status) age "blood pressure")
   (formula? (~ y x1 x2))
   (eval:error (~ y))
-  (eval:error (~ y (* x1 x2)))]}
+  (eval:error (~ y (* x1 x2)))
+  (eval:error (~ y x1 surv))]}
 
 @defthing[formula-term/c flat-contract?]{
   Accepts a predictor term as data, as @racket[~] quotes it: a column name
@@ -1308,12 +1310,16 @@ predictors @racket["x1"] to @racket["x8"]:
   @racket[mgaussian-fit]. The keywords are passed on to it; the Cox family has
   no intercept, so @racket[intercept?] does not apply to it.
 
-  The response must suit the family: @racket[(surv time status)] for the Cox
-  family, one or more columns for the multi-response family, and one column
-  otherwise. Its values must be ones the family models: 0 or 1 for the
-  binomial family, a class label @math{0, 1, …} for the multinomial family,
-  non-negative for the Poisson family, and for the Cox family positive times
-  and 0/1 statuses. An error names the column and row of a value that is not.
+  The response of @racket[f] must suit @racket[family], which the contract on
+  @racket[f] checks: @racket[(surv time status)] for the Cox family, one or
+  more columns for the multi-response family, and one column otherwise. Its
+  values must be ones the family models: 0 or 1 for the binomial family, class
+  labels @math{0, 1, …, K−1} with @math{K ≥ 2} and every class present for the
+  multinomial family, non-negative for the Poisson family, and for the Cox
+  family positive times and 0/1 statuses. An error names the column, and
+  either the row of a value the family does not model or the missing class
+  label.
+  An error that the family's procedure raises names @racket[formula-fit].
 
   @examples[#:eval ev
   (define fit (formula-fit (~ y all) T60 #:lambda 0.2 #:alpha 0.5))
@@ -1328,7 +1334,12 @@ predictors @racket["x1"] to @racket["x8"]:
   (formula-fit (~ positive (- all y)) T60b
                #:family 'binomial #:lambda 0.05)
   (eval:error (formula-fit (~ y all) T60 #:family 'binomial #:lambda 0.05))
-  (eval:error (formula-fit (~ y all) T60 #:family 'cox #:lambda 0.05))]}
+  (eval:error (formula-fit (~ y all) T60 #:family 'cox #:lambda 0.05))
+  (define T60c
+    (cons (cons "class" (for/list ([v (in-list y60)]) (if (> v 1) 2 0)))
+          T60))
+  (eval:error (formula-fit (~ class (- all y)) T60c
+                           #:family 'multinomial #:lambda 0.05))]}
 
 @defproc[(formula-path [f formula?]
                        [table table?]
@@ -1346,7 +1357,8 @@ predictors @racket["x1"] to @racket["x8"]:
          formula-model?]{
   Fits the @tech{regularization path} of @racket[f] on @racket[table], with the
   path fitter of @racket[family], such as @racket[elnet-path], to which the
-  keywords are passed. The response is as for @racket[formula-fit].
+  keywords are passed. The response is as for @racket[formula-fit], and an
+  error that the path fitter raises names @racket[formula-path].
 
   @examples[#:eval ev
   (define path
@@ -1375,8 +1387,11 @@ predictors @racket["x1"] to @racket["x8"]:
   Cross-validates the path of @racket[f] on @racket[table] with the
   cross-validation procedure of @racket[family], such as @racket[elnet-cv], to
   which the keywords are passed. @racket[type-measure] must be one of the
-  family's measures (see @secref["ref-cv"]); @racket[#f], the default, is the
-  family's default. The response is as for @racket[formula-fit].
+  family's measures (see @secref["ref-cv"]), which the contract on it checks;
+  @racket[#f], the default, is the family's default. @racket[fold-ids] needs
+  one entry per row of @racket[table]. The response is as for
+  @racket[formula-fit], and an error that the cross-validation procedure
+  raises names @racket[formula-cv].
 
   @examples[#:eval ev
   (define cv-model (formula-cv (~ y all) T60 #:nfolds 5))

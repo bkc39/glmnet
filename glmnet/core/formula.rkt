@@ -24,7 +24,8 @@
          "path.rkt"
          (submod "path.rkt" support)
          "cv.rkt"
-         (only-in (submod "cv.rkt" support) write-cv)
+         (only-in (submod "cv.rkt" support)
+                  nfolds/c fold-ids/c cv-lambda-sequence/c write-cv)
          "elnet.rkt"
          "lognet.rkt"
          "multinomial.rkt"
@@ -36,7 +37,11 @@
                   design-matrix-nrows column-name->string table-names select-table-columns))
 
 (define family/c (or/c 'gaussian 'binomial 'multinomial 'poisson 'cox 'mgaussian))
-(define measure/c (or/c #f 'mse 'deviance 'mae 'class 'auc 'C))
+
+;; A formula procedure's #:family, 'gaussian when it is not given, for the
+;; contracts that depend on it.
+(define (family-argument family)
+  (if (unsupplied-arg? family) 'gaussian family))
 
 (provide
  ~
@@ -53,42 +58,46 @@
   [formula-model-predictor-names (-> formula-model? (listof string?))]
   [formula-model-fit (-> formula-model? glmnet-model?)]
   [formula-fit
-   (->* (formula? table? #:lambda (>=/c 0))
-        (#:family family/c
-         #:alpha (real-in 0 1)
-         #:standardize? boolean?
-         #:intercept? boolean?
-         #:thresh (>/c 0)
-         #:max-iters exact-positive-integer?)
-        formula-model?)]
+   (->i ([f (family) (formula-for/c (family-argument family))]
+         [table table?]
+         #:lambda [lambda (>=/c 0)])
+        (#:family [family family/c]
+         #:alpha [alpha (real-in 0 1)]
+         #:standardize? [standardize? boolean?]
+         #:intercept? [intercept? boolean?]
+         #:thresh [thresh (>/c 0)]
+         #:max-iters [max-iters exact-positive-integer?])
+        [result formula-model?])]
   [formula-path
-   (->* (formula? table?)
-        (#:family family/c
-         #:lambda (or/c #f (and/c (listof (>=/c 0)) pair?))
-         #:nlambda exact-positive-integer?
-         #:lambda-min-ratio (or/c #f (and/c real? (>/c 0) (</c 1)))
-         #:alpha (real-in 0 1)
-         #:standardize? boolean?
-         #:intercept? boolean?
-         #:thresh (>/c 0)
-         #:max-iters exact-positive-integer?)
-        formula-model?)]
+   (->i ([f (family) (formula-for/c (family-argument family))]
+         [table table?])
+        (#:family [family family/c]
+         #:lambda [lambda lambda-sequence/c]
+         #:nlambda [nlambda exact-positive-integer?]
+         #:lambda-min-ratio [lambda-min-ratio lambda-min-ratio/c]
+         #:alpha [alpha (real-in 0 1)]
+         #:standardize? [standardize? boolean?]
+         #:intercept? [intercept? boolean?]
+         #:thresh [thresh (>/c 0)]
+         #:max-iters [max-iters exact-positive-integer?])
+        [result formula-model?])]
   [formula-cv
-   (->* (formula? table?)
-        (#:family family/c
-         #:type-measure measure/c
-         #:nfolds (and/c exact-integer? (>=/c 3))
-         #:fold-ids (or/c #f (and/c (listof exact-nonnegative-integer?) pair?))
-         #:grouped? boolean?
-         #:lambda (or/c #f (and/c (listof (>=/c 0)) (property/c length (>=/c 2))))
-         #:nlambda exact-positive-integer?
-         #:lambda-min-ratio (or/c #f (and/c real? (>/c 0) (</c 1)))
-         #:alpha (real-in 0 1)
-         #:standardize? boolean?
-         #:intercept? boolean?
-         #:thresh (>/c 0)
-         #:max-iters exact-positive-integer?)
-        formula-model?)]))
+   (->i ([f (family) (formula-for/c (family-argument family))]
+         [table table?])
+        (#:family [family family/c]
+         #:type-measure [type-measure (family) (type-measure/c (family-argument family))]
+         #:nfolds [nfolds nfolds/c]
+         #:fold-ids [fold-ids fold-ids/c]
+         #:grouped? [grouped? boolean?]
+         #:lambda [lambda cv-lambda-sequence/c]
+         #:nlambda [nlambda exact-positive-integer?]
+         #:lambda-min-ratio [lambda-min-ratio lambda-min-ratio/c]
+         #:alpha [alpha (real-in 0 1)]
+         #:standardize? [standardize? boolean?]
+         #:intercept? [intercept? boolean?]
+         #:thresh [thresh (>/c 0)]
+         #:max-iters [max-iters exact-positive-integer?])
+        [result formula-model?])]))
 
 ;; --- formulas ------------------------------------------------------------------
 
@@ -131,7 +140,10 @@
 (begin-for-syntax
   (define-syntax-class column
     #:description "a column name"
-    (pattern name:id #:when (not (memq (syntax-e #'name) reserved)))
+    (pattern name:id
+             #:fail-when (and (memq (syntax-e #'name) reserved) #'name)
+             (format "~a is a word of the formula language; write a column with this name as a string, ~s"
+                     (syntax-e #'name) (symbol->string (syntax-e #'name))))
     (pattern name:str))
 
   (define-syntax-class term
@@ -250,23 +262,57 @@
 
 ;; The response form the family needs: a (surv time status) response for Cox,
 ;; one or more columns for the multi-response family, one column otherwise.
-(define (check-response-form who f family-name)
+;; Returns what is wrong with f's response, or #f.
+(define (response-form-problem f family-name)
   (define form
     (match (formula-response f)
       [(list 'surv _ _) 'surv]
       [(? list?) 'columns]
       [_ 'column]))
-  (define problem
-    (case family-name
-      [(cox) (and (not (eq? form 'surv)) "the Cox family needs a (surv time status) response")]
-      [(mgaussian) (and (eq? form 'surv) "a (surv time status) response is for the Cox family")]
-      [else
-       (case form
-         [(surv) "a (surv time status) response is for the Cox family"]
-         [(columns) "a response of several columns is for the mgaussian family"]
-         [else #f])]))
-  (when problem
-    (raise-arguments-error who problem "family" family-name "formula" f)))
+  (case family-name
+    [(cox) (and (not (eq? form 'surv)) "the Cox family needs a (surv time status) response")]
+    [(mgaussian) (and (eq? form 'surv) "a (surv time status) response is for the Cox family")]
+    [else
+     (case form
+       [(surv) "a (surv time status) response is for the Cox family"]
+       [(columns) "a response of several columns is for the mgaussian family"]
+       [else #f])]))
+
+;; A formula whose response suits the family.
+(define (formula-for/c family-name)
+  (define expected
+    (format "a formula with ~a, for the ~a family"
+            (case family-name
+              [(cox) "a (surv time status) response"]
+              [(mgaussian) "a response of one or more columns"]
+              [else "a response of one column"])
+            family-name))
+  (flat-contract-with-explanation
+   (lambda (f)
+     (cond
+       [(not (formula? f))
+        (lambda (blame) (raise-blame-error blame f '(expected: "formula?" given: "~e") f))]
+       [(response-form-problem f family-name)
+        => (lambda (problem)
+             (lambda (blame)
+               (raise-blame-error blame f (list problem 'expected: "~a" 'given: "~e")
+                                  expected f)))]
+       [else #t]))
+   #:name 'formula?))
+
+;; #f, for the family's default, or one of the family's type measures.
+(define (type-measure/c family-name)
+  (define measures (family-measures (hash-ref families family-name)))
+  (flat-contract-with-explanation
+   (lambda (measure)
+     (or (not measure)
+         (and (memq measure measures) #t)
+         (lambda (blame)
+           (raise-blame-error blame measure
+                              (list (format "the ~a family has no such type measure" family-name)
+                                    'expected: "#f or one of ~e" 'given: "~e")
+                              measures measure))))
+   #:name (list* 'or/c #f measures)))
 
 ;; Checks that every value of a response column satisfies `ok?`.
 (define (check-values who column values ok? problem)
@@ -277,10 +323,26 @@
 
 (define (zero-or-one? v) (or (= v 0.0) (= v 1.0)))
 
+;; The labels of a multinomial response, 0, 1, ..., K - 1 with every class
+;; present and K >= 2, as multinomial-fit needs them.
+(define (check-class-labels who column labels)
+  (define present (for/hasheqv ([label (in-list labels)]) (values label #t)))
+  (define largest (apply max labels))
+  (define missing
+    (for/first ([label (in-naturals)]
+                #:unless (hash-ref present label #f))
+      label))
+  (cond
+    [(zero? largest)
+     (raise-arguments-error who "a multinomial response needs at least two classes"
+                            "column" column)]
+    [(< missing largest)
+     (raise-arguments-error who "a multinomial response must use every class label from 0 to its largest"
+                            "column" column "missing label" missing "largest label" largest)]))
+
 ;; The design matrix of predictors and the response arguments of the family's
 ;; procedures, from the table: R's model.frame and model.response.
 (define (model-frame who f table family-name)
-  (check-response-form who f family-name)
   (define columns (table-names table who))
   (define x (select-table-columns table (resolve-predictors who f columns) who))
   (define responses (response-columns f))
@@ -302,7 +364,9 @@
      [(multinomial)
       (check-values who column y1 (lambda (v) (and (integer? v) (>= v 0.0)))
                     "a multinomial response must be a class label 0, 1, ...")
-      (list (map inexact->exact y1))]
+      (define labels (map inexact->exact y1))
+      (check-class-labels who column labels)
+      (list labels)]
      [(poisson)
       (check-values who column y1 (lambda (v) (>= v 0.0)) "a Poisson response must be non-negative")
       (list y1)]
@@ -314,16 +378,44 @@
 
 ;; Fits the formula with the family procedure that `select` picks, passing
 ;; `options`, an association list from keyword to value, as keyword arguments.
+;; A #:fold-ids option must have one entry per row of the table.
 (define (fit-formula who select f table family-name options)
   (define spec (hash-ref families family-name))
   (define-values (x responses) (model-frame who f table family-name))
+  (define fold-ids (cond [(assq '#:fold-ids options) => cdr] [else #f]))
+  (when (and fold-ids (not (= (length fold-ids) (design-matrix-nrows x))))
+    (raise-arguments-error who "fold-ids does not have one entry per row of the table"
+                           "length of fold-ids" (length fold-ids)
+                           "rows of the table" (design-matrix-nrows x)))
   (define kws
     (sort (if (family-intercept? spec)
               options
               (filter (lambda (kw) (not (eq? (car kw) '#:intercept?))) options))
           keyword<? #:key car))
   (formula-model f (design-matrix-column-names x)
-                 (keyword-apply (select spec) (map car kws) (map cdr kws) (cons x responses))))
+                 (as-formula-procedure who spec
+                   (lambda ()
+                     (keyword-apply (select spec) (map car kws) (map cdr kws)
+                                    (cons x responses))))))
+
+;; The value of thunk, which calls one of the family's procedures. An error
+;; that the family's procedures raise in their own name is raised again in the
+;; name of `who`, the formula procedure that was called.
+(define (as-formula-procedure who spec thunk)
+  (define names
+    (map (lambda (proc) (symbol->string (object-name proc)))
+         (list (family-fit spec) (family-path spec) (family-cv spec))))
+  (define (family-error? e)
+    (and (exn:fail? e)
+         (not (exn:fail:contract:blame? e))
+         (let ([m (regexp-match #rx"^([^ :]+): " (exn-message e))])
+           (and m (member (cadr m) names) #t))))
+  (define (rename e)
+    (define message
+      (regexp-replace #rx"^[^ :]+: " (exn-message e) (lambda (_) (format "~a: " who))))
+    ((if (exn:fail:contract? e) exn:fail:contract exn:fail) message (exn-continuation-marks e)))
+  (with-handlers ([family-error? (lambda (e) (raise (rename e)))])
+    (thunk)))
 
 (define (formula-fit f table
                      #:family [family-name 'gaussian]
@@ -375,12 +467,8 @@
                     #:intercept? [intercept? #t]
                     #:thresh [thresh 1e-7]
                     #:max-iters [max-iters 100000])
-  (define who 'formula-cv)
   (define measures (family-measures (hash-ref families family-name)))
-  (when (and measure (not (memq measure measures)))
-    (raise-arguments-error who "the family has no such type measure"
-                           "type measure" measure "family" family-name "type measures" measures))
-  (fit-formula who family-cv f table family-name
+  (fit-formula 'formula-cv family-cv f table family-name
                (list (cons '#:type-measure (or measure (car measures)))
                      (cons '#:nfolds nfolds)
                      (cons '#:fold-ids fold-ids)
