@@ -686,11 +686,12 @@
   (and levels (vector-ref levels i)))
 
 ;; Each factor of the terms and its levels, as (label level ...), in the order
-;; of the variables: R's xlevels.
+;; of the variables: R's xlevels, which leave out the response, even in an
+;; interaction.
 (define (model-terms-factor-levels mt)
   (for/list ([v (in-vector (model-terms-variables mt))]
              [i (in-naturals)]
-             #:when (levels-of mt i))
+             #:when (and (>= i (model-terms-response-count mt)) (levels-of mt i)))
     (cons (variable-label v) (levels-of mt i))))
 
 ;; The coding of each variable of each term in the design matrix: R's

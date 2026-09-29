@@ -693,19 +693,29 @@ formula_fixtures <- list(
   list(id = "formula-cars-binomial-string", dataset = "cars", family = "binomial", r = "gearbox ~ wt + qsec",
        rkt = c("(gearbox . ~ . wt + qsec)"), lambda = c(0.2, 0.05, 0.02, 0.01)),
   list(id = "formula-cars-binomial-logical", dataset = "cars", family = "binomial", r = "heavy ~ hp + qsec",
-       rkt = c("(heavy . ~ . hp + qsec)"), lambda = c(0.2, 0.05, 0.02, 0.01))
+       rkt = c("(heavy . ~ . hp + qsec)"), lambda = c(0.2, 0.05, 0.02, 0.01)),
+  ## The response in an interaction is kept, and xlevels leave it out.
+  list(id = "formula-iris-response-interaction", dataset = "iris", family = "multinomial",
+       r = "Species ~ Sepal.Length:Species",
+       rkt = c("(Species . ~ . Sepal.Length : Species)"), lambda = c(0.2, 0.05, 0.02, 0.005)),
+  list(id = "formula-cars-logical-response-interaction", dataset = "cars", family = "binomial",
+       r = "heavy ~ hp + hp:heavy",
+       rkt = c("(heavy . ~ . hp + hp : heavy)"), lambda = c(0.2, 0.1, 0.05, 0.02))
 )
 
 ## The levels of the factors of the terms, in the order of the variables:
-## R's xlevels, and FALSE and TRUE for a logical variable, which R codes as a
-## factor with those levels.
+## R's xlevels (.getXlevels, which leaves out the response, even in an
+## interaction), and FALSE and TRUE for a logical variable other than the
+## response, which R codes as a factor with those levels but leaves out of
+## xlevels.
 factor_levels <- function(tt, mf) {
   fac <- attr(tt, "factors")
+  xlev <- .getXlevels(tt, mf)
+  response <- if (attr(tt, "response") > 0) rownames(fac)[attr(tt, "response")] else ""
   out <- list()
   for (v in rownames(fac)[rowSums(fac) > 0]) {
-    x <- mf[[v]]
-    lv <- if (is.factor(x)) levels(x) else if (is.character(x)) levels(factor(x))
-          else if (is.logical(x)) c("FALSE", "TRUE") else NULL
+    lv <- if (v %in% names(xlev)) xlev[[v]]
+          else if (is.logical(mf[[v]]) && v != response) c("FALSE", "TRUE") else NULL
     if (!is.null(lv)) out[[length(out) + 1]] <- list(name = v, levels = I(lv))
   }
   out

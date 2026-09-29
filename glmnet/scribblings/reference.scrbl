@@ -1680,9 +1680,9 @@ Trend road tests, and R's @tt{iris}, 150 irises of three species, which
   The levels of @racket[m]'s factors, as R's @tt{xlevels}: for each variable of
   its terms that is a factor, in the order the variables first appear in the
   formula, a list of its name and the labels of its levels, the baseline
-  first. A boolean variable has the levels @racket["FALSE"] and
-  @racket["TRUE"], which R's @tt{xlevels} leaves out. @racket[predict] codes
-  new data with these levels.
+  first. A response column in an interaction is left out, as in R. A boolean
+  variable has the levels @racket["FALSE"] and @racket["TRUE"], which R's
+  @tt{xlevels} leaves out. @racket[predict] codes new data with these levels.
 
   @examples[#:eval ev
   (formula-model-levels

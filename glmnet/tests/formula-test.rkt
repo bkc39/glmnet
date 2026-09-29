@@ -944,6 +944,18 @@
     (check-equal? (formula-model-levels m)
                   '(("(factor cyl)" "4" "6" "8") ("(> hp 150)" "FALSE" "TRUE")))
     (check-equal? (formula-model-levels (formula-fit (~ mpg wt) mtcars #:lambda 0.1)) '())
+    ;; R's xlevels leave out the response, even in an interaction: R's
+    ;; .getXlevels of Species ~ Sepal.Length:Species is an empty list.
+    (define response-in-interaction
+      (formula-fit (~ Species (: Sepal.Length Species)) iris-species
+                   #:family 'multinomial #:lambda 0.05))
+    (check-equal? (formula-model-predictor-names response-in-interaction)
+                  '("Speciessetosa:Sepal.Length" "Speciesversicolor:Sepal.Length"
+                    "Speciesvirginica:Sepal.Length"))
+    (check-equal? (formula-model-levels response-in-interaction) '())
+    (check-equal? (formula-model-levels
+                   (formula-fit (flag . ~ . x + x : flag) kinds #:family 'binomial #:lambda 0.1))
+                  '())
     ;; New data with some of the levels, 8.0 the level 8.
     (define new (list (cons "cyl" '(8.0 4)) (cons "hp" '(100 200)) (cons "wt" '(3.0 2.5))))
     (check-equal? (predict m new) (predict (formula-model-fit m) '((3.0 0 1 0) (2.5 0 0 1))))
