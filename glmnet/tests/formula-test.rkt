@@ -903,6 +903,42 @@
                   '("(factor (quotient hp 100))1" "(factor (quotient hp 100))2"
                     "(factor (quotient hp 100))3")))
 
+  (test-case "a transform reads a column of strings, symbols or booleans as its values, as R's calls do"
+    ;; R: y ~ I(group == "a"), with group a character column
+    (check-equal? (kinds-names (~ y (equal? group "a"))) '("(equal? group \"a\")TRUE"))
+    (check-equal? (hash-ref (kinds-columns (~ y (equal? group "a"))) "(equal? group \"a\")TRUE")
+                  '(0.0 1.0 0.0 1.0 0.0 0.0))
+    ;; R: y ~ I(!flag) and y ~ I(flag * x), with flag a logical column
+    (check-equal? (hash-ref (kinds-columns (~ y (not flag))) "(not flag)TRUE")
+                  '(0.0 1.0 0.0 0.0 1.0 1.0))
+    (check-equal? (hash-ref (kinds-columns (~ y (if flag x 0))) "(if flag x 0)")
+                  '(0.5 0.0 1.0 2.5 0.0 0.0))
+    ;; R: y ~ factor(toupper(group))
+    (check-equal? (kinds-names (~ y (factor (string-upcase group))))
+                  '("(factor (string-upcase group))B" "(factor (string-upcase group))C"))
+    ;; Symbols are symbols, and a column of numbers is flonums.
+    (check-equal? (kinds-names (~ y (symbol->string tag))) '("(symbol->string tag)b" "(symbol->string tag)c"))
+    (define seen '())
+    (define peek (transform-term "peek" '(code group) (lambda (c g) (set! seen (cons (list c g) seen)) c)))
+    (formula-design-matrix (make-formula 'y peek) kinds)
+    (check-equal? (take (reverse seen) 6)
+                  '((3.0 "b") (1.0 "a") (2.0 "c") (1.0 "a") (3.0 "b") (2.0 "c")))
+    ;; predict reads the new table's columns in the same way.
+    (define m (formula-fit (~ y x (not flag)) kinds #:lambda 0.01))
+    (check-equal? (predict m (list (cons "x" '(1.0 2.0)) (cons "flag" '(#f #t))))
+                  (predict (formula-model-fit m) '((1.0 1) (2.0 0))))
+    ;; A column of one kind of value, and numbers finite, or an error names the
+    ;; transform and the column.
+    (define (with-g g) (list (cons "y" '(1 2 3)) (cons "g" g)))
+    (check-exn #rx"^formula-fit: a transform reads a column that mixes numbers with strings or symbols\n  transform: \"\\(abs g\\)\"\n  column: \"g\"\n  row: 2\n  element: \"b\""
+               (lambda () (formula-fit (~ y (abs g)) (with-g '(1 2 "b")) #:lambda 0.1)))
+    (check-exn #rx"^formula-design-matrix: a transform reads a column with an element that is not a real number, a string, a symbol or a boolean\n  transform: \"\\(abs g\\)\"\n  column: \"g\"\n  row: 1\n  element: #\\\\a"
+               (lambda () (formula-design-matrix (~ y (abs g)) (with-g '(1 #\a 2)))))
+    (check-exn #rx"^formula-design-matrix: a transform reads a column with an element that is not finite\n  transform: \"\\(abs g\\)\"\n  column: \"g\"\n  row: 1\n  element: \\+inf.0"
+               (lambda () (formula-design-matrix (~ y (abs g)) (with-g '(1 +inf.0 2)))))
+    (check-exn #rx"^formula-design-matrix: a transform raised an exception\n  transform: \"\\(log group\\)\"\n  row: 0\n  exception: \n   log: contract violation\n     expected: number\\?\n     given: \"b\""
+               (lambda () (formula-design-matrix (~ y (log group)) kinds))))
+
   (test-case "the model keeps its factors' levels, and predict codes new data with them"
     (define m (formula-fit (mpg . ~ . wt + (factor cyl) + (> hp 150)) mtcars #:lambda 0.1))
     (check-equal? (formula-model-levels m)

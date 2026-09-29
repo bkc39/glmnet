@@ -273,11 +273,11 @@
 
 ;; The value of variable v in each row, a vector of `no` values: `column`
 ;; gives the values of the table's column of a name, and `flonums` those
-;; values as flonums, which a transform reads.
+;; values as flonums, which a transform reads from a column of numbers.
 (define (variable-values who v column flonums no)
   (match v
     [(column-variable name) (column name)]
-    [(transform-variable t names) (transform-values who t names flonums no)]
+    [(transform-variable t names) (transform-values who t names column flonums no)]
     [(factor-variable source) (variable-values who source column flonums no)]))
 
 ;; The values `vs` of a numeric variable v as an flvector. A column's must be
@@ -299,11 +299,11 @@
     [(factor-variable source) (variable-flonums who source vs)]))
 
 ;; The value of each row of transform t, whose names read the columns
-;; `names`, as flonums, or their Racket bindings where a name is #f. The
-;; bindings are read each time, as R reads them each time it evaluates the
-;; formula; a binding that is not defined, at the top level, counts as none.
-;; An error in the transform names it and the row.
-(define (transform-values who t names flonums no)
+;; `names` (transform-input), or their Racket bindings where a name is #f.
+;; The bindings are read each time, as R reads them each time it evaluates
+;; the formula; a binding that is not defined, at the top level, counts as
+;; none. An error in the transform names it and the row.
+(define (transform-values who t names column flonums no)
   (match-define (transform-term label _ proc) t)
   (define fallbacks
     (match t
@@ -312,13 +312,16 @@
   (define arguments
     (for/list ([name (in-list names)] [fallback (in-list fallbacks)])
       (cond
-        [name (flonums name)]
+        [name (transform-input who label name column flonums)]
         [fallback (with-handlers ([exn:fail:contract:variable? (lambda (e) unbound)])
                     (fallback))]
         [else unbound])))
   (define (row-arguments i)
     (for/list ([name (in-list names)] [a (in-list arguments)])
-      (if name (flvector-ref a i) a)))
+      (cond
+        [(not name) a]
+        [(flvector? a) (flvector-ref a i)]
+        [else (vector-ref a i)])))
   (for/vector #:length no ([i (in-range no)])
     (with-handlers ([exn:fail:unbound-name?
                      (lambda (e)
@@ -332,6 +335,30 @@
                                               "transform" label "row" i
                                               "exception" (unquoted-printing-string (exn-message e))))])
       (apply proc (row-arguments i)))))
+
+;; The values of the table's column `name` as transform `label` reads them,
+;; as R's calls read a numeric, character or logical column: an flvector
+;; when they are numbers, and a vector of the values themselves when they are
+;; strings or symbols, or booleans. They must be of one kind, and numbers
+;; finite; an error names the transform, the column and the row.
+(define (transform-input who label name column flonums)
+  (define vs (column name))
+  (define kind (value-kind (vector-ref vs 0)))
+  (define (fail message i x)
+    (raise-arguments-error who message "transform" label "column" name "row" i "element" x))
+  (for ([x (in-vector vs)] [i (in-naturals)])
+    (define k (value-kind x))
+    (cond
+      [(eq? k 'other)
+       (fail "a transform reads a column with an element that is not a real number, a string, a symbol or a boolean"
+             i x)]
+      [(not (eq? k kind))
+       (fail (format "a transform reads a column that mixes ~a with ~a"
+                     (hash-ref kind-names kind) (hash-ref kind-names k))
+             i x)]
+      [(and (eq? k 'number) (not (fl< (flabs (real->double-flonum x)) +inf.0)))
+       (fail "a transform reads a column with an element that is not finite" i x)]))
+  (if (eq? kind 'number) (flonums name) vs))
 
 ;; --- factors ---------------------------------------------------------------------
 

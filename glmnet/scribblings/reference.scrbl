@@ -1327,7 +1327,13 @@ one, and otherwise the Racket binding of that name where the formula is
 written, as R looks for a name in the data and then in the formula's
 environment; an identifier first in a group is always the Racket binding. The
 expression is evaluated once for each row, with each column name standing for
-the row's value, so a transform is elementwise. A name that is neither a
+the row's value, so a transform is elementwise. A column of numbers gives its
+value as a flonum, and a column of strings, symbols or booleans gives the
+value itself, as R's calls read a character or logical column, so
+@racket[(equal? Species "setosa")] is R's @tt{I(Species == "setosa")} and
+@racket[(not b)] is R's @tt{I(!b)}. A column that a transform reads must hold
+one kind of value, and its numbers must be finite; an error names the
+transform and the column. A name that is neither a
 column nor bound is an error, naming it, when the transform is evaluated, not
 when the formula is compiled. Each value must be a real number and finite, or
 else each a string, a symbol or a boolean, which makes the transform a factor
@@ -1473,6 +1479,7 @@ Trend road tests, and R's @tt{iris}, 150 irises of three species, which
   (formula-predictor-names (mpg . ~ . wt * (factor cyl)) mtcars)
   (formula-predictor-names (mpg . ~ . (factor (> gear 3)) + wt) mtcars)
   (formula-predictor-names (Sepal.Length . ~ . 0 + Species + Petal.Width) iris)
+  (formula-predictor-names (Sepal.Length . ~ . (equal? Species "setosa") + Petal.Width) iris)
   (~ (surv time status) age "blood pressure")
   (eval:error (~ mpg wt:hp))]}
 
@@ -1518,11 +1525,13 @@ Trend road tests, and R's @tt{iris}, 150 irises of three species, which
          transform-term?]{
   A transform as data, for @racket[make-formula]: the design-matrix column
   @racket[name], whose value in each row is @racket[proc] applied to the
-  row's value of each of the @racket[columns], in order, as flonums. Each of
-  the @racket[columns] must be a column of the table, and each value a finite
-  real. @racket[~] makes the same value from a transform written in a
-  formula, with its source as the name, except that a name of that transform
-  that is not a column of the table is the Racket binding of that name.
+  row's value of each of the @racket[columns], in order: a flonum for a column
+  of numbers, and the value itself for a column of strings, symbols or
+  booleans. Each of the @racket[columns] must be a column of the table that
+  holds one kind of value, and whose numbers are finite. @racket[~] makes the
+  same value from a transform written in a formula, with its source as the
+  name, except that a name of that transform that is not a column of the
+  table is the Racket binding of that name.
 
   A procedure has no source and names no columns, so a transform as data
   names both. Two transforms are @racket[equal?] when their names and columns

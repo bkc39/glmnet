@@ -675,6 +675,26 @@ the categories can be computed from numbers:
 @racket["high"] sorts before @racket["low"], so it is the second transform's
 baseline.
 
+A transform reads a column of strings, symbols or booleans as its values,
+as R's calls read a character or logical column, and a column of numbers as
+flonums. So a transform can compare or recode a factor's values, as R's
+@tt{I(Species == "setosa")} and @tt{factor(toupper(Species))} do:
+
+@examples[#:eval ev #:label #f
+(formula-predictor-names
+ (Sepal.Length . ~ . (equal? Species "setosa") + Petal.Width) iris)
+(formula-predictor-names
+ (Sepal.Length . ~ . (factor (string-upcase Species)) + Petal.Width) iris)
+]
+
+A symbol stays a symbol, so a comparison with a string is false for a column
+of symbols; compare it with @racket[eq?] and a quoted symbol instead. A
+boolean column's values are @racket[#t] and @racket[#f], so R's @tt{I(!b)} is
+@racket[(not b)], a factor, and R's @tt{I(b * x)} is
+@racket[(if b x 0)], a number. A column that a transform reads must hold one
+kind of value, and an error names the transform and the column where it
+does not.
+
 @subsection[#:tag "formulas-factor-new-data"]{New data and levels}
 
 @racket[predict] codes a new table's factors with the model's levels, as R's
