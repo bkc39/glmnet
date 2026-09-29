@@ -10,9 +10,9 @@
 An @emph{interaction} lets the effect of one predictor depend on another. A
 classic one is in R's @tt{mtcars}: a car's fuel economy falls with its weight
 and with its horsepower, and the product of the two lets the cost of each extra
-ton depend on the engine. R writes the model @tt{mpg ~ wt * hp}; the formula
-front end writes @racket[(~ mpg (* wt hp))], or @racketfont{(mpg . ~ . wt * hp)}
-(see @secref["formulas-algebra"]).
+thousand pounds depend on the engine. R writes the model @tt{mpg ~ wt * hp};
+the formula front end writes @racket[(~ mpg (* wt hp))], or
+@racketfont{(mpg . ~ . wt * hp)} (see @secref["formulas-algebra"]).
 
 @section[#:tag "ex-formula-interactions-data"]{The data}
 
@@ -53,10 +53,11 @@ coefficient, standing in for horsepower, which is still out; once horsepower
 enters, at @math{λ ≈ 2.7}, the interaction leaves again. At @math{λ = 0.5} the
 lasso keeps weight and horsepower and leaves the interaction at zero. The
 interaction comes back below @math{λ ≈ 0.10}, now positive, and at
-@math{λ = 0.01} its coefficient is about @math{0.025}: each extra ton costs
-less fuel economy in a more powerful car. Weight and horsepower then have
-larger negative coefficients, which the positive interaction offsets. The plot
-of the path (@secref["plot-path"]) shows where the interaction comes back:
+@math{λ = 0.01} its coefficient is about @math{0.025}: each extra thousand
+pounds costs less fuel economy in a more powerful car. Weight and horsepower
+then have larger negative coefficients, which the positive interaction
+offsets. The plot of the path (@secref["plot-path"]) shows where the
+interaction comes back:
 
 @examples[#:eval ev #:label #f
 (require glmnet/plot)

@@ -1279,10 +1279,16 @@ folded from the left: @racket[(* a b c)] is @racket[a * b * c].
 The design matrix, which @racket[formula-design-matrix] returns, has one
 column per term: a column of the table, or for an interaction the product of
 its variables' columns, named by joining their names with colons, as R names
-them: @racket["wt:hp"]. It has no intercept column, since the family's
+them: @racket["wt:hp"]. A column of the table keeps its name, where R puts
+backticks around a name that R's syntax does not allow, such as
+@racket["blood pressure"]. It has no intercept column, since the family's
 procedure fits the intercept. Every column the formula names, even one that it
 removes, must be a column of the table, and so must the response columns, which
-must be distinct. Names are compared as strings.
+must be distinct. Names are compared as strings. The design matrix's column
+names must be distinct, and none can be @racket["(Intercept)"], since
+@racket[coef] keys the coefficients by them and the intercept by
+@racket["(Intercept)"]; the formula procedures raise an error that names the
+column otherwise.
 
 A group that starts with an identifier other than the operators, such as
 @racket[(log hp)], is a @emph{transform}, as R's @tt{log(hp)} is: a Racket
@@ -1397,11 +1403,14 @@ as a table:
   or @litchar{+}. The reader reads @tt{wt:hp} and @tt{-wt} as one name, so an
   operator needs spaces around it; written as an identifier, such a name is a
   syntax error that says so. So is a number other than @racket[0] and
-  @racket[1], a group that is neither a prefix form, an infix form nor a
-  transform, such as @racket[(1 x z)], a quoted name, such as
-  @racket['hp], since @racket[~] quotes the names itself, and R's @tt{/},
-  whose error says to write a ratio as @racket[(I (/ hp wt))]. The error
-  points at the form that is wrong. Inside a transform, a column whose name
+  @racket[1]; a @racket[0] or @racket[1] with a sign glued to it, since the
+  reader reads @tt{-0} as @racket[0] and drops the sign that R reads as an
+  operator, so that R's @tt{-0} is written @racket[(- 0)]; a group that is
+  neither a prefix form, an infix form nor a transform, such as
+  @racket[(1 x z)]; a quoted name, such as @racket['hp], since @racket[~]
+  quotes the names itself; and R's @tt{/} or @tt{%in%}, between terms or at
+  the head of a group, where the error for @tt{/} says to write a ratio as
+  @racket[(I (/ hp wt))]. The error points at the form that is wrong. Inside a transform, a column whose name
   is not an identifier is written with bars, as
   @racket[(log |blood pressure|)].
 

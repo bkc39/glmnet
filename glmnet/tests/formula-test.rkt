@@ -206,6 +206,13 @@
                (lambda () (formula-predictor-names (~ y "a:b" (: a b)) with-colon)))
     (check-exn #rx"^formula-fit: two columns of the formula's design matrix have the same name"
                (lambda () (formula-fit (~ y "a:b" (: a b)) with-colon #:lambda 0.1)))
+    (define with-intercept-name (cons (cons "(Intercept)" '(2 0 1)) letters))
+    (check-exn #rx"^formula-fit: a column of the formula's design matrix has the intercept's name\n  name: \"\\(Intercept\\)\"\n  formula: \\(~ y \"\\(Intercept\\)\" a\\)"
+               (lambda () (formula-fit (~ y "(Intercept)" a) with-intercept-name #:lambda 0.1)))
+    (check-exn #rx"^formula-predictor-names: a column of the formula's design matrix has the intercept's name"
+               (lambda () (formula-predictor-names (~ y all) with-intercept-name)))
+    (check-equal? (formula-predictor-names (~ y (: "(Intercept)" a)) with-intercept-name)
+                  '("(Intercept):a"))
     (check-exn #rx"no column with this name.*column: \"z\""
                (lambda () (formula-fit (~ y a z) letters #:lambda 0.1))))
 
@@ -331,6 +338,31 @@
                   '("(Intercept)" . 0.0))
     (check-same (formula-fit (~ mpg wt hp) mtcars #:lambda 0.1 #:intercept? #f) without))
 
+  ;; R 4.5.3's attr(terms(f), "intercept"): 1 for mpg ~ wt + hp + -0, whose
+  ;; unary minus flips what 0 means, and 0 for mpg ~ wt + hp - -0, which flips
+  ;; it twice. The reader reads -0 as 0, which would invert both.
+  (test-case "a sign glued to 0 or 1 is a syntax error; (- 0) is R's -0, both ways"
+    (define (message-of thunk)
+      (with-handlers ([exn:fail:syntax? exn-message]) (thunk) #f))
+    (check-regexp-match
+     #rx"~: 0 has a sign glued to it, which the reader drops, reading -0 as 0; put a space after the sign, as in \\(- 0\\)\n  at: 0"
+     (message-of (lambda () (convert-compile-time-error (mpg . ~ . wt + hp + -0)))))
+    (check-regexp-match #rx"~: 0 has a sign glued to it"
+                        (message-of (lambda () (convert-compile-time-error (mpg . ~ . wt + hp - -0)))))
+    (check-regexp-match #rx"~: 0 has a sign glued to it"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg wt hp -0)))))
+    (check-regexp-match #rx"~: 0 has a sign glued to it"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (- (+ wt hp) +0))))))
+    (check-regexp-match
+     #rx"~: 1 has a sign glued to it, which the reader drops, reading \\+1 as 1; put a space after the sign, as in \\(\\+ 1\\)\n  at: 1"
+     (message-of (lambda () (convert-compile-time-error (mpg . ~ . +1 + wt + hp)))))
+    (define without (elnet-fit mtcars-rows mpg #:lambda 0.1 #:intercept? #f))
+    (define with (elnet-fit mtcars-rows mpg #:lambda 0.1))
+    (for ([f (list (mpg . ~ . wt + hp + (- 0)) (~ mpg wt hp (- 0)) (mpg . ~ . - 0 + wt + hp))])
+      (check-same (formula-fit f mtcars #:lambda 0.1) with))
+    (for ([f (list (mpg . ~ . wt + hp - (- 0)) (~ mpg (- (+ wt hp) (- 0))))])
+      (check-same (formula-fit f mtcars #:lambda 0.1) without)))
+
   (test-case "an #:intercept? that contradicts the formula's 1, 0 or - 1 blames the caller"
     (check-exn (blame-matching
                 #rx"^formula-fit: contract violation;\n the intercept\\? argument contradicts the formula's intercept\n  expected: #f, since the formula \\(~ mpg 0 wt hp\\) has no intercept\n  given: #t")
@@ -431,6 +463,10 @@
                (lambda () (convert-compile-time-error (~ y (a %in% b)))))
     (check-exn #rx"~: / is an operator"
                (lambda () (convert-compile-time-error (~ y a /))))
+    (check-exn #rx"~: / is an operator of R's formulas that this formula language does not have; for a ratio, write \\(I \\(/ a b\\)\\)\n  at: /"
+               (lambda () (convert-compile-time-error (~ y (/ a b)))))
+    (check-exn #rx"~: %in% is an operator of R's formulas that this formula language does not have\n  at: %in%"
+               (lambda () (convert-compile-time-error (~ y a (+ b (%in% a b))))))
     (check-exn #rx"~: a/b reads as one name"
                (lambda () (convert-compile-time-error (~ y a/b))))
     (check-exn exn:fail:contract? (lambda () (make-formula 'y 'a '/ 'b))))
@@ -463,6 +499,14 @@
     (check-regexp-match #rx"~: a power cannot be raised again; R reads x \\^ 2 \\^ 3 as x \\^ \\(2 \\^ 3\\), which is not a power\n  at: \\^"
                         (message-of (lambda () (convert-compile-time-error (y . ~ . (a + b) ^ 2 ^ 3)))))
     (check-equal? (format "~a" (y . ~ . ((a + b) ^ 2) ^ 3)) "(~ y ((a + b) ^ 2) ^ 3)")
+    (check-regexp-match #rx"~: the right-hand side of a formula is a list of terms, and this one has a dot before hp\n  at: hp"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg wt . hp)))))
+    (check-regexp-match #rx"~: the right-hand side .* a dot before hp\n"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg wt + . hp)))))
+    (check-regexp-match #rx"~: the right-hand side .* a dot before hp\n"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg . hp)))))
+    (check-regexp-match #rx"~: expected a term.*\n  at: \\(wt \\. hp\\)"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (wt . hp))))))
     (check-regexp-match #rx"~: expected more terms starting with a column name"
                         (message-of (lambda () (convert-compile-time-error (~ (surv t) all))))))
 

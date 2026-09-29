@@ -8,8 +8,8 @@
 
 An @emph{interaction} lets the effect of one predictor depend on another. In
 R's formula @tt{mpg ~ wt * hp}, fuel economy falls with a car's weight and with
-its horsepower, and the product @tt{wt:hp} lets the cost of each extra ton
-depend on the engine. The formula front end writes the same formula
+its horsepower, and the product @tt{wt:hp} lets the cost of each extra thousand
+pounds depend on the engine. The formula front end writes the same formula
 @racket[(~ mpg (* wt hp))], or with R's infix operators
 @racketfont{(mpg . ~ . wt * hp)}. Both expand, as R's @tt{terms} does, into the
 columns @racket["wt"], @racket["hp"] and @racket["wt:hp"], the last one the

@@ -167,7 +167,12 @@
   (define (infix-id? stx)
     (or (operator-id? stx) (unsupported-id? stx)))
   (define (any-operator? stx)
-    (ormap infix-id? (syntax->list stx)))
+    (define elements (syntax->list stx))
+    (and elements (ormap infix-id? elements)))
+  ;; What follows the dot of an improper list, as syntax.
+  (define (dotted-tail stx)
+    (define e (syntax-e stx))
+    (if (pair? e) (dotted-tail (datum->syntax stx (cdr e) stx)) stx))
   (define (infix-group? stx)
     (define elements (syntax->list stx))
     (and (pair? elements) (ormap infix-id? (cdr elements))))
@@ -178,6 +183,16 @@
   (define (unsupported-message stx)
     (format "~a is an operator of R's formulas that this formula language does not have"
             (syntax-e stx)))
+  ;; A 0 or 1 whose source is longer than its digit, such as -0, which the
+  ;; reader reads as 0, dropping the sign that R reads as an operator.
+  (define (glued-number? stx)
+    (define span (syntax-span stx))
+    (and span (> span 1)))
+  (define (glued-number-message stx)
+    (define n (syntax-e stx))
+    (define sign (if (eqv? n 0) "-" "+"))
+    (format "~a has a sign glued to it, which the reader drops, reading ~a~a as ~a; put a space after the sign, as in (~a ~a)"
+            n sign n n sign n))
 
   (define (ratio-hint o operands)
     (cond
@@ -399,8 +414,10 @@
     (pattern (~and a (~datum all))
              #:with expr #''a)
     (pattern (~and n (~fail #:unless (memv (syntax-e #'n) '(0 1))))
+             #:fail-when (and (glued-number? #'n) #'n) (glued-number-message #'n)
              #:with expr #''n)
-    (pattern (~and n (~fail #:unless (real? (syntax-e #'n))))
+    (pattern (~and n (~fail #:unless (let ([v (syntax-e #'n)])
+                                       (and (real? v) (not (memv v '(0 1)))))))
              #:fail-when #'n
              (if (negative? (syntax-e #'n))
                  (format "~a is a number; to remove a term, put a space after the sign, as in - ~a"
@@ -451,11 +468,18 @@
   (define-syntax-class right-hand-side
     #:description "the right-hand side of a formula"
     #:attributes ((expr 1))
-    (pattern (~and rhs (~fail #:when (any-operator? #'rhs)) (t:term ...))
+    (pattern (~and rhs (~fail #:unless (syntax->list #'rhs)) (~fail #:when (any-operator? #'rhs))
+                   (t:term ...))
              #:with (expr ...) #'(t.expr ...))
     (pattern (~and rhs (~fail #:unless (any-operator? #'rhs))
                    ((~optional s:sign) t:term step:infix-step ...))
-             #:with (expr ...) #'((~? 's) t.expr step.expr ... ...)))
+             #:with (expr ...) #'((~? 's) t.expr step.expr ... ...))
+    (pattern (~and rhs (~fail #:when (syntax->list #'rhs)))
+             #:with tail (dotted-tail #'rhs)
+             #:fail-when #'tail
+             (format "the right-hand side of a formula is a list of terms, and this one has a dot before ~s"
+                     (syntax->datum #'tail))
+             #:with (expr ...) #'()))
 
   ;; A response is columns, not a transform. A group that starts with I, or
   ;; with a bound name and has more than column names, is a transform, and
@@ -515,7 +539,8 @@
 ;; table and distinct, and so must every column the formula names, even one
 ;; it removes, as R's model.frame evaluates them all. A transform must read a
 ;; column, from which its rows come. The design matrix's column names must be
-;; distinct, as coef keys the coefficients by them.
+;; distinct, and none "(Intercept)", as coef keys the coefficients by them and
+;; the intercept by that name.
 (define (formula-expansion who f columns)
   (define responses (response-columns f))
   (define present (for/hash ([c (in-list columns)]) (values c #t)))
@@ -539,7 +564,11 @@
   (for ([v (in-list dropped)])
     (log-glmnet-warning "~a: the response column ~s appeared on the right-hand side and was dropped"
                         who (variable-label v)))
-  (define same-name (check-duplicates (model-terms-column-names kept)))
+  (define names (model-terms-column-names kept))
+  (when (member "(Intercept)" names)
+    (raise-arguments-error who "a column of the formula's design matrix has the intercept's name"
+                           "name" "(Intercept)" "formula" f))
+  (define same-name (check-duplicates names))
   (when same-name
     (raise-arguments-error who "two columns of the formula's design matrix have the same name"
                            "name" same-name "formula" f))
