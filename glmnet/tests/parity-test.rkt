@@ -16,7 +16,8 @@
 ;; checked against R's coef, names and values. Formula goldens (kind
 ;; "formula", #53) hold R's terms() and model.matrix() for a formula on mtcars
 ;; or longley and glmnet fitted on that matrix; each Racket spelling of the
-;; formula must expand to R's terms, build R's matrix and fit R's path.
+;; formula must expand to R's terms, build R's matrix and fit R's path, with
+;; R's name of each transform, such as log(hp), read as its Racket source.
 ;;
 ;; Goldens are generated on demand, never committed: the Nix `checks.parity` gate
 ;; regenerates them with the pinned R glmnet and points GLMNET_PARITY_GOLDENS at
@@ -30,10 +31,15 @@
            json
            racket/list
            racket/match
+           (only-in racket/math pi sqr)
            racket/runtime-path
+           racket/string
            glmnet
            glmnet/examples/data/mtcars
-           (only-in (file "../core/terms.rkt")
+           ;; The collection's instance, whose transform structs `~` makes;
+           ;; the checks run this file from the source tree against an
+           ;; installed copy of the package.
+           (only-in glmnet/core/terms
                     expand-terms model-terms-labels model-terms-intercept? model-terms-terms
                     model-terms-codings term-variables variable-label)
            (file "../private/demo-utils.rkt"))
@@ -330,10 +336,12 @@
                 [(vector _ message _ _) (cons message (loop))]))))
 
   ;; The formula algebra (#53): for each Racket spelling of the golden's
-  ;; formula, `~` and make-formula agree; the expansion has R's term labels,
-  ;; intercept and factors; formula-design-matrix is R's model.matrix without
-  ;; its intercept column, names and values, and warns where R does; and the
-  ;; path fitted from the formula is R's glmnet on that matrix.
+  ;; formula, `~` and make-formula agree, when the formula has no transforms;
+  ;; the expansion has R's term labels, intercept and factors;
+  ;; formula-design-matrix is R's model.matrix without its intercept column,
+  ;; names and values, and warns where R does; and the path fitted from the
+  ;; formula is R's glmnet on that matrix. Names are compared after the
+  ;; golden's `names` map R's name of each transform to its Racket source.
   (define (run-formula-golden g)
     (define id     (hash-ref g 'id))
     (define tols   (hash-ref (hash-ref g 'meta) 'tolerances))
@@ -345,25 +353,42 @@
     (define response-dropped?
       (member "the response appeared on the right-hand side and was dropped"
               (hash-ref g 'warnings)))
+    (define transform-names
+      (for/hash ([(r rkt) (in-hash (hash-ref g 'names (hash)))])
+        (values (symbol->string r) rkt)))
+    ;; An R name, a variable's or an interaction's, as the Racket one.
+    (define (racket-name r)
+      (string-join (for/list ([v (in-list (string-split r ":"))])
+                     (hash-ref transform-names v v))
+                   ":"))
+    (define coef-names
+      (let ([names (hash-ref gen 'coef_names)])
+        (hash-set names 'rows (map racket-name (hash-ref names 'rows)))))
     (for ([source (in-list (hash-ref g 'rkt))])
       (test-case (format "~a ~a" id source)
         (define datum (read (open-input-string source)))
-        (define f (apply make-formula (cdr datum)))
-        (check-equal? (eval datum formula-namespace) f "~ and make-formula")
+        (define f (eval datum formula-namespace))
+        (when (formula-rhs/c (cddr datum))
+          (check-equal? (apply make-formula (cdr datum)) f "~ and make-formula"))
+        (check-equal? (format "~a" f) (format "~s" datum) "printed")
         (define mt (expand-terms (formula-terms f) (list (format "~a" (formula-response f)))
                                  (table-column-names table)))
-        (check-equal? (model-terms-labels mt) (hash-ref g 'term_labels) "term labels")
+        (check-equal? (model-terms-labels mt) (map racket-name (hash-ref g 'term_labels))
+                      "term labels")
         (check-equal? (model-terms-intercept? mt) (hash-ref g 'intercept) "intercept")
         (check-equal? (for/list ([term (in-list (model-terms-terms mt))]
                                  [coding (in-list (model-terms-codings mt))])
-                        (for/hasheq ([v (in-list (term-variables mt term))] [c (in-list coding)])
-                          (values (string->symbol (variable-label v)) c)))
-                      (hash-ref g 'factors)
+                        (for/hash ([v (in-list (term-variables mt term))] [c (in-list coding)])
+                          (values (variable-label v) c)))
+                      (for/list ([factors (in-list (hash-ref g 'factors))])
+                        (for/hash ([(v c) (in-hash factors)])
+                          (values (racket-name (symbol->string v)) c)))
                       "factors")
+        (define column-names (map racket-name (hash-ref g 'column_names)))
         (define-values (dm warnings)
           (glmnet-warnings (lambda () (formula-design-matrix f table))))
-        (check-equal? (design-matrix-column-names dm) (hash-ref g 'column_names) "column names")
-        (check-equal? (formula-predictor-names f table) (hash-ref g 'column_names))
+        (check-equal? (design-matrix-column-names dm) column-names "column names")
+        (check-equal? (formula-predictor-names f table) column-names)
         (check-mat-close (design-matrix->columns dm) (hash-ref g 'columns) 1e-12 "design matrix")
         (check-equal? (and (pair? warnings) #t) (and response-dropped? #t)
                       (format "a warning where R warns: ~s" warnings))
@@ -373,7 +398,7 @@
         (define fp (formula-path f table #:lambda (hash-ref g 'lambda_user)
                                  #:alpha (hash-ref g 'alpha) #:thresh (hash-ref g 'thresh)))
         (check-named-coef (coef fp #:lambda (hash-ref gen 's)) (hash-ref gen 'coef_s)
-                          (hash-ref gen 'coef_names) (hash-ref tols 'coef))
+                          coef-names (hash-ref tols 'coef))
         (check-nested-close (predict fp table #:lambda (hash-ref gen 's))
                             (hash-ref (hash-ref gen 'predict_s) 'link) (hash-ref tols 'pred)
                             "formula predict"))))

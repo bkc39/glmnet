@@ -4,8 +4,9 @@
 ;; design matrix, `equal?` to it for every family and for single fits, paths
 ;; and cross-validation. The formula language is R's algebra: terms expand and
 ;; order as R's terms() does, prefix and infix, and the design matrix holds
-;; their products; unknown columns are errors, and a response on the
-;; right-hand side is dropped with a warning. `coef` is keyed by name, and
+;; their products; transforms are Racket functions of columns, whose names
+;; are the table's columns and then Racket bindings; unknown columns are
+;; errors, and a response on the right-hand side is dropped with a warning. `coef` is keyed by name, and
 ;; `predict` rebuilds the design matrix from a table, whatever the order of
 ;; its columns. The fixtures are the committed parity datasets, read as tables
 ;; with the CSV's column names, and mtcars. parity-test.rkt checks the algebra
@@ -18,6 +19,7 @@
            racket/list
            racket/match
            syntax/macro-testing
+           (only-in racket/math sqr)
            glmnet
            glmnet/examples/data/mtcars
            (file "../private/demo-utils.rkt"))
@@ -440,10 +442,10 @@
      #rx"~: \\(1 x \\(sqr x\\)\\) is not a term: a group of terms starts with an operator, as \\(\\+ x z\\) does, or has operators between its terms, as \\(x \\+ z\\) does\n  at: \\(1 x \\(sqr x\\)\\)"
      (message-of (lambda () (convert-compile-time-error (y . ~ . (+ (1 x (sqr x))))))))
     (check-regexp-match
-     #rx"~: \\(sqr x\\) is a function call, a transform, which the formula language does not support yet\n  at: \\(sqr x\\)"
-     (message-of (lambda () (convert-compile-time-error (~ y x (sqr x))))))
-    (check-regexp-match #rx"~: \\(I \\(\\* x x\\)\\) is a function call"
-                        (message-of (lambda () (convert-compile-time-error (~ y (+ x (I (* x x))))))))
+     #rx"~: \\(squared x\\) is not a term: squared is not bound, so it is not a transform, and a group of terms starts with an operator, as \\(\\+ x z\\) does, or has operators between its terms, as \\(x \\+ z\\) does\n  at: \\(squared x\\)"
+     (message-of (lambda () (convert-compile-time-error (~ y x (squared x))))))
+    (check-regexp-match #rx"~: \\(a b\\) is not a term: a is not bound"
+                        (message-of (lambda () (convert-compile-time-error (~ y (+ x (a b)))))))
     (check-regexp-match #rx"~: expected an infix operator \\(\\+, -, \\*, : or \\^\\) between two terms\n  at: b"
                         (message-of (lambda () (convert-compile-time-error (~ y a b + c)))))
     (check-regexp-match #rx"~: expected a power, an exact integer of at least 2\n  at: 1"
@@ -560,6 +562,201 @@
                (lambda () (formula-path (~ y k) constant #:lambda '(0.1))))
     (check-exn #rx"^formula-cv: .*all used predictors have zero variance"
                (lambda () (formula-cv (~ y k) constant #:nfolds 3))))
+
+  ;; --- transforms --------------------------------------------------------------------
+
+  ;; A column of mtcars, as flonums, as R holds it.
+  (define (mtcars-column name) (map exact->inexact (cdr (assoc name mtcars))))
+
+  (test-case "a transform is a function of columns, named by its source, and joins the algebra"
+    ;; R: mpg ~ log(hp) * wt gives log(hp) wt log(hp):wt
+    (check-equal? (mtcars-names (mpg . ~ . (log hp) * wt)) '("(log hp)" "wt" "(log hp):wt"))
+    ;; R: mpg ~ (log(hp) + wt + qsec)^2
+    (check-equal? (mtcars-names (~ mpg (^ (+ (log hp) wt qsec) 2)))
+                  '("(log hp)" "wt" "qsec" "(log hp):wt" "(log hp):qsec" "wt:qsec"))
+    ;; R: mpg ~ log(hp):wt + qsec
+    (check-equal? (mtcars-names (~ mpg (: (log hp) wt) qsec)) '("qsec" "(log hp):wt"))
+    (define x (columns-of (formula-design-matrix
+                           (mpg . ~ . (log hp) * wt + (sqrt disp) + (exp wt) + (log hp 2)) mtcars)))
+    (define log-hp (map log (mtcars-column "hp")))
+    (check-equal? (hash-ref x "(log hp)") log-hp)
+    (check-equal? (hash-ref x "(log hp):wt") (map * log-hp (mtcars-column "wt")))
+    (check-equal? (hash-ref x "(sqrt disp)") (map sqrt (mtcars-column "disp")))
+    (check-equal? (hash-ref x "(exp wt)") (map exp (mtcars-column "wt")))
+    (check-equal? (hash-ref x "(log hp 2)") (map (lambda (v) (log v 2)) (mtcars-column "hp"))))
+
+  (test-case "(I expr) is Racket arithmetic, where the operators are Racket's, as in R's I()"
+    (define x (columns-of (formula-design-matrix
+                           (~ mpg (I (expt hp 2)) (sqr hp) (I (* wt hp)) (: wt hp) (I (/ hp wt))
+                              (I (+ hp 1)) (log (+ hp 1)) (I hp))
+                           mtcars)))
+    (define hp (mtcars-column "hp"))
+    (define wt (mtcars-column "wt"))
+    (check-equal? (hash-ref x "(I (expt hp 2))") (map * hp hp))
+    (check-equal? (hash-ref x "(sqr hp)") (map * hp hp))
+    (check-equal? (hash-ref x "(I (* wt hp))") (hash-ref x "wt:hp"))
+    (check-equal? (hash-ref x "(I (/ hp wt))") (map / hp wt))
+    (check-equal? (hash-ref x "(I (+ hp 1))") (map add1 hp))
+    (check-equal? (hash-ref x "(log (+ hp 1))") (map (lambda (v) (log (add1 v))) hp))
+    (check-equal? (hash-ref x "(I hp)") hp))
+
+  (test-case "R's x^2 is crossing, x with itself, and a square is a transform"
+    ;; R: mpg ~ hp + hp^2 is mpg ~ hp; mpg ~ hp + I(hp^2) has two columns.
+    (check-equal? (mtcars-names (mpg . ~ . hp + hp ^ 2)) '("hp"))
+    (check-equal? (mtcars-names (mpg . ~ . hp + (sqr hp))) '("hp" "(sqr hp)"))
+    (check-equal? (mtcars-names (mpg . ~ . hp + (I (expt hp 2)))) '("hp" "(I (expt hp 2))")))
+
+  (test-case "a name in a transform is the table's column if it has one, else the Racket binding"
+    ;; mpg is also this module's variable, a list; the column wins, as in R.
+    (define x (columns-of (formula-design-matrix (~ wt (I (* 2 mpg))) mtcars)))
+    (check-equal? (hash-ref x "(I (* 2 mpg))") (map (lambda (v) (* 2 v)) (mtcars-column "mpg")))
+    (define hp 'not-a-number)
+    (check-equal? (hash-ref (columns-of (formula-design-matrix (~ mpg (log hp)) mtcars)) "(log hp)")
+                  (map log (mtcars-column "hp")))
+    (define k 100)
+    (check-equal? (hash-ref (columns-of (formula-design-matrix (~ mpg (I (/ disp k))) mtcars))
+                            "(I (/ disp k))")
+                  (map (lambda (v) (/ v 100)) (mtcars-column "disp")))
+    ;; A function in argument position, and names that the transform binds itself.
+    (check-equal? (hash-ref (columns-of (formula-design-matrix
+                                         (~ mpg (I (apply max (map abs (list hp (- wt)))))) mtcars))
+                            "(I (apply max (map abs (list hp (- wt)))))")
+                  (mtcars-column "hp"))
+    (check-equal? (hash-ref (columns-of (formula-design-matrix
+                                         (~ mpg (I (let ([z (* 2 hp)]) (+ z 1)))) mtcars))
+                            "(I (let ((z (* 2 hp))) (+ z 1)))")
+                  (map (lambda (v) (+ (* 2 v) 1)) (mtcars-column "hp")))
+    (check-equal? (hash-ref (columns-of (formula-design-matrix
+                                         (~ mpg (I (for/sum ([i (in-range 3)]) (* i hp)))) mtcars))
+                            "(I (for/sum ((i (in-range 3))) (* i hp)))")
+                  (map (lambda (v) (* 3 v)) (mtcars-column "hp")))
+    ;; A column named after a macro, such as racket/base's time.
+    (define timed (list (cons "y" '(1 2 3)) (cons "time" '(1 2 4))))
+    (check-equal? (hash-ref (columns-of (formula-design-matrix (~ y (log time)) timed)) "(log time)")
+                  (list 0.0 (log 2.0) (log 4.0))))
+
+  (test-case "a name that is neither a column nor bound is an error when the transform runs"
+    (define f (~ mpg wt (I (* hp scale))))
+    (check-equal? (mtcars-names f) '("wt" "(I (* hp scale))"))
+    (check-exn #rx"^formula-fit: a name in a transform is neither a column of the table nor a defined variable\n  name: \"scale\"\n  transform: \"\\(I \\(\\* hp scale\\)\\)\""
+               (lambda () (formula-fit f mtcars #:lambda 0.1)))
+    (check-exn #rx"^formula-fit: a transform must read a column of the table\n  transform: \"\\(log horsepower\\)\"\n  formula: \\(~ mpg \\(log horsepower\\)\\)"
+               (lambda () (formula-fit (~ mpg (log horsepower)) mtcars #:lambda 0.1))))
+
+  (test-case "a transform's value must be a finite real, and an error names the transform and the row"
+    (check-exn #rx"^formula-fit: a transform's value is not finite\n  transform: \"\\(log \\(- hp 110\\)\\)\"\n  row: 0\n  value: -inf.0"
+               (lambda () (formula-fit (~ mpg (log (- hp 110))) mtcars #:lambda 0.1)))
+    (check-exn #rx"^formula-design-matrix: a transform's value is not a real number\n  transform: \"\\(sqrt \\(- hp 100\\)\\)\"\n  row: 2\n  value: 0.0\\+2.6457513110645907i"
+               (lambda () (formula-design-matrix (~ mpg (sqrt (- hp 100))) mtcars)))
+    (check-exn #rx"^formula-path: a transform raised an exception\n  transform: \"\\(I \\(/ hp 0\\)\\)\"\n  row: 0\n  exception: /: division by zero"
+               (lambda () (formula-path (~ mpg (I (/ hp 0))) mtcars))))
+
+  (test-case "a transform is one variable: written twice it is one term, and R keeps a transformed response"
+    (check-equal? (mtcars-names (~ mpg (log hp) (log  hp) (: (log hp) wt) (: wt (log hp))))
+                  '("(log hp)" "(log hp):wt"))
+    ;; R: mpg ~ wt + log(hp) - log(hp)
+    (check-equal? (mtcars-names (mpg . ~ . wt + (log hp) - (log hp))) '("wt"))
+    (define-values (names warnings)
+      (glmnet-warnings (lambda () (mtcars-names (~ mpg (log mpg) wt)))))
+    (check-equal? names '("(log mpg)" "wt"))
+    (check-equal? warnings '())
+    (define with-name (cons (cons "(log hp)" (mtcars-column "hp")) mtcars))
+    (check-exn #rx"two columns of the formula's design matrix have the same name\n  name: \"\\(log hp\\)\""
+               (lambda () (formula-predictor-names (~ mpg "(log hp)" (log hp)) with-name))))
+
+  (test-case "a formula with transforms prints as written, and compares as written"
+    (define f (mpg . ~ . (log hp) * wt + (I (expt hp 2))))
+    (check-equal? (format "~a" f) "(~ mpg (log hp) * wt + (I (expt hp 2)))")
+    (check-equal? (format "~a" (~ mpg (* (log hp) wt))) "(~ mpg (* (log hp) wt))")
+    (define t (car (formula-terms (~ mpg (log hp)))))
+    (check-true (transform-term? t))
+    (check-true (formula-term/c t))
+    (check-false (formula-term/c '(log hp)))
+    (check-equal? (format "~a" t) "#<transform-term (log hp)>")
+    (check-equal? (~ mpg (log hp)) (~ mpg (log hp)))
+    (check-not-equal? (~ mpg (log hp)) (~ mpg (log wt)))
+    (check-equal? (make-formula 'mpg (transform-term "(log hp)" '(hp) log) '* 'wt)
+                  (mpg . ~ . (log hp) * wt)))
+
+  (test-case "transform-term makes a transform from a procedure, its name and its columns"
+    (define ratio (transform-term "hp/wt" '("hp" wt) /))
+    (define f (make-formula 'mpg ratio '+ 'qsec))
+    (check-equal? (format "~a" f) "(~ mpg hp/wt + qsec)")
+    (check-equal? (hash-ref (columns-of (formula-design-matrix f mtcars)) "hp/wt")
+                  (map / (mtcars-column "hp") (mtcars-column "wt")))
+    (check-exn #rx"^formula-fit: the table has no column with this name\n  column: \"power\""
+               (lambda () (formula-fit (make-formula 'mpg (transform-term "(log power)" '(power) log))
+                                       mtcars #:lambda 0.1)))
+    (check-exn (blame-matching #rx"transform-term: contract violation.*procedure-arity-includes/c 2")
+               (lambda () (transform-term "bad" '(hp wt) sqrt)))
+    (check-exn (blame-matching #rx"transform-term: contract violation.*in: the columns argument")
+               (lambda () (transform-term "none" '() (lambda () 1)))))
+
+  (test-case "^ and R's infix arithmetic inside a transform are syntax errors that say what to write"
+    (define (message-of thunk)
+      (with-handlers ([exn:fail:syntax? exn-message]) (thunk) #f))
+    (check-regexp-match #rx"~: \\^ is not a Racket function; inside a transform, write a power as \\(expt x 2\\), or a square as \\(sqr x\\)\n  at: \\^"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (I (^ hp 2)))))))
+    (check-regexp-match #rx"~: \\^ is not a Racket function"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (I (hp ^ 2)))))))
+    (check-regexp-match #rx"~: hp is not bound, and inside a transform the operators are Racket's, which come first: write \\(\\* hp wt\\)\n  at: \\(hp \\* wt\\)"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (I (hp * wt)))))))
+    (check-regexp-match #rx"~: hp is not bound.*write \\(\\+ hp 1\\)"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (log (hp + 1)))))))
+    (check-regexp-match #rx"~: I takes one Racket expression, as in \\(I \\(expt x 2\\)\\)\n  at: \\(I hp wt\\)"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (I hp wt)))))))
+
+  (test-case "a formula fit with transforms is the matrix fit of the transformed columns, for any family"
+    (define f (mpg . ~ . hp + (sqr hp) + (log wt)))
+    (define x (map list (mtcars-column "hp") (map sqr (mtcars-column "hp")) (map log (mtcars-column "wt"))))
+    (check-same (formula-fit f mtcars #:lambda 0.1) (elnet-fit x mpg #:lambda 0.1))
+    (check-same (formula-path f mtcars #:lambda '(1.0 0.1)) (elnet-path x mpg #:lambda '(1.0 0.1)))
+    (define cox (formula-fit (~ (surv time status) (log karno) age) veteran #:family 'cox #:lambda 0.05))
+    (check-same cox (cox-fit (for/list ([k (in-list (cdr (assoc "karno" veteran)))]
+                                        [a (in-list (cdr (assoc "age" veteran)))])
+                               (list (log k) a))
+                             tc sc #:lambda 0.05))
+    (check-equal? (map car (coef cox)) '("(log karno)" "age")))
+
+  (test-case "predict evaluates the transforms again on the new table's columns"
+    (define m (formula-path (mpg . ~ . (log hp) * wt) mtcars #:lambda '(1.0 0.1)))
+    (define new (list (cons "wt" '(2.5 3.5)) (cons "hp" '(100 200))))
+    (check-equal? (predict m new #:lambda 0.1)
+                  (predict (formula-model-fit m)
+                           (list (list (log 100.0) 2.5 (* (log 100.0) 2.5))
+                                 (list (log 200.0) 3.5 (* (log 200.0) 3.5)))
+                           #:lambda 0.1))
+    (check-exn #rx"^predict: the table has no column with this name\n  column: \"hp\""
+               (lambda () (predict m (list (cons "wt" '(2.5))))))
+    (check-exn #rx"^predict: a transform's value is not finite\n  transform: \"\\(log hp\\)\"\n  row: 1\n  value: -inf.0"
+               (lambda () (predict m (list (cons "wt" '(2.5 3.5)) (cons "hp" '(100 0)))))))
+
+  (test-case "at the top level, a transform's name can be defined after the formula"
+    (define ns (make-base-namespace))
+    (namespace-attach-module (variable-reference->namespace (#%variable-reference)) 'glmnet ns)
+    (define t (list (cons "y" '(1 2 3)) (cons "x" '(1 2 4))))
+    (define (column-of expr)
+      (parameterize ([current-namespace ns])
+        (design-matrix->columns (eval `(formula-design-matrix ,expr ',t)))))
+    (parameterize ([current-namespace ns])
+      (namespace-require 'glmnet)
+      (eval '(define x "a string, not the column"))
+      (eval '(define f (~ y (I (* x scale))))))
+    (check-exn #rx"^formula-design-matrix: a name in a transform is neither a column of the table nor a defined variable\n  name: \"scale\""
+               (lambda () (column-of 'f)))
+    (parameterize ([current-namespace ns])
+      (eval '(define scale 10)))
+    (check-equal? (column-of 'f) '((10.0 20.0 40.0))))
+
+  (test-case "a transform reads its Racket bindings each time, as R does"
+    (define k 2)
+    (define m (formula-fit (~ mpg (I (* k hp)) wt) mtcars #:lambda 0.1))
+    (define new (list (cons "hp" '(100)) (cons "wt" '(3))))
+    (define before (predict m new))
+    (define doubled (predict m (list (cons "hp" '(200)) (cons "wt" '(3)))))
+    (set! k 4)
+    (check-equal? (predict m new) doubled)
+    (check-not-equal? doubled before))
 
   ;; --- name-keyed results -----------------------------------------------------------
 
