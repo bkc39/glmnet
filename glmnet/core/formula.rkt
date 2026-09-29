@@ -162,15 +162,15 @@
     (format "~a is an operator of R's formulas that this formula language does not have"
             (syntax-e stx)))
   ;; A 0 or 1 whose source is longer than its digit, such as -0, which the
-  ;; reader reads as 0, dropping the sign that R reads as an operator.
+  ;; reader reads as 0, dropping the sign that R reads as an operator. The
+  ;; spelling is gone, so the message names no sign: +0 and -0 differ in R.
   (define (glued-number? stx)
     (define span (syntax-span stx))
     (and span (> span 1)))
   (define (glued-number-message stx)
     (define n (syntax-e stx))
-    (define sign (if (eqv? n 0) "-" "+"))
-    (format "~a has a sign glued to it, which the reader drops, reading ~a~a as ~a; put a space after the sign, as in (~a ~a)"
-            n sign n n sign n))
+    (format "~a is written with more than its digit, and the reader reads the rest away, as it does a sign glued to it, which R reads as an operator; write ~a, (+ ~a) or (- ~a)"
+            n n n n))
 
   (define-syntax-class column
     #:description "a column name"
