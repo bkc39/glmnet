@@ -98,6 +98,9 @@ identifiers or are words of the formula language (@racket[all],
 (formula-predictor-names (~ bp age dose) patients)
 ]
 
+Since @racket[~] quotes the names itself, a quoted name, such as
+@racket['age], is a syntax error that says to write @racket[age].
+
 The simplest terms are:
 
 @itemlist[
@@ -622,10 +625,15 @@ The formula language is smaller than R's:
        them again on the new data, where a name that the new data lacks
        falls back on a variable of the same name.}
  @item{The response is a column, not a transform: R's @tt{log(y) ~ x} has no
-       counterpart; add the column to the table.}
+       counterpart, and @racket[(~ (log y) x)] is a syntax error that says
+       so; add the column to the table. A response of several columns whose
+       first name is a function where the formula is written reads as such
+       a transform, so write those columns as strings.}
  @item{R's @tt{.} is written @racket[all]. R's @tt{%in%} and @tt{/}
-       (nesting) are syntax errors that say the language does not have them,
-       and @tt{offset()} has no counterpart.}
+       (nesting) are syntax errors that say the language does not have them;
+       for @tt{/}, the error says to write a ratio as
+       @racket[(I (/ x z))], R's @tt{I(x / z)}. @tt{offset()} has no
+       counterpart.}
  @item{An operator needs spaces around it, since the reader reads
        @tt{wt:hp} as one name, and a power is an exact integer of at least 2,
        where R truncates @tt{x^2.5} to @tt{x^2}.}

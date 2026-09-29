@@ -179,6 +179,36 @@
     (format "~a is an operator of R's formulas that this formula language does not have"
             (syntax-e stx)))
 
+  (define (ratio-hint o operands)
+    (cond
+      [(eq? (syntax-e o) '/)
+       (format "; for a ratio, write ~s"
+               (syntax-parse operands
+                 [(a b) `(I (/ ,(syntax->datum #'a) ,(syntax->datum #'b)))]
+                 [_ '(I (/ x z))]))]
+      [else ""]))
+
+  (define (quote-id? stx)
+    (and (identifier? stx)
+         (or (free-identifier=? stx #'quote) (free-identifier=? stx #'quasiquote))))
+  (define (quoted-message g d)
+    (define v (syntax-e d))
+    (format "~a is quoted, and ~~ quotes the names of a formula itself: ~a"
+            (parameterize ([print-reader-abbreviations #t])
+              (format "~s" (syntax->datum g)))
+            (cond
+              [(symbol? v) (format "write the column as ~a or ~s" v (symbol->string v))]
+              [(string? v) (format "write the column as ~s" v)]
+              [else (format "write ~s without the quote" (syntax->datum d))])))
+
+  (define transformed-response-message
+    "a transformed response is not supported; add the transformed column to the table, or write the columns of a response of several columns as strings")
+
+  ;; Whether id has a binding where it is written. At the top level that is a
+  ;; definition already evaluated, as a later one cannot be seen there.
+  (define (bound-here? id)
+    (and (identifier-binding id (syntax-local-phase-level) #t) #t))
+
   ;; Whether id can have a binding where it is written: it has one, or it is
   ;; at the top level, where a definition can come after the formula.
   (define (maybe-bound? id)
@@ -256,6 +286,12 @@
                     body))
                 (list fallback ...))))
 
+  ;; R's quote, which ~ does not need. It always fails, with a message that
+  ;; says what to write.
+  (define-syntax-class quoted
+    (pattern (~and g ((~and q (~fail #:unless (quote-id? #'q))) d))
+             #:fail-when #'g (quoted-message #'g #'d)))
+
   (define-syntax-class column
     #:description "a column name"
     (pattern name:id
@@ -297,7 +333,7 @@
     (pattern (~seq o:infix-operator t:term)
              #:with (expr ...) #'('o t.expr))
     (pattern (~seq (~and o (~fail #:unless (unsupported-id? #'o))) _ ...)
-             #:fail-when #'o (unsupported-message #'o)
+             #:fail-when #'o (string-append (unsupported-message #'o) (ratio-hint #'o #'()))
              #:with (expr ...) #'()))
 
   (define-syntax-class term
@@ -332,7 +368,15 @@
              #:with expr #'(list 'o t.expr u.expr ...))
     (pattern ((~and o (~datum ^)) t:term n:power)
              #:with expr #'(list 'o t.expr 'n))
-    (pattern (~and g (f:id _ ...) (~fail #:when (or (reserved-id? #'f) (infix-group? #'g))))
+    (pattern q:quoted
+             #:with expr #'q)
+    (pattern (~and g ((~and o (~fail #:unless (unsupported-id? #'o))) operand ...)
+                   (~fail #:when (infix-group? #'g)))
+             #:fail-when #'o
+             (string-append (unsupported-message #'o) (ratio-hint #'o #'(operand ...)))
+             #:with expr #'g)
+    (pattern (~and g (f:id _ ...)
+                   (~fail #:when (or (reserved-id? #'f) (quote-id? #'f) (infix-group? #'g))))
              #:do [(define I? (eq? (syntax-e #'f) 'I))]
              #:fail-when (and I? (not (= (length (syntax->list #'g)) 2)) #'g)
              "I takes one Racket expression, as in (I (expt x 2))"
@@ -360,16 +404,50 @@
                    ((~optional s:sign) t:term step:infix-step ...))
              #:with (expr ...) #'((~? 's) t.expr step.expr ... ...)))
 
+  ;; A response is columns, not a transform. A group that starts with I, or
+  ;; with a bound name and has more than column names, is a transform, and
+  ;; so is a group of columns whose first name is a procedure where the
+  ;; formula is written, which only the running program knows, so its `expr`
+  ;; checks it.
   (define-syntax-class response
     #:description "a response: a column name, (surv time status) or (column ...)"
-    (pattern _:column)
-    (pattern ((~datum surv) _:column _:column))
-    (pattern (_:column ...+))))
+    #:attributes (expr)
+    (pattern c:column
+             #:with expr #''c)
+    (pattern (~and r ((~datum surv) _:column _:column))
+             #:with expr #''r)
+    (pattern q:quoted
+             #:with expr #'q)
+    (pattern (~and g (h:id e ...)
+                   (~fail #:unless
+                          (or (eq? (syntax-e #'h) 'I)
+                              (and (bound-here? #'h)
+                                   (not (quote-id? #'h))
+                                   (not (andmap (lambda (e) (or (identifier? e) (string? (syntax-e e))))
+                                                (syntax->list #'(e ...))))))))
+             #:fail-when #'g transformed-response-message
+             #:with expr #'g)
+    (pattern (~and g ((~and h:column (~fail #:when (or (eq? (syntax-e #'h) 'I) (quote-id? #'h))))
+                      _:column ...))
+             #:with expr (if (referable? #'h)
+                             #`(checked-response 'g (lambda () h) (quote-syntax g)
+                                                 #,transformed-response-message)
+                             #''g))))
 
 (define-syntax (~ stx)
   (syntax-parse stx
     [(_ response:response . rhs:right-hand-side)
-     #'(make-formula 'response rhs.expr ...)]))
+     #'(make-formula response.expr rhs.expr ...)]))
+
+;; The response of several columns `response`, unless its first name has a
+;; procedure as its Racket binding where the formula is written, as `head`
+;; returns it: the response is then a transform, such as (log mpg), and
+;; `form`, the response as written, is a syntax error with `message`.
+(define (checked-response response head form message)
+  (define v (with-handlers ([exn:fail:contract:variable? (lambda (e) #f)]) (head)))
+  (when (procedure? v)
+    (raise-syntax-error '~ message form))
+  response)
 
 ;; The response columns of formula f, as strings.
 (define (response-columns f)

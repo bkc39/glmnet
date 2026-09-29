@@ -425,7 +425,7 @@
     (check-equal? (formula-response (~ blood-pressure age)) 'blood-pressure))
 
   (test-case "R's operators that the language lacks are errors that say so"
-    (check-exn #rx"~: / is an operator of R's formulas that this formula language does not have\n  at: /"
+    (check-exn #rx"~: / is an operator of R's formulas that this formula language does not have; for a ratio, write \\(I \\(/ x z\\)\\)\n  at: /"
                (lambda () (convert-compile-time-error (y . ~ . a / b))))
     (check-exn #rx"~: %in% is an operator of R's formulas"
                (lambda () (convert-compile-time-error (~ y (a %in% b)))))
@@ -634,6 +634,52 @@
     (define timed (list (cons "y" '(1 2 3)) (cons "time" '(1 2 4))))
     (check-equal? (hash-ref (columns-of (formula-design-matrix (~ y (log time)) timed)) "(log time)")
                   (list 0.0 (log 2.0) (log 4.0))))
+
+  (test-case "a quoted name is a syntax error that says to write the name"
+    (define (message-of thunk)
+      (with-handlers ([exn:fail:syntax? exn-message]) (thunk) #f))
+    (check-regexp-match #rx"~: 'hp is quoted, and ~ quotes the names of a formula itself: write the column as hp or \"hp\"\n  at: \\(quote hp\\)"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg 'hp 'wt)))))
+    (check-regexp-match #rx"~: `hp is quoted.*write the column as hp or \"hp\""
+                        (message-of (lambda () (convert-compile-time-error (mpg . ~ . `hp + wt)))))
+    (check-regexp-match #rx"~: '\"blood pressure\" is quoted.*write the column as \"blood pressure\""
+                        (message-of (lambda () (convert-compile-time-error (~ bp '"blood pressure")))))
+    (check-regexp-match #rx"~: '\\(log hp\\) is quoted.*write \\(log hp\\) without the quote"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg '(log hp))))))
+    (check-regexp-match #rx"~: 'mpg is quoted.*write the column as mpg or \"mpg\""
+                        (message-of (lambda () (convert-compile-time-error (~ 'mpg hp))))))
+
+  (test-case "R's / is a syntax error that says how to write a ratio"
+    (define (message-of thunk)
+      (with-handlers ([exn:fail:syntax? exn-message]) (thunk) #f))
+    (check-regexp-match #rx"~: / is an operator of R's formulas that this formula language does not have; for a ratio, write \\(I \\(/ hp wt\\)\\)\n  at: /"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (/ hp wt))))))
+    (check-regexp-match #rx"~: / is an operator.*; for a ratio, write \\(I \\(/ hp wt\\)\\)"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (hp . / . wt))))))
+    (check-regexp-match #rx"~: / is an operator.*; for a ratio, write \\(I \\(/ x z\\)\\)\n  at: /"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (/ hp wt qsec))))))
+    (check-regexp-match #rx"~: %in% is an operator of R's formulas that this formula language does not have\n  at: %in%"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (%in% hp wt)))))))
+
+  (test-case "a transformed response is a syntax error, and a response of columns is not"
+    (define (message-of thunk)
+      (with-handlers ([exn:fail:syntax? exn-message]) (thunk) #f))
+    (define transformed #rx"~: a transformed response is not supported; add the transformed column to the table, or write the columns of a response of several columns as strings")
+    (check-regexp-match transformed (message-of (lambda () (convert-compile-time-error (~ (I mpg) wt)))))
+    (check-regexp-match transformed
+                        (message-of (lambda () (convert-compile-time-error (~ (log (+ mpg 1)) wt)))))
+    ;; Whether log is a function is known when the formula is made.
+    (check-regexp-match transformed (message-of (lambda () (~ (log mpg) wt))))
+    (check-regexp-match transformed (message-of (lambda () (~ (sqrt mpg) (log hp)))))
+    ;; A response of columns whose first name is bound, not to a function.
+    (define y1 '(1 2 3 5 4 6))
+    (define y2 '(2 4 7 9 8 13))
+    (define two (list (cons "y1" y1) (cons "y2" y2) (cons "x" '(1 2 4 5 5 7))))
+    (check-equal? (formula-response (~ (y1 y2) x)) '(y1 y2))
+    (check-equal? (formula-response (~ ("log" "mpg") wt)) '("log" "mpg"))
+    (check-equal? (glmnet-model-response-names
+                   (formula-fit (~ (y1 y2) x) two #:family 'mgaussian #:lambda 0.1))
+                  '("y1" "y2")))
 
   (test-case "a name that is neither a column nor bound is an error when the transform runs"
     (define f (~ mpg wt (I (* hp scale))))

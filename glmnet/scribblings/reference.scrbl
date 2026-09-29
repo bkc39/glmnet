@@ -1384,13 +1384,23 @@ as a table:
   or @litchar{+}. The reader reads @tt{wt:hp} and @tt{-wt} as one name, so an
   operator needs spaces around it; written as an identifier, such a name is a
   syntax error that says so. So is a number other than @racket[0] and
-  @racket[1], and a group that is neither a prefix form, an infix form nor a
-  transform, such as @racket[(1 x z)]. The error points at the form that is
-  wrong. Inside a transform, a column whose name is not an identifier is
-  written with bars, as @racket[(log |blood pressure|)].
+  @racket[1], a group that is neither a prefix form, an infix form nor a
+  transform, such as @racket[(1 x z)], a quoted name, such as
+  @racket['hp], since @racket[~] quotes the names itself, and R's @tt{/},
+  whose error says to write a ratio as @racket[(I (/ hp wt))]. The error
+  points at the form that is wrong. Inside a transform, a column whose name
+  is not an identifier is written with bars, as
+  @racket[(log |blood pressure|)].
 
   The response is one column, @racket[(surv time-column status-column)] for
   the Cox family, or a list of columns for the multi-response Gaussian family.
+  It is not a transform: a response that starts with @racket[I], or with a
+  bound name and holds more than column names, such as
+  @racket[(log (+ mpg 1))], is a syntax error that says a transformed response
+  is not supported. So is a list of columns whose first name is a procedure
+  where the formula is written, such as @racket[(log mpg)], an error raised
+  when the formula is made, as only then is the value known; the columns of
+  such a response are written as strings, as in @racket[("log" "mpg")].
 
   @examples[#:eval ev
   (~ mpg (* wt hp))
