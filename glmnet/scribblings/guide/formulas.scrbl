@@ -236,8 +236,8 @@ depend on the product, and the lasso leaves it out:
 ]
 
 The operators take any terms, so sums cross and interact term by term:
-@racket[(: (+ age dose) marker)] is @racket[age:marker] and
-@racket[dose:marker], and @racket[(* (+ age dose) marker)] adds the three
+@racket[(: (+ age dose) marker)] gives @racket["age:marker"] and
+@racket["dose:marker"], and @racket[(* (+ age dose) marker)] adds the three
 main effects. The prefix forms take more than two operands, folded from the
 left, and @racket[(* age dose marker)] crosses all three:
 
@@ -359,13 +359,16 @@ are each dropped in the same way:
 A formula model keeps the terms it was fitted with. @racket[predict] builds
 their design matrix from a new table's columns, which can come in any order,
 and does not expand the formula again, so @racket[all] stands for the columns
-it stood for in the fit. The table needs the columns that the terms read, and
-an error names those it lacks:
+it stood for in the fit. The table needs only the columns that the terms read,
+here the age and the dose:
 
 @examples[#:eval ev #:label #f
 (define crossed (formula-fit (~ bp (* age dose)) patients #:lambda 0.1))
-(predict crossed new-patients)
+(predict crossed (list (cons "dose" '(2.0 8.0)) (cons "age" '(40 70))))
 ]
+
+A table that lacks one of them is an error that names it, as
+@secref["formulas-gaussian"] shows.
 
 @subsection[#:tag "formulas-r-syntax"]{From R's syntax}
 
