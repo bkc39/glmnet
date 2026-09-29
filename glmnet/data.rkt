@@ -60,7 +60,8 @@
            as-response
            column-name->string
            table-names
-           select-table-columns))
+           select-table-columns
+           flvectors->design-matrix))
 
 (struct design-matrix (data nrows ncols column-names)
   #:property prop:custom-write
@@ -385,6 +386,25 @@
 
 (define (column-length column)
   (if (vector? column) (vector-length column) (length column)))
+
+;; Columns computed from a table, such as the interactions of a formula (#53),
+;; as a design matrix with the given names. Each column is an flvector of the
+;; same length; an entry that is not finite, from an overflowing product, is an
+;; error that names its column and row.
+(define (flvectors->design-matrix columns names who)
+  (define no (flvector-length (car columns)))
+  (define ni (length columns))
+  (define v (make-f64vector (* no ni)))
+  (for ([column (in-list columns)]
+        [name (in-list names)]
+        [j (in-naturals)])
+    (for ([x (in-flvector column)]
+          [i (in-naturals)])
+      (unless (fl< (flabs x) +inf.0)
+        (raise-arguments-error who "a column of the design matrix has an element that is not finite"
+                               "column" name "row" i "element" x))
+      (f64vector-set! v (+ i (* j no)) x)))
+  (design-matrix v no ni (check-column-names names ni who)))
 
 (define (table->design-matrix t [names (table-names t 'table->design-matrix)])
   (define dup (check-duplicates (map column-name->string names)))

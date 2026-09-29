@@ -89,14 +89,15 @@ A @tech{formula} is written with @racket[~], as R writes @tt{y ~ x1 + x2}:
 the response, then the predictor terms. @racket[~] quotes its body, so the
 column names are written as identifiers, or as strings when they are not
 identifiers or are words of the formula language (@racket[all],
-@racket[surv], @racket[+] and @racket[-]):
+@racket[surv] and the operators @racket[+], @racket[-], @racket[*],
+@racket[:] and @racket[^]):
 
 @examples[#:eval ev #:label #f
 (~ bp age dose)
 (formula-predictor-names (~ bp age dose) patients)
 ]
 
-A term is one of:
+The simplest terms are:
 
 @itemlist[
  @item{a column name, which selects that column;}
@@ -118,13 +119,16 @@ formula selects from a table:
 ]
 
 @racket[all] leaves out the response but not the table's other responses, so
-the second formula excludes them. A column name that is not in the table, or
-a response column added as a predictor, is an error:
+the second formula excludes them. A column name that is not in the table is an
+error:
 
 @examples[#:eval ev #:label #f
 (eval:error (formula-predictor-names (~ bp age weight) patients))
-(eval:error (formula-predictor-names (~ bp age bp) patients))
 ]
+
+The formula language has R's whole algebra of terms: interactions,
+crossing, powers and the intercept, written prefix as here or infix as R
+writes them. @secref["formulas-algebra"] describes it.
 
 The response is one column for most families. For the Cox family it is
 @racket[(surv time status)], as R's @tt{Surv(time, status)}, and for the
@@ -201,6 +205,185 @@ same columns as a matrix:
         (lasso (map list age dose marker) bp #:lambda 0.5))
 ]
 
+@section[#:tag "formulas-algebra"]{The formula algebra}
+
+R's formulas have an algebra of terms, and so do these. A term is a set of
+variables, the table's columns: a column name is a term of one variable, and
+an @emph{interaction} of several variables is a term whose column in the
+design matrix is the product of theirs. The operators build terms from terms,
+as R's @tt{terms} builds them, and the design matrix has a column per term, as
+R's @tt{model.matrix} builds it.
+
+@subsection[#:tag "formulas-interactions"]{Interactions and crossing}
+
+@racket[(: age dose)], R's @tt{age:dose}, is the interaction of age and dose,
+and @racket[(* age dose)], R's @tt{age*dose}, crosses them: both main effects
+and their interaction. The interaction's column is named as R names it, with
+a colon:
+
+@examples[#:eval ev #:label #f
+(formula-predictor-names (~ bp (* age dose)) patients)
+(define X (formula-design-matrix (~ bp (* age dose)) patients))
+(design-matrix->rows (design-matrix-select-rows X '(0 1)))
+]
+
+Each row's third entry is the product of the first two. The fit is the matrix
+fit of that design matrix. In the simulated data blood pressure does not
+depend on the product, and the lasso leaves it out:
+
+@examples[#:eval ev #:label #f
+(coef (formula-fit (~ bp (* age dose)) patients #:lambda 0.5))
+]
+
+The operators take any terms, so sums cross and interact term by term:
+@racket[(: (+ age dose) marker)] is @racket[age:marker] and
+@racket[dose:marker], and @racket[(* (+ age dose) marker)] adds the three
+main effects. The prefix forms take more than two operands, folded from the
+left, and @racket[(* age dose marker)] crosses all three:
+
+@examples[#:eval ev #:label #f
+(formula-predictor-names (~ bp (: (+ age dose) marker)) patients)
+(formula-predictor-names (~ bp (* age dose marker)) patients)
+]
+
+The terms come out in R's order: main effects first, then the interactions of
+two variables, then of three, each in the order they first appear. A term
+written twice, as @racket[(: age dose)] and @racket[(: dose age)] are, counts
+once.
+
+@subsection[#:tag "formulas-powers"]{Powers, and R's @tt{x^2}}
+
+@racket[(^ term n)], R's @tt{(a + b + c)^n}, crosses a sum with itself: every
+interaction of at most @racket[n] of its terms. With @racket[2], that is the
+main effects and every two-way interaction:
+
+@examples[#:eval ev #:label #f
+(formula-predictor-names (~ bp (^ (+ age dose marker) 2)) patients)
+]
+
+A variable crossed with itself is itself, so in a formula @tt{x^2} is not a
+square. R's @tt{y ~ x + x^2} is the same model as @tt{y ~ x}, and so is
+@racket[(~ bp age (^ age 2))]:
+
+@examples[#:eval ev #:label #f
+(formula-predictor-names (~ bp age (^ age 2)) patients)
+]
+
+This surprises people who come to R's formulas from algebra. R writes a
+square @tt{I(x^2)}. The formula language does not have transforms yet, so for
+now a square is a column of its own in the table.
+
+@subsection[#:tag "formulas-removal"]{Removing terms}
+
+@racket[(- term removed ...)] removes the terms that are equal to a term of
+@racket[removed], so it can take an interaction out of a crossing or a column
+out of @racket[all]. A term that is not there is ignored, as in R:
+
+@examples[#:eval ev #:label #f
+(formula-predictor-names (~ bp (- (* age dose marker) (: age dose marker))) patients)
+(formula-predictor-names (~ bp (- (* age dose) dose)) patients)
+(formula-predictor-names (~ bp (- (* age dose) marker)) patients)
+]
+
+@subsection[#:tag "formulas-intercept"]{The intercept}
+
+A model has an intercept unless its formula says otherwise. @racket[0], or
+removing @racket[1] with @racket[- 1], fits without one, as R's @tt{y ~ 0 + x}
+and @tt{y ~ x - 1} do; @racket[1] keeps it. The coefficients still list the
+intercept, at zero, as R's @tt{coef} does:
+
+@examples[#:eval ev #:label #f
+(coef (formula-fit (~ bp 0 age dose) patients #:lambda 0.5))
+]
+
+The fit procedures' @racket[#:intercept?] then defaults to the formula's
+intercept. Given explicitly, it must agree with a formula that writes
+@racket[1], @racket[0] or @racket[- 1], and a contradiction is an error that
+names both; with a formula that writes none, it decides. The Cox family has
+no intercept, and ignores intercept terms.
+
+A formula whose terms leave no predictors, such as @racket[(~ bp 1)] or
+@racket[(~ bp)], is R's intercept-only model. glmnet cannot fit it, since it
+needs at least one predictor, and the formula procedures say so.
+
+@subsection[#:tag "formulas-infix"]{Infix formulas}
+
+The operators can also go between terms, as R writes them. The Racket
+reader's infix dots make @racketfont{(bp . ~ . age * dose + marker)} the same as
+@racket[(~ bp age * dose + marker)], so an R formula reads almost as written:
+
+@examples[#:eval ev #:label #f
+(define f (bp . ~ . 1 + age * dose + marker))
+f
+(formula-predictor-names f patients)
+]
+
+The formula prints as the @racket[~] form that the reader makes of it. The
+operators have R's precedence: @racket[^] binds tightest, then a leading
+@racket[-] or @racket[+], then @racket[:], then @racket[*], then @racket[+]
+and @racket[-], and each groups from the left. A parenthesized group can be
+infix too, and infix and prefix forms mix:
+
+@examples[#:eval ev #:label #f
+(formula-predictor-names (bp . ~ . (age + dose + marker) ^ 2 - age : dose) patients)
+(formula-predictor-names (bp . ~ . - 1 + (* age dose) + marker) patients)
+]
+
+An operator needs spaces around it. The reader reads @tt{age:dose} as one
+name, and a formula that uses such a name is a syntax error that says so:
+
+@examples[#:eval ev #:label #f
+(eval:error (~ bp age:dose))
+]
+
+@subsection[#:tag "formulas-response-rhs"]{The response on the right-hand side}
+
+A response column is not a predictor. R's @tt{model.matrix} drops the response
+when the right-hand side has it as a term of its own, with a warning, and keeps
+it in an interaction; so do the formula procedures, which log the warning on
+the @racket['glmnet] topic. The columns of a Cox or multi-response response
+are each dropped in the same way:
+
+@examples[#:eval ev #:label #f
+(formula-predictor-names (bp . ~ . age + bp + age : bp) patients)
+]
+
+@subsection[#:tag "formulas-new-data"]{Predicting from new data}
+
+A formula model keeps the terms it was fitted with. @racket[predict] builds
+their design matrix from a new table's columns, which can come in any order,
+and does not expand the formula again, so @racket[all] stands for the columns
+it stood for in the fit. The table needs the columns that the terms read, and
+an error names those it lacks:
+
+@examples[#:eval ev #:label #f
+(define crossed (formula-fit (~ bp (* age dose)) patients #:lambda 0.1))
+(predict crossed new-patients)
+]
+
+@subsection[#:tag "formulas-r-syntax"]{From R's syntax}
+
+@tabular[#:style 'boxed
+         #:sep @hspace[2]
+         #:row-properties '(bottom-border ())
+ (list (list @bold{R}                        @bold{Prefix}                          @bold{Infix})
+       (list @tt{y ~ a + b}                  @racket[(~ y a b)]                     @racket[(~ y a + b)])
+       (list @tt{y ~ a:b}                    @racket[(~ y (: a b))]                 @racket[(~ y a : b)])
+       (list @tt{y ~ a*b}                    @racket[(~ y (* a b))]                 @racket[(~ y a * b)])
+       (list @tt{y ~ (a + b + c)^2}          @racket[(~ y (^ (+ a b c) 2))]         @racket[(~ y (a + b + c) ^ 2)])
+       (list @tt{y ~ a*b - a}                @racket[(~ y (- (* a b) a))]           @racket[(~ y a * b - a)])
+       (list @tt{y ~ 0 + a}                  @racket[(~ y 0 a)]                     @racket[(~ y 0 + a)])
+       (list @tt{y ~ a - 1}                  @racket[(~ y (- a 1))]                 @racket[(~ y a - 1)])
+       (list @tt{y ~ .}                      @racket[(~ y all)]                     "")
+       (list @tt{y ~ . - a}                  @racket[(~ y (- all a))]               @racket[(~ y all - a)])
+       (list @tt{y ~ .^2}                    @racket[(~ y (^ all 2))]               @racket[(~ y all ^ 2)])
+       (list @tt{Surv(time, status) ~ .}     @racket[(~ (surv time status) all)]    "")
+       (list @tt{cbind(y1, y2) ~ a}          @racket[(~ (y1 y2) a)]                 ""))]
+
+Each infix form can also be written with the reader's infix dots, as
+@racketfont{(y . ~ . a * b)}. @secref["formulas-r"] lists what the formula
+language does not have.
+
 @section[#:tag "formulas-binomial"]{A binomial fit}
 
 With @racket[#:family 'binomial], the response column holds 0/1 labels. Here
@@ -269,24 +452,33 @@ curve with its predictor's name; see @secref["plot-path-names"].
 @section[#:tag "formulas-r"]{Matching R}
 
 R's @tt{glmnet} takes a matrix @tt{x} and a response @tt{y}, and has no
-formula interface. The formula front end therefore has no numbers of its own:
-a formula fit is the matrix fit of the columns the formula selects, which the
-parity tests compare with R, and its tests require the two to be
-@racket[equal?] for every family. What it takes from R is how the results are
-named: R's @tt{coef} labels the intercept @tt{(Intercept)} and each predictor
-by its column name, and names the elements of a multinomial or multi-response
-result by class or response. The parity tests also check those names against
-R's.
+formula interface. A formula fit is R's @tt{glmnet} on R's
+@tt{model.matrix(formula, data)} without its intercept column, with
+@tt{intercept} set to the formula's. The parity tests check, on R's
+@tt{mtcars} and @tt{longley}, that each formula expands to the terms R's
+@tt{terms} gives, in R's order, that @racket[formula-design-matrix] is R's
+model matrix, names and values, and that the fit is R's; and this package's
+tests require a formula fit to be @racket[equal?] to the matrix fit of its
+design matrix for every family. From R also comes how the results are named:
+R's @tt{coef} labels the intercept @tt{(Intercept)} and each predictor by its
+column name, @tt{wt:hp} for an interaction, and names the elements of a
+multinomial or multi-response result by class or response.
 
 The formula language is smaller than R's:
 
 @itemlist[
- @item{Every predictor is a numeric column. There are no factors to expand
-       into indicator columns, no interactions (@tt{x1:x2}, @tt{x1 * x2}) and
-       no transformations such as @tt{log(x)} or @tt{I(x^2)}; add such columns
-       to the table instead.}
- @item{R's @tt{.} is written @racket[all], and @tt{- 1} is not a term: use
-       @racket[#:intercept? #f].}
+ @item{Every variable is a numeric column. There are no factors to expand
+       into indicator columns, and no transforms such as @tt{log(x)} or
+       @tt{I(x^2)}; add such columns to the table instead.}
+ @item{R's @tt{.} is written @racket[all]. R's @tt{%in%} and @tt{/}
+       (nesting) and @tt{offset()} have no counterpart.}
+ @item{An operator needs spaces around it, since the reader reads
+       @tt{wt:hp} as one name, and a power is an exact integer of at least 2,
+       where R truncates @tt{x^2.5} to @tt{x^2}.}
+ @item{The columns of a @racket[(surv time status)] or multi-column response
+       are each dropped from the right-hand side, as R drops a one-column
+       response. R's response there is the one variable @tt{Surv(time, status)}
+       or @tt{cbind(y1, y2)}, so R would keep @tt{time} as a predictor.}
  @item{A missing or non-finite value is an error that names its column and
        row, where R's default @tt{na.action} would drop the row.}
 ]
