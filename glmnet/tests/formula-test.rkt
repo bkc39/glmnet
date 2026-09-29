@@ -20,6 +20,7 @@
            racket/match
            syntax/macro-testing
            (only-in racket/math sqr)
+           (for-syntax racket/base syntax/parse)
            glmnet
            glmnet/examples/data/mtcars
            (file "../private/demo-utils.rkt"))
@@ -340,28 +341,58 @@
 
   ;; R 4.5.3's attr(terms(f), "intercept"): 1 for mpg ~ wt + hp + -0, whose
   ;; unary minus flips what 0 means, and 0 for mpg ~ wt + hp - -0, which flips
-  ;; it twice. The reader reads -0 as 0, which would invert both.
+  ;; it twice; 0 for + +0 and 1 for - +0. The reader reads -0 and +0 as 0,
+  ;; which would invert two of the four, so the message names no sign.
   (test-case "a sign glued to 0 or 1 is a syntax error; (- 0) is R's -0, both ways"
     (define (message-of thunk)
       (with-handlers ([exn:fail:syntax? exn-message]) (thunk) #f))
-    (check-regexp-match
-     #rx"~: 0 has a sign glued to it, which the reader drops, reading -0 as 0; put a space after the sign, as in \\(- 0\\)\n  at: 0"
-     (message-of (lambda () (convert-compile-time-error (mpg . ~ . wt + hp + -0)))))
-    (check-regexp-match #rx"~: 0 has a sign glued to it"
+    (define glued-0
+      #rx"~: 0 is written with more than its digit, and the reader reads the rest away, as it does a sign glued to it, which R reads as an operator; write 0, \\(\\+ 0\\) or \\(- 0\\)\n  at: 0")
+    (check-regexp-match glued-0
+                        (message-of (lambda () (convert-compile-time-error (mpg . ~ . wt + hp + -0)))))
+    (check-regexp-match glued-0
                         (message-of (lambda () (convert-compile-time-error (mpg . ~ . wt + hp - -0)))))
-    (check-regexp-match #rx"~: 0 has a sign glued to it"
+    (check-regexp-match glued-0
                         (message-of (lambda () (convert-compile-time-error (~ mpg wt hp -0)))))
-    (check-regexp-match #rx"~: 0 has a sign glued to it"
+    (check-regexp-match glued-0
                         (message-of (lambda () (convert-compile-time-error (~ mpg (- (+ wt hp) +0))))))
-    (check-regexp-match
-     #rx"~: 1 has a sign glued to it, which the reader drops, reading \\+1 as 1; put a space after the sign, as in \\(\\+ 1\\)\n  at: 1"
-     (message-of (lambda () (convert-compile-time-error (mpg . ~ . +1 + wt + hp)))))
+    (check-regexp-match glued-0
+                        (message-of (lambda () (convert-compile-time-error (mpg . ~ . wt + hp + +0)))))
+    (check-regexp-match glued-0
+                        (message-of (lambda () (convert-compile-time-error (~ mpg wt hp 00)))))
+    (define glued-1
+      #rx"~: 1 is written with more than its digit, and the reader reads the rest away, as it does a sign glued to it, which R reads as an operator; write 1, \\(\\+ 1\\) or \\(- 1\\)\n  at: 1")
+    (check-regexp-match glued-1
+                        (message-of (lambda () (convert-compile-time-error (mpg . ~ . +1 + wt + hp)))))
+    (check-regexp-match glued-1
+                        (message-of (lambda () (convert-compile-time-error (~ mpg #e1 wt hp)))))
+    (check-same (formula-fit (mpg . ~ . wt + hp + (+ 0)) mtcars #:lambda 0.1)
+                (elnet-fit mtcars-rows mpg #:lambda 0.1 #:intercept? #f))
+    (check-same (formula-fit (mpg . ~ . wt + hp - (+ 0)) mtcars #:lambda 0.1)
+                (elnet-fit mtcars-rows mpg #:lambda 0.1))
     (define without (elnet-fit mtcars-rows mpg #:lambda 0.1 #:intercept? #f))
     (define with (elnet-fit mtcars-rows mpg #:lambda 0.1))
     (for ([f (list (mpg . ~ . wt + hp + (- 0)) (~ mpg wt hp (- 0)) (mpg . ~ . - 0 + wt + hp))])
       (check-same (formula-fit f mtcars #:lambda 0.1) with))
     (for ([f (list (mpg . ~ . wt + hp - (- 0)) (~ mpg (- (+ wt hp) (- 0))))])
       (check-same (formula-fit f mtcars #:lambda 0.1) without)))
+
+  (define-syntax (intercept-formula stx)
+    (syntax-parse stx
+      [(_ keep?:boolean)
+       #:with n (datum->syntax #'keep? (if (syntax-e #'keep?) 1 0))
+       #'(~ mpg n wt hp)]))
+  (define-syntax (intercept-formula/borrowed stx)
+    (syntax-parse stx
+      [(_ keep?:boolean)
+       #:with n (datum->syntax #'keep? (if (syntax-e #'keep?) 1 0) #'keep?)
+       #'(~ mpg n wt hp)]))
+
+  (test-case "a 0 or 1 that a macro builds has a location of its own, or none"
+    (check-equal? (intercept-formula #f) (~ mpg 0 wt hp))
+    (check-equal? (intercept-formula #t) (~ mpg 1 wt hp))
+    (check-exn #rx"~: 0 is written with more than its digit"
+               (lambda () (convert-compile-time-error (intercept-formula/borrowed #f)))))
 
   (test-case "an #:intercept? that contradicts the formula's 1, 0 or - 1 blames the caller"
     (check-exn (blame-matching

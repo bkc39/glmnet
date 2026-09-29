@@ -1403,16 +1403,24 @@ as a table:
   or @litchar{+}. The reader reads @tt{wt:hp} and @tt{-wt} as one name, so an
   operator needs spaces around it; written as an identifier, such a name is a
   syntax error that says so. So is a number other than @racket[0] and
-  @racket[1]; a @racket[0] or @racket[1] with a sign glued to it, since the
-  reader reads @tt{-0} as @racket[0] and drops the sign that R reads as an
-  operator, so that R's @tt{-0} is written @racket[(- 0)]; a group that is
-  neither a prefix form, an infix form nor a transform, such as
-  @racket[(1 x z)]; a quoted name, such as @racket['hp], since @racket[~]
-  quotes the names itself; and R's @tt{/} or @tt{%in%}, between terms or at
-  the head of a group, where the error for @tt{/} says to write a ratio as
-  @racket[(I (/ hp wt))]. The error points at the form that is wrong. Inside a transform, a column whose name
-  is not an identifier is written with bars, as
-  @racket[(log |blood pressure|)].
+  @racket[1]; a @racket[0] or @racket[1] written with more than its digit,
+  such as @tt{-0} or @tt{+0}, since the reader reads both as @racket[0] and
+  drops the sign that R reads as an operator, so that R's @tt{-0} is written
+  @racket[(- 0)] and its @tt{+0} @racket[(+ 0)]; a group that is neither a
+  prefix form, an infix form nor a transform, such as @racket[(1 x z)]; a
+  quoted name, such as @racket['hp], since @racket[~] quotes the names
+  itself; and R's @tt{/} or @tt{%in%}, between terms or at the head of a
+  group, where the error for @tt{/} says to write a ratio as
+  @racket[(I (/ hp wt))]. The error points at the form that is wrong. Inside
+  a transform, a column whose name is not an identifier is written with bars,
+  as @racket[(log |blood pressure|)].
+
+  Whether a @racket[0] or @racket[1] is written with more than its digit is
+  read from its source location, the only trace of its spelling. A macro that
+  builds one into a formula therefore gives it a location of its own, or none:
+  a @racket[0] made by @racket[datum->syntax] with the location of a longer
+  form, such as the @racket[#f] option it stands for, counts as written with
+  more than its digit, and is a syntax error.
 
   The response is one column, @racket[(surv time-column status-column)] for
   the Cox family, or a list of columns for the multi-response Gaussian family.
