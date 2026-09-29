@@ -5,12 +5,14 @@
 ;; and cross-validation. The formula language is R's algebra: terms expand and
 ;; order as R's terms() does, prefix and infix, and the design matrix holds
 ;; their products; transforms are Racket functions of columns, whose names
-;; are the table's columns and then Racket bindings; unknown columns are
-;; errors, and a response on the right-hand side is dropped with a warning. `coef` is keyed by name, and
-;; `predict` rebuilds the design matrix from a table, whatever the order of
-;; its columns. The fixtures are the committed parity datasets, read as tables
-;; with the CSV's column names, and mtcars. parity-test.rkt checks the algebra
-;; against R itself.
+;; are the table's columns and then Racket bindings; columns of strings,
+;; symbols or booleans and (factor x) are factors, coded as R's model.matrix
+;; codes them; unknown columns are errors, and a response on the right-hand
+;; side is dropped with a warning. `coef` is keyed by name, and `predict`
+;; rebuilds the design matrix from a table, whatever the order of its
+;; columns, with the factors' levels of the fit. The fixtures are the
+;; committed parity datasets, read as tables with the CSV's column names, and
+;; R's mtcars and iris. parity-test.rkt checks the algebra against R itself.
 
 (module+ test
   (require rackunit
@@ -22,6 +24,7 @@
            (only-in racket/math sqr)
            glmnet
            glmnet/examples/data/mtcars
+           (only-in glmnet/examples/data/iris [iris iris-species])
            (file "../private/demo-utils.rkt"))
 
   (define longley (load-table "longley"))
@@ -637,9 +640,13 @@
 
   (test-case "a name that is neither a column nor bound is an error when the transform runs"
     (define f (~ mpg wt (I (* hp scale))))
-    (check-equal? (mtcars-names f) '("wt" "(I (* hp scale))"))
+    (check-true (formula? f))
     (check-exn #rx"^formula-fit: a name in a transform is neither a column of the table nor a defined variable\n  name: \"scale\"\n  transform: \"\\(I \\(\\* hp scale\\)\\)\""
                (lambda () (formula-fit f mtcars #:lambda 0.1)))
+    ;; The names run the transform too, since its values decide whether it is
+    ;; a factor, as R's model.matrix evaluates it.
+    (check-exn #rx"^formula-predictor-names: a name in a transform is neither"
+               (lambda () (mtcars-names f)))
     (check-exn #rx"^formula-fit: a transform must read a column of the table\n  transform: \"\\(log horsepower\\)\"\n  formula: \\(~ mpg \\(log horsepower\\)\\)"
                (lambda () (formula-fit (~ mpg (log horsepower)) mtcars #:lambda 0.1))))
 
@@ -757,6 +764,239 @@
     (set! k 4)
     (check-equal? (predict m new) doubled)
     (check-not-equal? doubled before))
+
+  ;; --- factors ----------------------------------------------------------------------
+
+  ;; A small table with a column of each kind that makes a factor, and a
+  ;; column of numbers.
+  (define kinds
+    (list (cons "y" '(1.0 3.0 2.0 5.0 4.0 6.0))
+          (cons "x" '(0.5 1.5 1.0 2.5 2.0 3.0))
+          (cons "group" '("b" "a" "c" "a" "b" "c"))
+          (cons "tag" '(b a c a b c))
+          (cons "mixed" #("b" a "c" a "b" c))
+          (cons "flag" '(#t #f #t #t #f #f))
+          (cons "code" '(3 1 2 1 3 2))))
+
+  (define (kinds-names f) (formula-predictor-names f kinds))
+  (define (kinds-columns f) (columns-of (formula-design-matrix f kinds)))
+
+  ;; The rows of a table at the indices `rows`.
+  (define (table-rows table rows)
+    (for/list ([column (in-list table)])
+      (cons (car column) (for/list ([i (in-list rows)]) (list-ref (cdr column) i)))))
+
+  (test-case "a column of strings, symbols or booleans is a factor, coded by treatment contrasts"
+    ;; R: y ~ group + x, with group a character column
+    (check-equal? (kinds-names (~ y group x)) '("groupb" "groupc" "x"))
+    (define x (kinds-columns (~ y group x)))
+    (check-equal? (hash-ref x "groupb") '(1.0 0.0 0.0 0.0 1.0 0.0))
+    (check-equal? (hash-ref x "groupc") '(0.0 0.0 1.0 0.0 0.0 1.0))
+    ;; Symbols, and a string and a symbol with the same text, are one level.
+    (check-equal? (kinds-names (~ y tag)) '("tagb" "tagc"))
+    (check-equal? (hash-ref (kinds-columns (~ y tag)) "tagc") (hash-ref x "groupc"))
+    (check-equal? (hash-ref (kinds-columns (~ y mixed)) "mixedc") (hash-ref x "groupc"))
+    ;; R codes a logical as a factor with the levels FALSE and TRUE, both even
+    ;; when one is absent.
+    (check-equal? (hash-ref (kinds-columns (~ y flag)) "flagTRUE") '(1.0 0.0 1.0 1.0 0.0 0.0))
+    (check-equal? (formula-predictor-names (~ y on) (list (cons "y" '(1 2 3)) (cons "on" '(#t #t #t))))
+                  '("onTRUE"))
+    ;; Numbers are a number, as in R, and all takes a factor column as it is.
+    (check-equal? (kinds-names (~ y code)) '("code"))
+    (check-equal? (kinds-names (~ y (- all tag mixed))) '("x" "groupb" "groupc" "flagTRUE" "code")))
+
+  (test-case "(factor x) makes numbers a factor, its levels sorted by value, as R's factor()"
+    ;; R: mpg ~ wt + factor(cyl)
+    (check-equal? (mtcars-names (mpg . ~ . wt + (factor cyl))) '("wt" "(factor cyl)6" "(factor cyl)8"))
+    (check-equal? (mtcars-names (~ mpg wt (factor "cyl"))) '("wt" "(factor cyl)6" "(factor cyl)8"))
+    (check-equal? (hash-ref (columns-of (formula-design-matrix (~ mpg (factor cyl)) mtcars))
+                            "(factor cyl)6")
+                  (for/list ([c (in-list (mtcars-column "cyl"))]) (if (= c 6.0) 1.0 0.0)))
+    ;; 9 comes before 10, 6 and 6.0 are one level, and a level is named as
+    ;; Racket prints its number, without a trailing .0.
+    (define codes (list (cons "y" '(1 2 3 4 5 6)) (cons "k" '(10 9 2.5 6 6.0 -1))))
+    (check-equal? (formula-predictor-names (~ y (factor k)) codes)
+                  '("(factor k)2.5" "(factor k)6" "(factor k)9" "(factor k)10"))
+    ;; Of strings, the levels of the strings; of booleans, those present.
+    (check-equal? (kinds-names (~ y (factor group))) '("(factor group)b" "(factor group)c"))
+    (check-equal? (formula-predictor-names (~ y (factor on)) (list (cons "y" '(1 2)) (cons "on" '(#f #t))))
+                  '("(factor on)TRUE"))
+    ;; A column whose name is not an identifier is named as a string.
+    (check-equal? (formula-predictor-names (~ y (factor "n k"))
+                                           (list (cons "y" '(1 2 3)) (cons "n k" '(1 2 1))))
+                  '("(factor \"n k\")2")))
+
+  (test-case "string levels sort by string<?, as R's sort() does in the C locale"
+    ;; R with LC_COLLATE=C: 10 9 A B Z _z a b. An en_US session sorts them
+    ;; _z 10 9 a A b B Z.
+    (define letters* (list (cons "y" '(1 2 3 4 5 6 7 8))
+                           (cons "g" '("b" "B" "a" "A" "Z" "_z" "10" "9"))))
+    (check-equal? (formula-predictor-names (~ y g) letters*)
+                  '("g9" "gA" "gB" "gZ" "g_z" "ga" "gb")))
+
+  (test-case "without an intercept, the first factor is coded by dummies, as R's model.matrix does"
+    ;; R: mpg ~ 0 + wt + factor(cyl)
+    (check-equal? (mtcars-names (mpg . ~ . 0 + wt + (factor cyl)))
+                  '("wt" "(factor cyl)4" "(factor cyl)6" "(factor cyl)8"))
+    ;; R: mpg ~ 0 + factor(cyl) + factor(gear): only the first factor
+    (check-equal? (mtcars-names (mpg . ~ . 0 + (factor cyl) + (factor gear)))
+                  '("(factor cyl)4" "(factor cyl)6" "(factor cyl)8" "(factor gear)4" "(factor gear)5"))
+    ;; R: mpg ~ 0 + wt + wt:factor(cyl): in the first term that has a factor
+    (check-equal? (mtcars-names (mpg . ~ . 0 + wt + wt : (factor cyl)))
+                  '("wt" "wt:(factor cyl)4" "wt:(factor cyl)6" "wt:(factor cyl)8"))
+    ;; The dummies add up to the intercept's column of ones.
+    (define x (kinds-columns (~ y 0 group)))
+    (check-equal? (map + (hash-ref x "groupa") (hash-ref x "groupb") (hash-ref x "groupc"))
+                  (make-list 6 1.0))
+    ;; R: y ~ 0 + flag + x, with flag a logical column
+    (check-equal? (kinds-names (~ y 0 flag x)) '("flagFALSE" "flagTRUE" "x")))
+
+  (test-case "in an interaction, a factor is coded by R's marginality rule"
+    ;; R: mpg ~ wt * factor(cyl): contrasts, as the main effect is there
+    (check-equal? (mtcars-names (mpg . ~ . wt * (factor cyl)))
+                  '("wt" "(factor cyl)6" "(factor cyl)8" "wt:(factor cyl)6" "wt:(factor cyl)8"))
+    ;; R: mpg ~ wt:factor(cyl): without the main effect, dummies
+    (check-equal? (mtcars-names (mpg . ~ . wt : (factor cyl)))
+                  '("wt:(factor cyl)4" "wt:(factor cyl)6" "wt:(factor cyl)8"))
+    ;; R: mpg ~ factor(cyl) + wt:factor(cyl): a slope for each level
+    (check-equal? (mtcars-names (mpg . ~ . (factor cyl) + wt : (factor cyl)))
+                  '("(factor cyl)6" "(factor cyl)8" "(factor cyl)4:wt" "(factor cyl)6:wt"
+                    "(factor cyl)8:wt"))
+    ;; R: mpg ~ factor(cyl) * factor(gear): the first factor varies fastest
+    (check-equal? (mtcars-names (mpg . ~ . (factor cyl) * (factor gear)))
+                  '("(factor cyl)6" "(factor cyl)8" "(factor gear)4" "(factor gear)5"
+                    "(factor cyl)6:(factor gear)4" "(factor cyl)8:(factor gear)4"
+                    "(factor cyl)6:(factor gear)5" "(factor cyl)8:(factor gear)5"))
+    (define x (kinds-columns (~ y (* group x))))
+    (check-equal? (hash-ref x "groupb:x") (map * (hash-ref x "groupb") (hash-ref x "x"))))
+
+  (test-case "a factor needs two levels, and a column holds one kind of value; errors name it"
+    (define one (list (cons "y" '(1 2 3)) (cons "g" '("a" "a" "a")) (cons "k" '(4 4 4))))
+    (check-exn #rx"^formula-fit: a factor must have at least two levels\n  column: \"g\"\n  level: \"a\""
+               (lambda () (formula-fit (~ y g) one #:lambda 0.1)))
+    (check-exn #rx"^formula-predictor-names: a factor must have at least two levels\n  factor: \"\\(factor k\\)\"\n  level: \"4\""
+               (lambda () (formula-predictor-names (~ y (factor k)) one)))
+    (define y '(1 2 3))
+    (check-exn #rx"^formula-fit: a column mixes numbers with strings or symbols\n  column: \"g\"\n  row: 2\n  element: \"b\""
+               (lambda () (formula-fit (~ y g) (list (cons "y" y) (cons "g" '(1 2 "b"))) #:lambda 0.1)))
+    (check-exn #rx"^formula-fit: a column mixes strings or symbols with numbers\n  column: \"g\"\n  row: 1\n  element: 2"
+               (lambda () (formula-fit (~ y g) (list (cons "y" y) (cons "g" '("a" 2 "b"))) #:lambda 0.1)))
+    (check-exn #rx"a column mixes booleans with strings or symbols\n  column: \"h\""
+               (lambda () (formula-fit (~ y h) (list (cons "y" y) (cons "h" '(#t "a" #f))) #:lambda 0.1)))
+    ;; Among numbers, another value is not a real number, as before.
+    (check-exn #rx"the table has an element that is not a real number\n  column: \"g\"\n  row: 1"
+               (lambda () (formula-fit (~ y g) (list (cons "y" y) (cons "g" '(1 #\a 2))) #:lambda 0.1)))
+    (check-exn #rx"^formula-design-matrix: a transform's values mix numbers with strings or symbols\n  transform: \"\\(if \\(> hp 150\\) \\\\\"high\\\\\" 0\\)\"\n  row: 4\n  value: \"high\""
+               (lambda () (formula-design-matrix (~ mpg (if (> hp 150) "high" 0)) mtcars))))
+
+  (test-case "a transform whose values are strings or booleans is a factor, as in R"
+    ;; R: mpg ~ ifelse(hp > 150, "high", "low") + wt
+    (check-equal? (mtcars-names (mpg . ~ . (if (> hp 150) "high" "low") + wt))
+                  '("(if (> hp 150) \"high\" \"low\")low" "wt"))
+    ;; R: mpg ~ I(hp > 150) + wt
+    (check-equal? (mtcars-names (mpg . ~ . (> hp 150) + wt)) '("(> hp 150)TRUE" "wt"))
+    ;; R: mpg ~ factor(gear > 3) * wt
+    (check-equal? (mtcars-names (mpg . ~ . (factor (> gear 3)) * wt))
+                  '("(factor (> gear 3))TRUE" "wt" "(factor (> gear 3))TRUE:wt"))
+    ;; R: mpg ~ factor(hp %/% 100)
+    (check-equal? (mtcars-names (~ mpg (factor (quotient hp 100))))
+                  '("(factor (quotient hp 100))1" "(factor (quotient hp 100))2"
+                    "(factor (quotient hp 100))3")))
+
+  (test-case "the model keeps its factors' levels, and predict codes new data with them"
+    (define m (formula-fit (mpg . ~ . wt + (factor cyl) + (> hp 150)) mtcars #:lambda 0.1))
+    (check-equal? (formula-model-levels m)
+                  '(("(factor cyl)" "4" "6" "8") ("(> hp 150)" "FALSE" "TRUE")))
+    (check-equal? (formula-model-levels (formula-fit (~ mpg wt) mtcars #:lambda 0.1)) '())
+    ;; New data with some of the levels, 8.0 the level 8.
+    (define new (list (cons "cyl" '(8.0 4)) (cons "hp" '(100 200)) (cons "wt" '(3.0 2.5))))
+    (check-equal? (predict m new) (predict (formula-model-fit m) '((3.0 0 1 0) (2.5 0 0 1))))
+    (check-exn #rx"^predict: a factor has levels that the model was not fitted with\n  factor: \"\\(factor cyl\\)\"\n  new levels: '\\(\"5\" \"7\"\\)\n  levels: '\\(\"4\" \"6\" \"8\"\\)"
+               (lambda () (predict m (list (cons "cyl" '(5 4 7 5)) (cons "hp" '(1 2 3 4))
+                                           (cons "wt" '(1 2 3 4))))))
+    ;; A column of strings: symbols with the same text are its levels.
+    (define g (formula-fit (~ y group x) kinds #:lambda 0.01))
+    (check-equal? (formula-model-levels g) '(("group" "a" "b" "c")))
+    (define rows (list (cons "x" '(1.0 2.0)) (cons "group" '("c" "a"))))
+    (check-equal? (predict g rows) (predict (formula-model-fit g) '((0 1 1.0) (0 0 2.0))))
+    (check-equal? (predict g (list (cons "x" '(1.0 2.0)) (cons "group" '(c a)))) (predict g rows))
+    (check-exn #rx"^predict: a factor has levels that the model was not fitted with\n  column: \"group\"\n  new levels: '\\(\"d\"\\)"
+               (lambda () (predict g (list (cons "x" '(1.0)) (cons "group" '("d"))))))
+    ;; A column that was numbers must still be numbers.
+    (check-exn #rx"^predict: the table has an element that is not a real number\n  column: \"wt\""
+               (lambda () (predict m (list (cons "cyl" '(4)) (cons "hp" '(1)) (cons "wt" '("heavy")))))))
+
+  (test-case "a binomial or multinomial response of strings or booleans has its levels as classes"
+    (define measures '("Sepal.Length" "Sepal.Width" "Petal.Length" "Petal.Width"))
+    (define species (cdr (assoc "Species" iris-species)))
+    (define m (formula-fit (~ Species all) iris-species #:family 'multinomial #:lambda 0.05))
+    (check-same m (multinomial-fit (rows-of iris-species measures)
+                                   (for/list ([s (in-list species)])
+                                     (index-of '("setosa" "versicolor" "virginica") s))
+                                   #:lambda 0.05))
+    (check-equal? (map car (coef m)) '("setosa" "versicolor" "virginica"))
+    (define three (table-rows iris-species '(0 50 100)))
+    ;; R: predict(glmnet(x, y, "multinomial", lambda = 0.05), x[c(1, 51, 101), ], type = "class")
+    (check-equal? (predict m three #:type 'class) '("setosa" "versicolor" "virginica"))
+    ;; R: glmnet(x[, 2:4], iris$Sepal.Length > 5.8, "binomial", lambda = 0.05):
+    ;; FALSE is the baseline, and the class is the level's name.
+    (define long (cons (cons "long" (for/list ([v (in-list (cdr (assoc "Sepal.Length" iris-species)))])
+                                      (> v 5.8)))
+                       iris-species))
+    (define b (formula-fit (~ long Sepal.Width Petal.Length Petal.Width) long
+                           #:family 'binomial #:lambda 0.05))
+    (check-within (cdr (assoc "(Intercept)" (coef b))) -5.363383 1e-6)
+    (check-within (cdr (assoc "Petal.Length" (coef b))) 1.289253 1e-6)
+    (check-equal? (predict b three #:type 'class) '("FALSE" "TRUE" "TRUE"))
+    (check-exn #rx"^formula-fit: a binomial response has two classes; the multinomial family takes more\n  column: \"Species\"\n  classes: '\\(\"setosa\" \"versicolor\" \"virginica\"\\)"
+               (lambda () (formula-fit (~ Species all) iris-species #:family 'binomial #:lambda 0.05)))
+    (define setosa (table-rows iris-species (range 50)))
+    (check-exn #rx"^formula-fit: a binomial response needs two classes\n  column: \"Species\""
+               (lambda () (formula-fit (~ Species all) setosa #:family 'binomial #:lambda 0.05)))
+    (check-exn #rx"^formula-cv: a multinomial response needs at least two classes\n  column: \"Species\""
+               (lambda () (formula-cv (~ Species all) setosa #:family 'multinomial)))
+    ;; A Gaussian response is numbers.
+    (check-exn #rx"^formula-fit: the table has an element that is not a real number\n  column: \"Species\""
+               (lambda () (formula-fit (~ Species all) iris-species #:lambda 0.05))))
+
+  (test-case "factor takes one column or Racket expression, and says so where it is written"
+    (define (message-of thunk)
+      (with-handlers ([exn:fail:syntax? exn-message]) (thunk) #f))
+    (check-regexp-match #rx"~: factor takes one column or Racket expression, as in \\(factor cyl\\)\n  at: \\(factor cyl gear\\)"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (factor cyl gear))))))
+    (check-regexp-match #rx"~: factor takes one column or Racket expression"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (factor))))))
+    (check-regexp-match #rx"~: expected a column, or a Racket expression such as \\(> hp 150\\)\n  at: 3"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (factor 3))))))
+    (check-regexp-match #rx"~: \\(wt hp\\) is not a Racket expression: wt is not bound\n  at: \\(wt hp\\)"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (factor (wt hp)))))))
+    (check-regexp-match #rx"~: cyl:gear reads as one name"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (factor cyl:gear)))))))
+
+  (test-case "(factor x) is data, printed and compared as written"
+    (define f (mpg . ~ . wt * (factor cyl)))
+    (check-equal? (format "~a" f) "(~ mpg wt * (factor cyl))")
+    (check-equal? f (make-formula 'mpg 'wt '* '(factor cyl)))
+    (check-true (formula-term/c '(factor cyl)))
+    (define gear>3 (transform-term "(> gear 3)" '(gear) (lambda (g) (> g 3))))
+    (check-true (formula-term/c (list 'factor gear>3)))
+    (check-false (formula-term/c '(factor cyl gear)))
+    (check-false (formula-term/c '(factor (> gear 3))))
+    (check-equal? (format "~a" (~ mpg (factor (> gear 3)))) "(~ mpg (factor (> gear 3)))")
+    (check-equal? (formula-predictor-names (make-formula 'mpg (list 'factor gear>3)) mtcars)
+                  '("(factor (> gear 3))TRUE")))
+
+  (test-case "a formula fit with factors is the matrix fit of its dummies, for any family"
+    (define f (mpg . ~ . wt + (factor cyl)))
+    (define x (for/list ([w (in-list (mtcars-column "wt"))] [c (in-list (mtcars-column "cyl"))])
+                (list w (if (= c 6.0) 1 0) (if (= c 8.0) 1 0))))
+    (check-same (formula-fit f mtcars #:lambda 0.1) (elnet-fit x mpg #:lambda 0.1))
+    (check-same (formula-path f mtcars #:lambda '(1.0 0.1)) (elnet-path x mpg #:lambda '(1.0 0.1)))
+    (check-same (formula-fit (am . ~ . wt + (factor cyl)) mtcars #:family 'binomial #:lambda 0.05)
+                (logistic-fit x (mtcars-column "am") #:lambda 0.05))
+    ;; A design matrix as the table: (factor x) of its numbers.
+    (define dm (table->design-matrix mtcars '("mpg" "wt" "cyl")))
+    (check-equal? (formula-design-matrix f dm) (formula-design-matrix f mtcars)))
 
   ;; --- name-keyed results -----------------------------------------------------------
 

@@ -27,9 +27,11 @@ glmnet/                        Racket collection
   core/formula.rkt             formula front end: (~ y all) on a table -> any family,
                                a formula-model with name-keyed coef and predict
   core/terms.rkt               formula terms: R's terms() expansion (+ - * : ^, 0/1),
-                               transforms (log x), (I expr), and model.matrix();
-                               terms are sorted index lists
+                               transforms (log x), (I expr), factors (strings,
+                               booleans, (factor x)) with their levels, and
+                               model.matrix()'s coding; terms are sorted index lists
   examples/data/mtcars.rkt     R's mtcars as a table, for formula examples and parity
+  examples/data/iris.rkt       R's iris, Species as strings, likewise
   main.rkt                     public API (require glmnet)
   plot.rkt                     glmnet/plot: R's plot.glmnet / plot.cv.glmnet on plot-lib
                                (picts); not re-exported by main.rkt
@@ -52,6 +54,22 @@ them: plot-lib is Typed Racket and pulls in the drawing stack, and
 `(require glmnet)` must not load it, just as Racket's own `plot` stays out of
 `racket`. Their documentation is a guide chapter (`guide/plots.scrbl`, tag
 `plots`) and a reference section (`ref-plot`, `@defmodule[glmnet/plot]`).
+
+The formula language (#53) is R's, checked against R's `terms()` and
+`model.matrix()` by the parity goldens. A new kind of formula term, such as
+another R call with a meaning of its own, adds:
+
+- its data form to `term?` and `parse-term` in `core/terms.rkt`, and a
+  clause of the `term` syntax class of `~` in `core/formula.rkt`, before the
+  transform clause, since any other group whose head is bound is a transform;
+- a variable struct and a clause in each of `leaf-variable`,
+  `variable-label`, `variable-kind`, `variable-inputs`, `variable-values`
+  and `variable-flonums`;
+- if its values can make a factor, the rule in `factor-levels`. Levels are
+  found by `resolve-levels` when the model is fitted and kept in the terms;
+  `design-codings` applies R's coding, `model-terms-column-names` and
+  `terms->design-matrix` name and build the columns;
+- R parity fixtures that map R's name of the term to its Racket source.
 
 ## Non-negotiable invariants
 
@@ -138,7 +156,10 @@ different `α` (`parm`) and `λ`. Each new capability is shipped as one unit:
    - `core/formula.rkt`: the `families` table (the fit, path and cv
      procedures, the type measures with the default first, and whether
      `#:intercept?` applies), `family/c`, and the response checks
-     (`response-form-problem` and `model-frame`).
+     (`response-form-problem` and `model-frame`). A family whose response
+     has classes takes a response of strings, symbols or booleans through
+     `response-classes` in `model-frame`, and `coef` and `predict` name the
+     classes through `prop:class-labels` (`core/model.rkt`).
    - `core/model.rkt`: `row-transform` and `check-type` (what `#:type`
      makes of the linear predictor), and for a family with one coefficient
      vector per class or response, the grouped cases of `single-fit-path`,
@@ -226,10 +247,10 @@ Done: Phase 0 (toolchain + FFI spine); the six families of R glmnet 4.1
 Poisson and multi-response Gaussian) as single fits; and the R-style modelling
 arc #44: regularization paths (#10), the design-matrix layer (#35), the
 generic model interface (#25), cross-validation (#27), plots (#28) and the
-formula front end (#26); and R's formula algebra and transforms (#53, legs 1
-and 2).
+formula front end (#26); and R's formula language, its algebra, transforms
+and factors (#53).
 
-Next: factors in formulas (#53, leg 3); the per-fit knobs, weights,
+Next: the per-fit knobs, weights,
 `penalty.factor`, coefficient limits, offsets and `exclude` (#12); sparse
 input through `spelnet` / `splognet` / `spfishnet` (#11), already present in
 `vendor/`; the data-source adapters of the input-formats arc (#41); and parity

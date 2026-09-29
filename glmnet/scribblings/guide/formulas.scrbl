@@ -32,9 +32,10 @@ A @tech{table} is any of these:
  @item{a @racket[design-matrix?] with column names.}
 ]
 
-A name is a string or a symbol, and a column a list or vector of reals. Names
-are compared as strings, so the symbol @racket['age] and the string
-@racket["age"] name the same column. The examples in this chapter use a table
+A name is a string or a symbol, and a column a list or vector of reals, or
+of strings, symbols or booleans, which a formula reads as categories (see
+@secref["formulas-factors"]). Names are compared as strings, so the symbol
+@racket['age] and the string @racket["age"] name the same column. The examples in this chapter use a table
 of 60 simulated patients: an @racket["age"], a @racket["dose"] and a
 @racket["marker"], and the responses of three models. Blood pressure,
 @racket["bp"], depends on age and dose; a relapse, @racket["relapse"] (0 or
@@ -80,8 +81,8 @@ D
 (design-matrix-column-names D)
 ]
 
-Only the columns a model reads must hold numbers, so a table can carry other
-columns, such as an identifier or a label.
+Only the columns a model reads are checked, so a table can carry other
+columns, such as an identifier.
 
 @section[#:tag "formulas-language"]{Formulas}
 
@@ -129,8 +130,10 @@ error:
 
 The formula language also has R's operators for interactions, crossing,
 powers and the intercept, written prefix as here or infix as R writes them,
-which @secref["formulas-algebra"] describes, and transforms such as
-@racket[(log age)], which @secref["formulas-transforms"] describes.
+which @secref["formulas-algebra"] describes; transforms such as
+@racket[(log age)], which @secref["formulas-transforms"] describes; and
+categorical predictors, columns of strings and @racket[(factor x)], which
+@secref["formulas-factors"] describes.
 
 The response is one column for most families. For the Cox family it is
 @racket[(surv time status)], as R's @tt{Surv(time, status)}, and for the
@@ -387,7 +390,8 @@ an error names those it lacks:
 
 Each infix form can also be written with the reader's infix dots, as
 @racketfont{(y . ~ . a * b)}. @secref["formulas-transforms"] has the
-transforms, such as R's @tt{log(a)}, and @secref["formulas-r"] lists what the
+transforms, such as R's @tt{log(a)}, @secref["formulas-factors-r"] the
+factors, such as R's @tt{factor(a)}, and @secref["formulas-r"] lists what the
 formula language does not have.
 
 @section[#:tag "formulas-transforms"]{Transforms}
@@ -473,7 +477,9 @@ instead.
 @subsection[#:tag "formulas-transform-values"]{Values and new data}
 
 Each value of a transform must be a real number and finite, and an error
-names the transform and the row where it is not. @racket[predict] evaluates
+names the transform and the row where it is not, unless its values are
+strings, symbols or booleans, which make it a factor (see
+@secref["formulas-factor-transforms"]). @racket[predict] evaluates
 the transforms again on the new table's rows, so it needs the columns they
 read, and it reads their Racket bindings again, as R's @tt{predict} does:
 
@@ -522,10 +528,214 @@ column @racket["(log hp)"] here:
 R's vectorized @tt{pmin} is Racket's @racket[min] here, since a transform
 sees one row at a time.
 
+@section[#:tag "formulas-factors"]{Categorical predictors}
+
+A @emph{factor} is a categorical variable: its values name categories, such as
+a species or a number of cylinders, rather than measure a quantity. R's
+@tt{model.matrix} expands a factor into indicator columns, and so does the
+formula front end. The examples in this section use R's @tt{mtcars}, whose
+@racket["cyl"] counts each car's cylinders, and R's @tt{iris}, whose
+@racket["Species"] names each flower's species as a string. The modules
+@racketmodname[glmnet/examples/data/mtcars] and
+@racketmodname[glmnet/examples/data/iris] provide them as tables:
+
+@examples[#:eval ev #:label #f
+(require glmnet/examples/data/mtcars glmnet/examples/data/iris)
+(table-column-names iris)
+(list-ref (cdr (assoc "Species" iris)) 100)
+]
+
+@subsection[#:tag "formulas-factor-columns"]{Which columns are factors}
+
+A column is a factor when its values are strings or symbols, as a character
+column is in R. A string and a symbol with the same text are the same
+category, so @racket["setosa"] and @racket['setosa] are. A column of booleans
+is a factor too, as R's logical columns are, with the categories
+@racket["FALSE"] and @racket["TRUE"]. A column of numbers is a number, as in
+R, and @racket[(factor x)], R's @tt{factor(x)}, makes a factor of it, for
+numbers that are codes, as cylinder counts are:
+
+@examples[#:eval ev #:label #f
+(formula-predictor-names (Sepal.Length . ~ . Petal.Width + Species) iris)
+(formula-predictor-names (mpg . ~ . wt + cyl) mtcars)
+(formula-predictor-names (mpg . ~ . wt + (factor cyl)) mtcars)
+]
+
+A factor's columns are named as R names them, by the variable and the
+category, so @racket["Speciesversicolor"] is R's @tt{Speciesversicolor}.
+@racket[(factor cyl)] is named by its source, as a transform is, so R's
+@tt{factor(cyl)6} is @racket["(factor cyl)6"] here. A column that mixes
+numbers with strings, or either with booleans, is an error that names it.
+
+@subsection[#:tag "formulas-levels"]{Levels and baselines}
+
+The categories of a factor are its @emph{levels}: its distinct values, sorted
+as R's @tt{factor()} sorts them. Numbers are sorted by value, strings and
+symbols with @racket[string<?], and booleans @racket["FALSE"] before
+@racket["TRUE"]. The first level is the @emph{baseline}, which the other
+levels are compared with. A factor with one level is an error, as in R, since
+it has nothing to compare.
+
+@racket[string<?] compares characters by code point, which is how R's
+@tt{sort} orders strings in the C locale: digits before capital letters, and
+capital letters before small ones, so @racket["B"] comes before
+@racket["a"]. An R session in another locale, such as @tt{en_US}, sorts
+letters without regard to case first, so for levels that differ in case R
+there can choose a different baseline.
+
+A fitted model keeps its factors' levels, as R's @tt{xlevels}, and
+@racket[formula-model-levels] returns them:
+
+@examples[#:eval ev #:label #f
+(define cars
+  (formula-fit (mpg . ~ . wt + (factor cyl)) mtcars #:lambda 0.1))
+(formula-model-levels cars)
+(coef cars)
+]
+
+Four cylinders is the baseline. At @math{λ = 0.1}, a six-cylinder car does 3.7
+miles per gallon fewer than a four-cylinder car of the same weight, and an
+eight-cylinder car 5.6 fewer.
+
+@subsection[#:tag "formulas-contrasts"]{Treatment contrasts}
+
+The design matrix codes a factor by @emph{treatment contrasts}, R's default:
+a column for each level but the baseline, which is 1 in the rows at that level
+and 0 in the others. A coefficient is then the difference between its level
+and the baseline. For the cylinder counts:
+
+@tabular[#:style 'boxed
+         #:sep @hspace[2]
+         #:row-properties '(bottom-border ())
+ (list (list @bold{Cylinders}  @racket["(factor cyl)6"]  @racket["(factor cyl)8"])
+       (list "4 (baseline)"    "0"                      "0")
+       (list "6"               "1"                      "0")
+       (list "8"               "0"                      "1"))]
+
+The first cars of @tt{mtcars} have six, four and eight cylinders:
+
+@examples[#:eval ev #:label #f
+(define C (formula-design-matrix (~ mpg (factor cyl)) mtcars))
+(design-matrix->rows (design-matrix-select-rows C '(0 2 4)))
+]
+
+Without an intercept, R's @tt{model.matrix} codes the first factor by
+@emph{dummies}: a column for every level, which together take the intercept's
+place. So does the formula front end. It does this for the first factor only,
+and the others keep their contrasts:
+
+@examples[#:eval ev #:label #f
+(formula-predictor-names (mpg . ~ . 0 + wt + (factor cyl) + (factor gear)) mtcars)
+]
+
+@subsection[#:tag "formulas-factor-interactions"]{Factors in interactions}
+
+The interaction of a number and a factor has a column for each of the
+factor's columns, their product. @racket[(* wt (factor cyl))] gives each
+cylinder count a slope of its own, as a difference from the baseline's:
+
+@examples[#:eval ev #:label #f
+(formula-predictor-names (mpg . ~ . wt * (factor cyl)) mtcars)
+]
+
+Which columns a factor has in a term follows R's rule of marginality, the
+@tt{factors} attribute of R's @tt{terms}. A factor is coded by contrasts in a
+term when the rest of the term, without the factor, is empty or is an earlier
+term of the formula, and by dummies when it is not. In
+@racket[(* wt (factor cyl))], @racket[wt] is a term, so the interaction has
+contrasts. @racket[wt : (factor cyl)] alone
+gives each level a slope and has dummies, and so does
+@racket[(factor cyl) + wt : (factor cyl)], where each level has its own
+intercept and its own slope:
+
+@examples[#:eval ev #:label #f
+(formula-predictor-names (mpg . ~ . wt : (factor cyl)) mtcars)
+(formula-predictor-names (mpg . ~ . (factor cyl) + wt : (factor cyl)) mtcars)
+]
+
+Two factors interact level by level, with the first factor's levels varying
+fastest:
+
+@examples[#:eval ev #:label #f
+(formula-predictor-names (mpg . ~ . (factor cyl) * (factor am)) mtcars)
+]
+
+@subsection[#:tag "formulas-factor-transforms"]{Transforms that make factors}
+
+A transform whose values are strings, symbols or booleans is a factor too, as
+in R, and @racket[(factor expr)] makes a factor of any transform's values, so
+the categories can be computed from numbers:
+
+@examples[#:eval ev #:label #f
+(formula-predictor-names (mpg . ~ . (> hp 150) + wt) mtcars)
+(formula-predictor-names (mpg . ~ . (if (> hp 150) "high" "low") + wt) mtcars)
+(formula-predictor-names (mpg . ~ . (factor (quotient hp 100)) + wt) mtcars)
+]
+
+@racket["high"] sorts before @racket["low"], so it is the second transform's
+baseline.
+
+@subsection[#:tag "formulas-factor-new-data"]{New data and levels}
+
+@racket[predict] codes a new table's factors with the model's levels, as R's
+@tt{predict} does with the model's @tt{xlevels}. The new rows need not have
+every level, in any order, and their values match the levels by label: the
+number @racket[8.0] is the level @racket["8"], and a symbol is the level of the
+string with its text. A level that the model was not fitted with is an error
+that names it, as R's "factor has new levels" is:
+
+@examples[#:eval ev #:label #f
+(define new-cars (list (cons "wt" '(2.5 3.5)) (cons "cyl" '(8 4))))
+(predict cars new-cars)
+(eval:error (predict cars (list (cons "wt" '(3.0)) (cons "cyl" '(5)))))
+]
+
+@subsection[#:tag "formulas-factor-response"]{Categorical responses}
+
+For the binomial and multinomial families, a response of strings, symbols or
+booleans is categorical, as a factor response is for R's @tt{glmnet}: its
+levels are the classes. The second of a binomial response's two classes is
+the one whose probability the model gives. @racket[coef] keys a multinomial
+model's coefficients by class, and @racket[predict] with
+@racket[#:type 'class] returns classes:
+
+@examples[#:eval ev #:label #f
+(define species
+  (formula-fit (~ Species all) iris
+               #:family 'multinomial #:lambda 0.05))
+(map car (coef species))
+(define flowers
+  (list (cons "Sepal.Length" '(5.0 6.5))
+        (cons "Sepal.Width" '(3.4 3.0))
+        (cons "Petal.Length" '(1.5 5.6))
+        (cons "Petal.Width" '(0.2 2.1))))
+(predict species flowers #:type 'class)
+]
+
+@subsection[#:tag "formulas-factors-r"]{From R's factors}
+
+@tabular[#:style 'boxed
+         #:sep @hspace[2]
+         #:row-properties '(bottom-border ())
+ (list (list @bold{R}                           @bold{Racket}                     @bold{Columns})
+       (list @tt{factor(cyl)}                   @racket[(factor cyl)]             @elem{@racket["(factor cyl)6"], @racket["(factor cyl)8"]})
+       (list @elem{@tt{f}, a character column}  @elem{@racket[f], strings or symbols}  @elem{@racket["fb"], @racket["fc"]})
+       (list @elem{@tt{b}, a logical column}    @elem{@racket[b], booleans}       @racket["bTRUE"])
+       (list @tt{I(x > 3)}                      @racket[(> x 3)]                  @racket["(> x 3)TRUE"])
+       (list @tt{ifelse(x > 3, "hi", "lo")}     @racket[(if (> x 3) "hi" "lo")]   @racket["(if (> x 3) \"hi\" \"lo\")lo"])
+       (list @tt{factor(x > 3)}                 @racket[(factor (> x 3))]         @racket["(factor (> x 3))TRUE"])
+       (list @tt{x*f}                           @racket[(* x f)]                  @elem{@racket["x"], @racket["fb"], @racket["x:fb"]})
+       (list @tt{y ~ 0 + f}                     @racket[(~ y 0 f)]                @elem{@racket["fa"], @racket["fb"]}))]
+
+R's other contrasts and its ways to choose a baseline have no counterpart
+here (see @secref["formulas-r"]).
+
 @section[#:tag "formulas-binomial"]{A binomial fit}
 
-With @racket[#:family 'binomial], the response column holds 0/1 labels. Here
-the formula takes every column except the other responses:
+With @racket[#:family 'binomial], the response column holds 0/1 labels, or two
+classes as strings, symbols or booleans (see
+@secref["formulas-factor-response"]). Here the formula takes every column
+except the other responses:
 
 @examples[#:eval ev #:label #f
 (define relapse-cv
@@ -593,24 +803,38 @@ R's @tt{glmnet} takes a matrix @tt{x} and a response @tt{y}, and has no
 formula interface. A formula fit is R's @tt{glmnet} on R's
 @tt{model.matrix(formula, data)} without its intercept column, with
 @tt{intercept} set to the formula's. The parity tests check, on R's
-@tt{mtcars} and @tt{longley}, that each formula expands to the terms R's
-@tt{terms} gives, in R's order, that @racket[formula-design-matrix] is R's
-model matrix, names and values, and that the fit is R's; and this package's
-tests require a formula fit to be @racket[equal?] to the matrix fit of its
-design matrix for every family. From R also comes how the results are named:
-R's @tt{coef} labels the intercept @tt{(Intercept)} and each predictor by its
-column name, @tt{wt:hp} for an interaction, and names the elements of a
-multinomial or multi-response result by class or response. The one change is
-a transform's name, its Racket source: R's @tt{log(hp)}, @tt{I(hp^2)} and
-@tt{log(hp):wt} are @racket["(log hp)"], @racket["(I (expt hp 2))"] or
-@racket["(sqr hp)"], and @racket["(log hp):wt"] here, and the parity tests map
-R's names to these before they compare them.
+@tt{mtcars}, @tt{longley} and @tt{iris}, that each formula expands to the
+terms R's @tt{terms} gives, in R's order, that @racket[formula-design-matrix]
+is R's model matrix, names and values, that a factor's levels are R's, that
+the fit is R's, and that new data is coded and predicted as R's
+@tt{predict} codes and predicts it; and this package's tests require a
+formula fit to be @racket[equal?] to the matrix fit of its design matrix for
+every family. From R also comes how the results are named: R's @tt{coef}
+labels the intercept @tt{(Intercept)} and each predictor by its column name,
+@tt{wt:hp} for an interaction and @tt{Speciesversicolor} for a level, and
+names the elements of a multinomial or multi-response result by class or
+response. The one change is the name of a transform or a @racket[factor], its
+Racket source: R's @tt{log(hp)}, @tt{I(hp^2)}, @tt{log(hp):wt} and
+@tt{factor(cyl)6} are @racket["(log hp)"], @racket["(I (expt hp 2))"] or
+@racket["(sqr hp)"], @racket["(log hp):wt"] and @racket["(factor cyl)6"]
+here, and the parity tests map R's names to these before they compare them.
 
 The formula language is smaller than R's:
 
 @itemlist[
- @item{Every variable is a numeric column or a transform of numeric columns.
-       There are no factors to expand into indicator columns.}
+ @item{A factor is coded by treatment contrasts, R's default, with its first
+       level as the baseline. R's other contrasts, such as @tt{contr.sum} and
+       the polynomial contrasts of ordered factors, and its ways to choose a
+       baseline, @tt{relevel()} and @tt{factor(x, levels = ...)}, have no
+       counterpart.}
+ @item{String levels are sorted by code point, which is R's order in the C
+       locale. In another locale R sorts letters without regard to case
+       first, and can choose a different baseline.}
+ @item{A level of @racket[(factor x)] is labelled as Racket prints the
+       number, @racket["100000"] where R writes @tt{1e+05}, and two numbers
+       that R prints the same, to 15 digits, are two levels here.}
+ @item{A table has no factor type, so a column's levels are the values it
+       has: R keeps a factor's unused levels as columns of zeros.}
  @item{A transform is evaluated one row at a time, where R evaluates it on
        whole columns. R's transforms that read the whole column, such as
        @tt{scale(x)}, @tt{x - mean(x)} and @tt{poly(x, 2)}, the orthogonal
