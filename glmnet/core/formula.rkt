@@ -296,7 +296,7 @@
              #:with expr #''c)
     (pattern (~and s (~fail #:unless (string? (syntax-e #'s))))
              #:with expr #'s)
-    (pattern (~and g (_ . _) (~var c (call not-an-expression)))
+    (pattern (~and g (_ _ ...) (~var c (call not-an-expression)))
              #:with expr #'c.expr))
 
   (define-syntax-class column
@@ -377,7 +377,8 @@
              #:with expr #'(list 'o t.expr 'n))
     (pattern ((~datum factor) a:factor-argument)
              #:with expr #'(list 'factor a.expr))
-    (pattern (~and g ((~datum factor) . args) (~fail #:when (= (length (syntax->list #'args)) 1)))
+    (pattern (~and g ((~datum factor) . args)
+                   (~fail #:when (let ([args (syntax->list #'args)]) (and args (= (length args) 1)))))
              #:fail-when #'g "factor takes one column or Racket expression, as in (factor cyl)"
              #:with expr #'g)
     (pattern (~and g (f:id _ ...)

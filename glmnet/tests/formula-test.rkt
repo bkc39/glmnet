@@ -1014,6 +1014,12 @@
                         (message-of (lambda () (convert-compile-time-error (~ mpg (factor cyl gear))))))
     (check-regexp-match #rx"~: factor takes one column or Racket expression"
                         (message-of (lambda () (convert-compile-time-error (~ mpg (factor))))))
+    (check-regexp-match #rx"~: factor takes one column or Racket expression, as in \\(factor cyl\\)\n  at: \\(factor \\. cyl\\)"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (factor . cyl))))))
+    (check-regexp-match #rx"~: factor takes one column or Racket expression"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (factor cyl . gear))))))
+    (check-regexp-match #rx"~: expected a column, or a Racket expression such as \\(> hp 150\\)\n  at: \\(log \\. hp\\)"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (factor (log . hp)))))))
     (check-regexp-match #rx"~: expected a column, or a Racket expression such as \\(> hp 150\\)\n  at: 3"
                         (message-of (lambda () (convert-compile-time-error (~ mpg (factor 3))))))
     (check-regexp-match #rx"~: \\(wt hp\\) is not a Racket expression: wt is not bound\n  at: \\(wt hp\\)"
