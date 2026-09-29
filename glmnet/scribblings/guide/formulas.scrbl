@@ -487,7 +487,12 @@ At the top level, as in the REPL and in this chapter, a transform's function
 must be defined before the formula, since a later definition cannot be seen
 there; in a module it can be defined anywhere in the module. A name in
 argument position can be defined later in both, since the transform reads it
-when it runs.
+when it runs. A bug in Racket's contracts at the top level makes a formula
+procedure whose first call in a session had a syntax error in its formula
+fail from then on with @tt{lifted/1.1: undefined}; restart the REPL when
+that happens, or define the formula on its own first, as
+@racket[(define f (~ ....))], where a syntax error does no harm, and pass
+@racket[f] to the procedure.
 
 A transform is elementwise: it sees one row at a time. R's @tt{scale(x)} and
 @tt{x - mean(x)} read the whole column; compute such a column in the table
