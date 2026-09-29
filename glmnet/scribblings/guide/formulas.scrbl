@@ -306,7 +306,9 @@ The fit procedures' @racket[#:intercept?] then defaults to the formula's
 intercept. Given explicitly, it must agree with a formula that writes
 @racket[1], @racket[0] or @racket[- 1], and a contradiction is an error that
 names both; with a formula that writes none, it decides. The Cox family has
-no intercept, and ignores intercept terms.
+no intercept, and accepts @racket[1], @racket[0] and @racket[- 1] with any
+@racket[#:intercept?]. As in R, @racket[0] and @racket[- 1] still change how a
+factor is coded (see @secref["formulas-contrasts"]).
 
 A formula whose terms leave no predictors, such as @racket[(~ bp 1)] or
 @racket[(~ bp)], is R's intercept-only model. glmnet cannot fit it, since it
@@ -640,8 +642,9 @@ cylinder count a slope of its own, as a difference from the baseline's:
 
 Which columns a factor has in a term follows R's rule of marginality, the
 @tt{factors} attribute of R's @tt{terms}. A factor is coded by contrasts in a
-term when the rest of the term, without the factor, is empty or is an earlier
-term of the formula, and by dummies when it is not. In
+term when the rest of the term, without the factor, is empty or is contained
+in an earlier term of the formula, that is, when every variable of the rest
+is a variable of one earlier term. It is coded by dummies when it is not. In
 @racket[(* wt (factor cyl))], @racket[wt] is a term, so the interaction has
 contrasts. @racket[wt : (factor cyl)] alone
 gives each level a slope and has dummies, and so does
@@ -651,6 +654,14 @@ intercept and its own slope:
 @examples[#:eval ev #:label #f
 (formula-predictor-names (mpg . ~ . wt : (factor cyl)) mtcars)
 (formula-predictor-names (mpg . ~ . (factor cyl) + wt : (factor cyl)) mtcars)
+]
+
+The earlier term need not be the rest itself. After @racket[wt : hp], which
+contains @racket[wt], @racket[wt : (factor cyl)] has contrasts, as in R,
+though @racket[wt] is not a term of its own:
+
+@examples[#:eval ev #:label #f
+(formula-predictor-names (mpg . ~ . wt : hp + wt : (factor cyl)) mtcars)
 ]
 
 Two factors interact level by level, with the first factor's levels varying
@@ -744,8 +755,11 @@ model's coefficients by class, and @racket[predict] with
        (list @tt{I(x > 3)}                      @racket[(> x 3)]                  @racket["(> x 3)TRUE"])
        (list @tt{ifelse(x > 3, "hi", "lo")}     @racket[(if (> x 3) "hi" "lo")]   @racket["(if (> x 3) \"hi\" \"lo\")lo"])
        (list @tt{factor(x > 3)}                 @racket[(factor (> x 3))]         @racket["(factor (> x 3))TRUE"])
-       (list @tt{x*f}                           @racket[(* x f)]                  @elem{@racket["x"], @racket["fb"], @racket["x:fb"]})
-       (list @tt{y ~ 0 + f}                     @racket[(~ y 0 f)]                @elem{@racket["fa"], @racket["fb"]}))]
+       (list @tt{I(f == "a")}                   @racket[(equal? f "a")]           @racket["(equal? f \"a\")TRUE"])
+       (list @tt{factor(toupper(f))}            @racket[(factor (string-upcase f))]  @elem{@racket["(factor (string-upcase f))B"], @racket["(factor (string-upcase f))C"]})
+       (list @tt{I(!b)}                         @racket[(not b)]                  @racket["(not b)TRUE"])
+       (list @tt{x*f}                           @racket[(* x f)]                  @elem{@racket["x"], @racket["fb"], @racket["fc"], @racket["x:fb"], @racket["x:fc"]})
+       (list @tt{y ~ 0 + f}                     @racket[(~ y 0 f)]                @elem{@racket["fa"], @racket["fb"], @racket["fc"]}))]
 
 R's other contrasts and its ways to choose a baseline have no counterpart
 here (see @secref["formulas-r"]).

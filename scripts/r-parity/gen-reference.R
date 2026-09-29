@@ -610,6 +610,11 @@ formula_fixtures <- list(
        r = "mpg ~ factor(cyl):wt + qsec",
        rkt = c("(mpg . ~ . (factor cyl) : wt + qsec)"),
        names = list(`factor(cyl)` = "(factor cyl)")),
+  ## x:f after a term that contains x, though x is not a term: contrasts.
+  list(id = "formula-mtcars-factor-marginal-contained", dataset = "mtcars",
+       r = "mpg ~ wt:hp + wt:factor(cyl)",
+       rkt = c("(mpg . ~ . wt : hp + wt : (factor cyl))"),
+       names = list(`factor(cyl)` = "(factor cyl)")),
   ## f + x:f: the slope within each level, f coded by dummies in x:f.
   list(id = "formula-mtcars-factor-nested", dataset = "mtcars", r = "mpg ~ factor(cyl) + wt:factor(cyl)",
        rkt = c("(mpg . ~ . (factor cyl) + wt : (factor cyl))"),

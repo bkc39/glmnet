@@ -346,13 +346,26 @@
     (check-exn (blame-matching #rx"expected: boolean\\?")
                (lambda () (formula-fit (~ mpg wt) mtcars #:lambda 0.1 #:intercept? 'yes))))
 
-  (test-case "the Cox family accepts intercept terms and ignores them"
+  (test-case "the Cox family fits no intercept, and 0 changes only how a factor is coded, as in R"
     (define fit (formula-fit (~ (surv time status) karno age) veteran #:family 'cox #:lambda 0.05))
     (check-same (formula-fit (~ (surv time status) 0 karno age) veteran #:family 'cox #:lambda 0.05)
                 (formula-model-fit fit))
     (check-same (formula-fit (~ (surv time status) 1 + karno + age) veteran #:family 'cox
                              #:lambda 0.05 #:intercept? #f)
-                (formula-model-fit fit)))
+                (formula-model-fit fit))
+    ;; R: model.matrix(Surv(time, status) ~ 0 + karno + factor(trt), veteran)
+    ;; has karno factor(trt)1 factor(trt)2, and without the 0, (Intercept)
+    ;; karno factor(trt)2.
+    (check-equal? (formula-predictor-names (~ (surv time status) 0 karno (factor trt)) veteran)
+                  '("karno" "(factor trt)1" "(factor trt)2"))
+    (check-equal? (formula-predictor-names (~ (surv time status) karno (factor trt)) veteran)
+                  '("karno" "(factor trt)2"))
+    (define trt (for/list ([t (in-list (cdr (assoc "trt" veteran)))]) (if (= t 1) '(1 0) '(0 1))))
+    (check-same (formula-fit (~ (surv time status) 0 karno (factor trt)) veteran
+                             #:family 'cox #:lambda 0.05)
+                (cox-fit (map cons (cdr (assoc "karno" veteran)) trt)
+                         (cdr (assoc "time" veteran)) (cdr (assoc "status" veteran))
+                         #:lambda 0.05)))
 
   (test-case "a formula without predictors is an error when it is fitted"
     (check-equal? (formula-predictor-names (~ mpg 1) mtcars) '())
@@ -858,6 +871,10 @@
     ;; R: mpg ~ wt:factor(cyl): without the main effect, dummies
     (check-equal? (mtcars-names (mpg . ~ . wt : (factor cyl)))
                   '("wt:(factor cyl)4" "wt:(factor cyl)6" "wt:(factor cyl)8"))
+    ;; R: mpg ~ wt:hp + wt:factor(cyl): contrasts, as wt is contained in wt:hp,
+    ;; an earlier term, though it is not a term itself
+    (check-equal? (mtcars-names (mpg . ~ . wt : hp + wt : (factor cyl)))
+                  '("wt:hp" "wt:(factor cyl)6" "wt:(factor cyl)8"))
     ;; R: mpg ~ factor(cyl) + wt:factor(cyl): a slope for each level
     (check-equal? (mtcars-names (mpg . ~ . (factor cyl) + wt : (factor cyl)))
                   '("(factor cyl)6" "(factor cyl)8" "(factor cyl)4:wt" "(factor cyl)6:wt"

@@ -1361,9 +1361,12 @@ error that names it. A factor is coded by treatment contrasts, as R's
 first, the baseline, named by the variable's name and the level's label, as
 @racket["(factor cyl)6"] or @racket["Speciesversicolor"]. It has a column for
 every level instead, dummies, where R's @tt{model.matrix} has: in a term
-whose other variables do not make up an earlier term (R's @tt{factors}
-attribute of @tt{terms}), and, without an intercept, for the first factor of
-the first term that has one. The fitted model keeps the levels (see
+that has other variables, when no earlier term contains all of them (R's
+@tt{factors} attribute of @tt{terms}), and, without an intercept, for the
+first factor of the first term that has one. So in
+@racket[(~ mpg wt : (factor cyl))] the factor has dummies, and after
+@racket[wt], or after @racket[wt : hp], which contains @racket[wt], it has
+contrasts. The fitted model keeps the levels (see
 @racket[formula-model-levels]), and @racket[predict] codes a new table with
 them; a value whose level the model was not fitted with is an error that
 names the factor and the new levels.
@@ -1378,8 +1381,11 @@ The intercept of the fit is the formula's: without @racket[#:intercept?], the
 fit procedures fit an intercept unless the formula has @racket[0] or
 @racket[- 1]. An explicit @racket[#:intercept?] must agree with a formula
 that writes @racket[1], @racket[0] or @racket[- 1], which its contract checks,
-naming both; with a formula that writes none, it decides. The Cox family has
-no intercept, and accepts intercept terms and ignores them. A formula whose
+naming both; with a formula that writes none, it decides. The Cox family
+fits no intercept, and accepts @racket[1], @racket[0] and @racket[- 1] with
+any @racket[#:intercept?]. As in R, they still decide how a factor is coded:
+with @racket[0] or @racket[- 1], the first factor has a column for every
+level (see above). A formula whose
 terms leave no predictors, such as @racket[(~ y 1)], cannot be fitted: glmnet
 needs at least one predictor.
 
