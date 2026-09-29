@@ -497,6 +497,14 @@
     (check-regexp-match #rx"~: a power cannot be raised again; R reads x \\^ 2 \\^ 3 as x \\^ \\(2 \\^ 3\\), which is not a power\n  at: \\^"
                         (message-of (lambda () (convert-compile-time-error (y . ~ . (a + b) ^ 2 ^ 3)))))
     (check-equal? (format "~a" (y . ~ . ((a + b) ^ 2) ^ 3)) "(~ y ((a + b) ^ 2) ^ 3)")
+    (check-regexp-match #rx"~: the right-hand side of a formula is a list of terms, and this one has a dot before hp\n  at: hp"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg wt . hp)))))
+    (check-regexp-match #rx"~: the right-hand side .* a dot before hp\n"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg wt + . hp)))))
+    (check-regexp-match #rx"~: the right-hand side .* a dot before hp\n"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg . hp)))))
+    (check-regexp-match #rx"~: expected a term.*\n  at: \\(wt \\. hp\\)"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (wt . hp))))))
     (check-regexp-match #rx"~: expected more terms starting with a column name"
                         (message-of (lambda () (convert-compile-time-error (~ (surv t) all))))))
 

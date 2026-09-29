@@ -145,7 +145,12 @@
   (define (infix-id? stx)
     (or (operator-id? stx) (unsupported-id? stx)))
   (define (any-operator? stx)
-    (ormap infix-id? (syntax->list stx)))
+    (define elements (syntax->list stx))
+    (and elements (ormap infix-id? elements)))
+  ;; What follows the dot of an improper list, as syntax.
+  (define (dotted-tail stx)
+    (define e (syntax-e stx))
+    (if (pair? e) (dotted-tail (datum->syntax stx (cdr e) stx)) stx))
   (define (infix-group? stx)
     (define elements (syntax->list stx))
     (and (pair? elements) (ormap infix-id? (cdr elements))))
@@ -241,9 +246,15 @@
 
   (define-syntax-class right-hand-side
     #:description "the right-hand side of a formula"
-    (pattern (~and rhs (~fail #:when (any-operator? #'rhs)) (_:term ...)))
+    (pattern (~and rhs (~fail #:unless (syntax->list #'rhs)) (~fail #:when (any-operator? #'rhs))
+                   (_:term ...)))
     (pattern (~and rhs (~fail #:unless (any-operator? #'rhs))
-                   ((~optional _:sign) _:term _:infix-step ...))))
+                   ((~optional _:sign) _:term _:infix-step ...)))
+    (pattern (~and rhs (~fail #:when (syntax->list #'rhs)))
+             #:with tail (dotted-tail #'rhs)
+             #:fail-when #'tail
+             (format "the right-hand side of a formula is a list of terms, and this one has a dot before ~s"
+                     (syntax->datum #'tail))))
 
   (define-syntax-class response
     #:description "a response: a column name, (surv time status) or (column ...)"
