@@ -635,6 +635,44 @@
     (check-equal? (hash-ref (columns-of (formula-design-matrix (~ y (log time)) timed)) "(log time)")
                   (list 0.0 (log 2.0) (log 4.0))))
 
+  (test-case "a column named like a function is the column as an argument and the function at the head"
+    ;; R: y ~ pmax(max, x) is 4 5 9: R looks up a call's function by name,
+    ;; skipping the column max.
+    (define t (list (cons "y" '(1 2 3)) (cons "max" '(1 5 9)) (cons "x" '(4 4 4))))
+    (check-equal? (columns-of (formula-design-matrix (~ y (max max x)) t))
+                  (hash "(max max x)" '(4.0 5.0 9.0)))
+    (check-equal? (columns-of (formula-design-matrix (~ y (I (+ 1 (max max x)))) t))
+                  (hash "(I (+ 1 (max max x)))" '(5.0 6.0 10.0)))
+    (check-equal? (mtcars-names (~ mpg (I (abs (- hp (min hp wt)))))) '("(I (abs (- hp (min hp wt))))")))
+
+  (test-case "a transform reads the names that it does not bind itself, and needs only those columns"
+    ;; The lambda's hp is its own, so the transform reads wt alone, and
+    ;; predict needs no hp.
+    (define m (formula-fit (~ mpg (I ((lambda (hp) (* 2 hp)) wt))) mtcars #:lambda 0.1))
+    (define wt (mtcars-column "wt"))
+    (check-equal? (predict m (list (cons "wt" '(3.0))))
+                  (predict (formula-model-fit m) '((6.0))))
+    (check-equal? (formula-model-fit m)
+                  (elnet-fit (map (lambda (v) (list (* 2 v))) wt) mpg #:lambda 0.1))
+    ;; A transform whose let binds every name it uses reads no column.
+    (check-exn #rx"^formula-predictor-names: a transform must read a column of the table\n  transform: \"\\(I \\(let \\(\\(hp 5.0\\)\\) hp\\)\\)\""
+               (lambda () (mtcars-names (~ mpg (I (let ([hp 5.0]) hp)) wt))))
+    ;; Quoted data is data: its names are not read.
+    (check-equal? (hash-ref (columns-of (formula-design-matrix
+                                         (~ mpg (I (+ hp (length '(wt * qsec ^ 2))))) mtcars))
+                            "(I (+ hp (length (quote (wt * qsec ^ 2)))))")
+                  (map (lambda (v) (+ v 5)) (mtcars-column "hp"))))
+
+  (test-case "a function or ^ that a transform binds itself is Racket's, not R's infix arithmetic"
+    (define x (columns-of (formula-design-matrix
+                           (~ mpg (I (let ([combine (lambda (f a b) (f a b))]) (combine * hp wt)))
+                              (I (let ([^ expt]) (^ hp 2))))
+                           mtcars)))
+    (check-equal? (hash-ref x "(I (let ((combine (lambda (f a b) (f a b)))) (combine * hp wt)))")
+                  (map * (mtcars-column "hp") (mtcars-column "wt")))
+    (check-equal? (hash-ref x "(I (let ((^ expt)) (^ hp 2)))")
+                  (map sqr (mtcars-column "hp"))))
+
   (test-case "a quoted name is a syntax error that says to write the name"
     (define (message-of thunk)
       (with-handlers ([exn:fail:syntax? exn-message]) (thunk) #f))
@@ -793,6 +831,26 @@
     (parameterize ([current-namespace ns])
       (eval '(define scale 10)))
     (check-equal? (column-of 'f) '((10.0 20.0 40.0))))
+
+  (test-case "at the top level, a transform's function must be defined first, and ~ checks it as in a module"
+    (define ns (make-base-namespace))
+    (namespace-attach-module (variable-reference->namespace (#%variable-reference)) 'glmnet ns)
+    (define (run expr)
+      (parameterize ([current-namespace ns]) (eval expr)))
+    (define (message-of expr)
+      (with-handlers ([exn:fail:syntax? exn-message]) (run expr) #f))
+    (run '(require glmnet))
+    (check-regexp-match #rx"~: \\(squared x\\) is not a term: squared is not bound"
+                        (message-of '(~ y (squared x))))
+    (check-regexp-match #rx"~: x is not bound, and inside a transform the operators are Racket's, which come first: write \\(\\+ x 1\\)"
+                        (message-of '(~ y (log (x + 1)))))
+    (check-regexp-match #rx"~: \\^ is not a Racket function"
+                        (message-of '(~ y (I (x ^ 2)))))
+    (run '(define (squared v) (* v v)))
+    (check-equal? (run '(design-matrix->columns
+                         (formula-design-matrix (~ y (squared x)) (list (cons "y" '(1 2 3))
+                                                                        (cons "x" '(1 2 4))))))
+                  '((1.0 4.0 16.0))))
 
   (test-case "a transform reads its Racket bindings each time, as R does"
     (define k 2)

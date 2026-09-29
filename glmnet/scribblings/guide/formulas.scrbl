@@ -449,8 +449,7 @@ a transform that uses it is a syntax error that says so:
 A transform reads names as R does, from the data first and then from the
 program. An identifier in argument position, that is, anywhere but first in a
 group, is the table's column of that name when the table has one, and
-otherwise the Racket binding of that name where the formula is written. The
-identifier first in a group, the function, is always the Racket binding. So a
+otherwise the Racket binding of that name where the formula is written. So a
 constant of the program can scale a column:
 
 @examples[#:eval ev #:label #f
@@ -461,13 +460,25 @@ constant of the program can scale a column:
 
 In this chapter @racket[age] is also a Racket variable, the list of ages that
 @racket[patients] was built from, but inside the formula it names the
-column. Names that the transform binds itself, with @racket[let] or
-@racket[for/sum], are its own. A name that is neither a column nor bound is an
-error when the formula is fitted, which names it:
+column. The identifier first in a group, the function, is always the Racket
+binding, even when the table has a column of that name, as R looks up a
+function by name and skips a column: with a column @racket[max],
+@racket[(max max x)] is the larger of that column and @racket[x], R's
+@tt{pmax(max, x)}. Names that the transform binds itself, with @racket[let],
+@racket[lambda] or @racket[for/sum], are its own, and so are not read from the
+table, and neither are the names in quoted data; @racket[predict] needs only
+the columns that a transform reads. A name that is neither a column nor bound
+is an error when the formula is fitted, which names it:
 
 @examples[#:eval ev #:label #f
 (eval:error (formula-fit (~ bp (I (* age scale)) dose) patients #:lambda 0.1))
 ]
+
+At the top level, as in the REPL and in this chapter, a transform's function
+must be defined before the formula, since a later definition cannot be seen
+there; in a module it can be defined anywhere in the module. A name in
+argument position can be defined later in both, since the transform reads it
+when it runs.
 
 A transform is elementwise: it sees one row at a time. R's @tt{scale(x)} and
 @tt{x - mean(x)} read the whole column; compute such a column in the table

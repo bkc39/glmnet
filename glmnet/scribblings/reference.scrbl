@@ -1295,7 +1295,13 @@ the design matrix named by the transform's source, @racket["(log hp)"].
 not first in a group, is the table's column of that name when the table has
 one, and otherwise the Racket binding of that name where the formula is
 written, as R looks for a name in the data and then in the formula's
-environment; an identifier first in a group is always the Racket binding. The
+environment. An identifier first in a group is always the Racket binding, even
+when the table has a column of that name, as R looks up the function of a
+call by name and skips a column: with a column @racket[max],
+@racket[(max max x)] is the larger of that column and @racket[x], R's
+@tt{pmax(max, x)}. A name that the transform binds itself, with
+@racket[let], @racket[lambda] or a @racket[for] form, is its own, and a name
+in quoted data is data; the columns a transform reads are the others. The
 expression is evaluated once for each row, with each column name standing for
 the row's value, so a transform is elementwise. A name that is neither a
 column nor bound is an error, naming it, when the transform is evaluated, not
@@ -1374,9 +1380,16 @@ as a table:
   right-hand side as written. Each transform becomes a
   @racket[transform-term?] value that computes it, whose name is its source,
   the datum written as @racket[write] writes it. A transform's
-  @racket[proc-id] must be bound, and an @racket[arg-expr] or the
-  @racket[expr] of @racket[I] is any Racket expression, in which @racket[^],
-  R's power, is a syntax error that says to write @racket[expt]. A column is
+  @racket[proc-id] must be bound where the formula is written: in a module,
+  anywhere in it; at the top level, as in the REPL, by a definition evaluated
+  before the formula, since a later one cannot be seen there. A name in
+  argument position is read when the transform runs, so at the top level it
+  can be defined after the formula. An @racket[arg-expr] or the @racket[expr]
+  of @racket[I] is any Racket expression, checked as it is expanded, where
+  the names bound in it are known: @racket[^], R's power, is a syntax error
+  that says to write @racket[expt] unless it is bound, and so is R's infix
+  arithmetic, such as @racket[(hp * wt)], whose first name is not bound,
+  which says to write @racket[(* hp wt)]. A column is
   written as an identifier or a string, and as a string when its name is a
   word of the formula language (@racket[all], @racket[surv], the operators,
   and R's @tt{/} and @tt{%in%}, which it does not have), starts with
@@ -1456,8 +1469,9 @@ as a table:
   row's value of each of the @racket[columns], in order, as flonums. Each of
   the @racket[columns] must be a column of the table, and each value a finite
   real. @racket[~] makes the same value from a transform written in a
-  formula, with its source as the name, except that a name of that transform
-  that is not a column of the table is the Racket binding of that name.
+  formula, with its source as the name and the names it reads as the
+  columns, except that a name of that transform that is not a column of the
+  table is the Racket binding of that name.
 
   A procedure has no source and names no columns, so a transform as data
   names both. Two transforms are @racket[equal?] when their names and columns
