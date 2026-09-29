@@ -329,9 +329,12 @@
   ;; the Racket binding of the name where the formula is written, which a
   ;; thunk captures when the name has one. The names it reads are those in
   ;; argument position that its body, once expanded, refers to, so not a name
-  ;; that it binds itself; the body is expanded here to find them.
+  ;; that it binds itself; the body is expanded here to find them. The class
+  ;; commits: a later term's failure must not backtrack into the second
+  ;; alternative, which would expand (I e) as a call of I and raise there.
   (define-syntax-class transform
     #:attributes (expr)
+    #:commit
     (pattern (~and t (~or* ((~datum I) body) (~and body (_ arg ...))))
              #:do [(define power? (not (bound-here? (datum->syntax #'t '^))))
                    (define names

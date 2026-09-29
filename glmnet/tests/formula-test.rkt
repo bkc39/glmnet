@@ -865,6 +865,26 @@
     (check-regexp-match #rx"~: I takes one Racket expression, as in \\(I \\(expt x 2\\)\\)\n  at: \\(I hp wt\\)"
                         (message-of (lambda () (convert-compile-time-error (~ mpg (I hp wt)))))))
 
+  (test-case "an error after an (I expr) term is that error, not one about I"
+    (define (message-of thunk)
+      (with-handlers ([exn:fail:syntax? exn-message]) (thunk) #f))
+    (check-regexp-match #rx"~: wt:hp reads as one name; put spaces around an operator, as in wt : hp, or write a column with this name as a string, \"wt:hp\"\n  at: wt:hp"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (I (expt hp 2)) wt:hp)))))
+    (check-regexp-match #rx"~: expected a power, an exact integer of at least 2\n  at: 1"
+                        (message-of (lambda () (convert-compile-time-error
+                                                (mpg . ~ . hp + (I (expt hp 2)) + wt ^ 1)))))
+    (check-regexp-match #rx"~: \\(1 x z\\) is not a term: a group of terms starts with an operator, as \\(\\+ x z\\) does, or has operators between its terms, as \\(x \\+ z\\) does\n  at: \\(1 x z\\)"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (I (expt hp 2)) (1 x z))))))
+    (check-regexp-match #rx"~: 'wt is quoted, and ~ quotes the names of a formula itself: write the column as wt or \"wt\"\n  at: \\(quote wt\\)"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (I (expt hp 2)) 'wt)))))
+    (check-regexp-match #rx"~: / is an operator of R's formulas that this formula language does not have; for a ratio, write \\(I \\(/ hp wt\\)\\)\n  at: /"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (I (expt hp 2)) (/ hp wt))))))
+    (check-regexp-match #rx"~: \\(squared hp\\) is not a term: squared is not bound, so it is not a transform, and a group of terms starts with an operator.*\n  at: \\(squared hp\\)"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (I (* wt hp)) (squared hp))))))
+    (define two #rx"~: 2 is not a term; a formula's numbers are 1, 0 and a power after \\^\n  at: 2")
+    (check-regexp-match two (message-of (lambda () (convert-compile-time-error (~ mpg (log hp) (I (* wt hp)) 2)))))
+    (check-regexp-match two (message-of (lambda () (convert-compile-time-error (~ mpg (I (* wt hp)) (log hp) 2))))))
+
   (test-case "a formula fit with transforms is the matrix fit of the transformed columns, for any family"
     (define f (mpg . ~ . hp + (sqr hp) + (log wt)))
     (define x (map list (mtcars-column "hp") (map sqr (mtcars-column "hp")) (map log (mtcars-column "wt"))))
