@@ -209,6 +209,13 @@
                (lambda () (formula-predictor-names (~ y "a:b" (: a b)) with-colon)))
     (check-exn #rx"^formula-fit: two columns of the formula's design matrix have the same name"
                (lambda () (formula-fit (~ y "a:b" (: a b)) with-colon #:lambda 0.1)))
+    (define with-intercept-name (cons (cons "(Intercept)" '(2 0 1)) letters))
+    (check-exn #rx"^formula-fit: a column of the formula's design matrix has the intercept's name\n  name: \"\\(Intercept\\)\"\n  formula: \\(~ y \"\\(Intercept\\)\" a\\)"
+               (lambda () (formula-fit (~ y "(Intercept)" a) with-intercept-name #:lambda 0.1)))
+    (check-exn #rx"^formula-predictor-names: a column of the formula's design matrix has the intercept's name"
+               (lambda () (formula-predictor-names (~ y all) with-intercept-name)))
+    (check-equal? (formula-predictor-names (~ y (: "(Intercept)" a)) with-intercept-name)
+                  '("(Intercept):a"))
     (check-exn #rx"no column with this name.*column: \"z\""
                (lambda () (formula-fit (~ y a z) letters #:lambda 0.1))))
 
@@ -334,6 +341,31 @@
                   '("(Intercept)" . 0.0))
     (check-same (formula-fit (~ mpg wt hp) mtcars #:lambda 0.1 #:intercept? #f) without))
 
+  ;; R 4.5.3's attr(terms(f), "intercept"): 1 for mpg ~ wt + hp + -0, whose
+  ;; unary minus flips what 0 means, and 0 for mpg ~ wt + hp - -0, which flips
+  ;; it twice. The reader reads -0 as 0, which would invert both.
+  (test-case "a sign glued to 0 or 1 is a syntax error; (- 0) is R's -0, both ways"
+    (define (message-of thunk)
+      (with-handlers ([exn:fail:syntax? exn-message]) (thunk) #f))
+    (check-regexp-match
+     #rx"~: 0 has a sign glued to it, which the reader drops, reading -0 as 0; put a space after the sign, as in \\(- 0\\)\n  at: 0"
+     (message-of (lambda () (convert-compile-time-error (mpg . ~ . wt + hp + -0)))))
+    (check-regexp-match #rx"~: 0 has a sign glued to it"
+                        (message-of (lambda () (convert-compile-time-error (mpg . ~ . wt + hp - -0)))))
+    (check-regexp-match #rx"~: 0 has a sign glued to it"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg wt hp -0)))))
+    (check-regexp-match #rx"~: 0 has a sign glued to it"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (- (+ wt hp) +0))))))
+    (check-regexp-match
+     #rx"~: 1 has a sign glued to it, which the reader drops, reading \\+1 as 1; put a space after the sign, as in \\(\\+ 1\\)\n  at: 1"
+     (message-of (lambda () (convert-compile-time-error (mpg . ~ . +1 + wt + hp)))))
+    (define without (elnet-fit mtcars-rows mpg #:lambda 0.1 #:intercept? #f))
+    (define with (elnet-fit mtcars-rows mpg #:lambda 0.1))
+    (for ([f (list (mpg . ~ . wt + hp + (- 0)) (~ mpg wt hp (- 0)) (mpg . ~ . - 0 + wt + hp))])
+      (check-same (formula-fit f mtcars #:lambda 0.1) with))
+    (for ([f (list (mpg . ~ . wt + hp - (- 0)) (~ mpg (- (+ wt hp) (- 0))))])
+      (check-same (formula-fit f mtcars #:lambda 0.1) without)))
+
   (test-case "an #:intercept? that contradicts the formula's 1, 0 or - 1 blames the caller"
     (check-exn (blame-matching
                 #rx"^formula-fit: contract violation;\n the intercept\\? argument contradicts the formula's intercept\n  expected: #f, since the formula \\(~ mpg 0 wt hp\\) has no intercept\n  given: #t")
@@ -441,12 +473,16 @@
     (check-equal? (formula-response (~ blood-pressure age)) 'blood-pressure))
 
   (test-case "R's operators that the language lacks are errors that say so"
-    (check-exn #rx"~: / is an operator of R's formulas that this formula language does not have\n  at: /"
+    (check-exn #rx"~: / is an operator of R's formulas that this formula language does not have; for a ratio, write \\(I \\(/ x z\\)\\)\n  at: /"
                (lambda () (convert-compile-time-error (y . ~ . a / b))))
     (check-exn #rx"~: %in% is an operator of R's formulas"
                (lambda () (convert-compile-time-error (~ y (a %in% b)))))
     (check-exn #rx"~: / is an operator"
                (lambda () (convert-compile-time-error (~ y a /))))
+    (check-exn #rx"~: / is an operator of R's formulas that this formula language does not have; for a ratio, write \\(I \\(/ a b\\)\\)\n  at: /"
+               (lambda () (convert-compile-time-error (~ y (/ a b)))))
+    (check-exn #rx"~: %in% is an operator of R's formulas that this formula language does not have\n  at: %in%"
+               (lambda () (convert-compile-time-error (~ y a (+ b (%in% a b))))))
     (check-exn #rx"~: a/b reads as one name"
                (lambda () (convert-compile-time-error (~ y a/b))))
     (check-exn exn:fail:contract? (lambda () (make-formula 'y 'a '/ 'b))))
@@ -479,6 +515,14 @@
     (check-regexp-match #rx"~: a power cannot be raised again; R reads x \\^ 2 \\^ 3 as x \\^ \\(2 \\^ 3\\), which is not a power\n  at: \\^"
                         (message-of (lambda () (convert-compile-time-error (y . ~ . (a + b) ^ 2 ^ 3)))))
     (check-equal? (format "~a" (y . ~ . ((a + b) ^ 2) ^ 3)) "(~ y ((a + b) ^ 2) ^ 3)")
+    (check-regexp-match #rx"~: the right-hand side of a formula is a list of terms, and this one has a dot before hp\n  at: hp"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg wt . hp)))))
+    (check-regexp-match #rx"~: the right-hand side .* a dot before hp\n"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg wt + . hp)))))
+    (check-regexp-match #rx"~: the right-hand side .* a dot before hp\n"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg . hp)))))
+    (check-regexp-match #rx"~: expected a term.*\n  at: \\(wt \\. hp\\)"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (wt . hp))))))
     (check-regexp-match #rx"~: expected more terms starting with a column name"
                         (message-of (lambda () (convert-compile-time-error (~ (surv t) all))))))
 
@@ -651,6 +695,90 @@
     (check-equal? (hash-ref (columns-of (formula-design-matrix (~ y (log time)) timed)) "(log time)")
                   (list 0.0 (log 2.0) (log 4.0))))
 
+  (test-case "a column named like a function is the column as an argument and the function at the head"
+    ;; R: y ~ pmax(max, x) is 4 5 9: R looks up a call's function by name,
+    ;; skipping the column max.
+    (define t (list (cons "y" '(1 2 3)) (cons "max" '(1 5 9)) (cons "x" '(4 4 4))))
+    (check-equal? (columns-of (formula-design-matrix (~ y (max max x)) t))
+                  (hash "(max max x)" '(4.0 5.0 9.0)))
+    (check-equal? (columns-of (formula-design-matrix (~ y (I (+ 1 (max max x)))) t))
+                  (hash "(I (+ 1 (max max x)))" '(5.0 6.0 10.0)))
+    (check-equal? (mtcars-names (~ mpg (I (abs (- hp (min hp wt)))))) '("(I (abs (- hp (min hp wt))))")))
+
+  (test-case "a transform reads the names that it does not bind itself, and needs only those columns"
+    ;; The lambda's hp is its own, so the transform reads wt alone, and
+    ;; predict needs no hp.
+    (define m (formula-fit (~ mpg (I ((lambda (hp) (* 2 hp)) wt))) mtcars #:lambda 0.1))
+    (define wt (mtcars-column "wt"))
+    (check-equal? (predict m (list (cons "wt" '(3.0))))
+                  (predict (formula-model-fit m) '((6.0))))
+    (check-equal? (formula-model-fit m)
+                  (elnet-fit (map (lambda (v) (list (* 2 v))) wt) mpg #:lambda 0.1))
+    ;; A transform whose let binds every name it uses reads no column.
+    (check-exn #rx"^formula-predictor-names: a transform must read a column of the table\n  transform: \"\\(I \\(let \\(\\(hp 5.0\\)\\) hp\\)\\)\""
+               (lambda () (mtcars-names (~ mpg (I (let ([hp 5.0]) hp)) wt))))
+    ;; Quoted data is data: its names are not read.
+    (check-equal? (hash-ref (columns-of (formula-design-matrix
+                                         (~ mpg (I (+ hp (length '(wt * qsec ^ 2))))) mtcars))
+                            "(I (+ hp (length (quote (wt * qsec ^ 2)))))")
+                  (map (lambda (v) (+ v 5)) (mtcars-column "hp"))))
+
+  (test-case "a function or ^ that a transform binds itself is Racket's, not R's infix arithmetic"
+    (define x (columns-of (formula-design-matrix
+                           (~ mpg (I (let ([combine (lambda (f a b) (f a b))]) (combine * hp wt)))
+                              (I (let ([^ expt]) (^ hp 2))))
+                           mtcars)))
+    (check-equal? (hash-ref x "(I (let ((combine (lambda (f a b) (f a b)))) (combine * hp wt)))")
+                  (map * (mtcars-column "hp") (mtcars-column "wt")))
+    (check-equal? (hash-ref x "(I (let ((^ expt)) (^ hp 2)))")
+                  (map sqr (mtcars-column "hp"))))
+
+  (test-case "a quoted name is a syntax error that says to write the name"
+    (define (message-of thunk)
+      (with-handlers ([exn:fail:syntax? exn-message]) (thunk) #f))
+    (check-regexp-match #rx"~: 'hp is quoted, and ~ quotes the names of a formula itself: write the column as hp or \"hp\"\n  at: \\(quote hp\\)"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg 'hp 'wt)))))
+    (check-regexp-match #rx"~: `hp is quoted.*write the column as hp or \"hp\""
+                        (message-of (lambda () (convert-compile-time-error (mpg . ~ . `hp + wt)))))
+    (check-regexp-match #rx"~: '\"blood pressure\" is quoted.*write the column as \"blood pressure\""
+                        (message-of (lambda () (convert-compile-time-error (~ bp '"blood pressure")))))
+    (check-regexp-match #rx"~: '\\(log hp\\) is quoted.*write \\(log hp\\) without the quote"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg '(log hp))))))
+    (check-regexp-match #rx"~: 'mpg is quoted.*write the column as mpg or \"mpg\""
+                        (message-of (lambda () (convert-compile-time-error (~ 'mpg hp))))))
+
+  (test-case "R's / is a syntax error that says how to write a ratio"
+    (define (message-of thunk)
+      (with-handlers ([exn:fail:syntax? exn-message]) (thunk) #f))
+    (check-regexp-match #rx"~: / is an operator of R's formulas that this formula language does not have; for a ratio, write \\(I \\(/ hp wt\\)\\)\n  at: /"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (/ hp wt))))))
+    (check-regexp-match #rx"~: / is an operator.*; for a ratio, write \\(I \\(/ hp wt\\)\\)"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (hp . / . wt))))))
+    (check-regexp-match #rx"~: / is an operator.*; for a ratio, write \\(I \\(/ x z\\)\\)\n  at: /"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (/ hp wt qsec))))))
+    (check-regexp-match #rx"~: %in% is an operator of R's formulas that this formula language does not have\n  at: %in%"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (%in% hp wt)))))))
+
+  (test-case "a transformed response is a syntax error, and a response of columns is not"
+    (define (message-of thunk)
+      (with-handlers ([exn:fail:syntax? exn-message]) (thunk) #f))
+    (define transformed #rx"~: a transformed response is not supported; add the transformed column to the table, or write the columns of a response of several columns as strings")
+    (check-regexp-match transformed (message-of (lambda () (convert-compile-time-error (~ (I mpg) wt)))))
+    (check-regexp-match transformed
+                        (message-of (lambda () (convert-compile-time-error (~ (log (+ mpg 1)) wt)))))
+    ;; Whether log is a function is known when the formula is made.
+    (check-regexp-match transformed (message-of (lambda () (~ (log mpg) wt))))
+    (check-regexp-match transformed (message-of (lambda () (~ (sqrt mpg) (log hp)))))
+    ;; A response of columns whose first name is bound, not to a function.
+    (define y1 '(1 2 3 5 4 6))
+    (define y2 '(2 4 7 9 8 13))
+    (define two (list (cons "y1" y1) (cons "y2" y2) (cons "x" '(1 2 4 5 5 7))))
+    (check-equal? (formula-response (~ (y1 y2) x)) '(y1 y2))
+    (check-equal? (formula-response (~ ("log" "mpg") wt)) '("log" "mpg"))
+    (check-equal? (glmnet-model-response-names
+                   (formula-fit (~ (y1 y2) x) two #:family 'mgaussian #:lambda 0.1))
+                  '("y1" "y2")))
+
   (test-case "a name that is neither a column nor bound is an error when the transform runs"
     (define f (~ mpg wt (I (* hp scale))))
     (check-true (formula? f))
@@ -767,6 +895,26 @@
     (parameterize ([current-namespace ns])
       (eval '(define scale 10)))
     (check-equal? (column-of 'f) '((10.0 20.0 40.0))))
+
+  (test-case "at the top level, a transform's function must be defined first, and ~ checks it as in a module"
+    (define ns (make-base-namespace))
+    (namespace-attach-module (variable-reference->namespace (#%variable-reference)) 'glmnet ns)
+    (define (run expr)
+      (parameterize ([current-namespace ns]) (eval expr)))
+    (define (message-of expr)
+      (with-handlers ([exn:fail:syntax? exn-message]) (run expr) #f))
+    (run '(require glmnet))
+    (check-regexp-match #rx"~: \\(squared x\\) is not a term: squared is not bound"
+                        (message-of '(~ y (squared x))))
+    (check-regexp-match #rx"~: x is not bound, and inside a transform the operators are Racket's, which come first: write \\(\\+ x 1\\)"
+                        (message-of '(~ y (log (x + 1)))))
+    (check-regexp-match #rx"~: \\^ is not a Racket function"
+                        (message-of '(~ y (I (x ^ 2)))))
+    (run '(define (squared v) (* v v)))
+    (check-equal? (run '(design-matrix->columns
+                         (formula-design-matrix (~ y (squared x)) (list (cons "y" '(1 2 3))
+                                                                        (cons "x" '(1 2 4))))))
+                  '((1.0 4.0 16.0))))
 
   (test-case "a transform reads its Racket bindings each time, as R does"
     (define k 2)
@@ -1041,6 +1189,12 @@
                         (message-of (lambda () (convert-compile-time-error (~ mpg (factor 3))))))
     (check-regexp-match #rx"~: \\(wt hp\\) is not a Racket expression: wt is not bound\n  at: \\(wt hp\\)"
                         (message-of (lambda () (convert-compile-time-error (~ mpg (factor (wt hp)))))))
+    (check-regexp-match #rx"~: hp is not bound, and inside a transform the operators are Racket's, which come first: write \\(\\* hp wt\\)\n  at: \\(hp \\* wt\\)"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (factor (hp * wt)))))))
+    (check-regexp-match #rx"~: \\^ is not a Racket function; inside a transform, write a power as \\(expt x 2\\)"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (factor (hp ^ 2)))))))
+    (check-regexp-match #rx"~: 'cyl is quoted, and ~ quotes the names of a formula itself: write the column as cyl or \"cyl\"\n  at: \\(quote cyl\\)"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (factor 'cyl))))))
     (check-regexp-match #rx"~: cyl:gear reads as one name"
                         (message-of (lambda () (convert-compile-time-error (~ mpg (factor cyl:gear)))))))
 

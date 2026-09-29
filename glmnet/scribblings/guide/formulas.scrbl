@@ -99,6 +99,9 @@ identifiers or are words of the formula language (@racket[all],
 (formula-predictor-names (~ bp age dose) patients)
 ]
 
+Since @racket[~] quotes the names itself, a quoted name, such as
+@racket['age], is a syntax error that says to write @racket[age].
+
 The simplest terms are:
 
 @itemlist[
@@ -241,8 +244,8 @@ depend on the product, and the lasso leaves it out:
 ]
 
 The operators take any terms, so sums cross and interact term by term:
-@racket[(: (+ age dose) marker)] is @racket[age:marker] and
-@racket[dose:marker], and @racket[(* (+ age dose) marker)] adds the three
+@racket[(: (+ age dose) marker)] gives @racket["age:marker"] and
+@racket["dose:marker"], and @racket[(* (+ age dose) marker)] adds the three
 main effects. The prefix forms take more than two operands, folded from the
 left, and @racket[(* age dose marker)] crosses all three:
 
@@ -339,12 +342,16 @@ prefix forms mix:
 ]
 
 An operator needs spaces around it. The reader reads @tt{age:dose} and
-@tt{-age} as one name each, and @tt{-1} as a number, and a formula that uses
-one is a syntax error that says so:
+@tt{-age} as one name each, @tt{-1} as a number, and @tt{-0} as @racket[0],
+dropping the sign that R reads as an operator, and a formula that uses one is
+a syntax error that says so:
 
 @examples[#:eval ev #:label #f
 (eval:error (~ bp age:dose))
 ]
+
+R's @tt{-0}, which in @tt{y ~ x + -0} keeps the intercept, is therefore
+written @racket[(- 0)], as in @racketfont{(y . ~ . x + (- 0))}.
 
 @subsection[#:tag "formulas-response-rhs"]{The response on the right-hand side}
 
@@ -363,13 +370,16 @@ are each dropped in the same way:
 A formula model keeps the terms it was fitted with. @racket[predict] builds
 their design matrix from a new table's columns, which can come in any order,
 and does not expand the formula again, so @racket[all] stands for the columns
-it stood for in the fit. The table needs the columns that the terms read, and
-an error names those it lacks:
+it stood for in the fit. The table needs only the columns that the terms read,
+here the age and the dose:
 
 @examples[#:eval ev #:label #f
 (define crossed (formula-fit (~ bp (* age dose)) patients #:lambda 0.1))
-(predict crossed new-patients)
+(predict crossed (list (cons "dose" '(2.0 8.0)) (cons "age" '(40 70))))
 ]
+
+A table that lacks one of them is an error that names it, as
+@secref["formulas-gaussian"] shows.
 
 @subsection[#:tag "formulas-r-syntax"]{From R's syntax}
 
@@ -452,8 +462,7 @@ a transform that uses it is a syntax error that says so:
 A transform reads names as R does, from the data first and then from the
 program. An identifier in argument position, that is, anywhere but first in a
 group, is the table's column of that name when the table has one, and
-otherwise the Racket binding of that name where the formula is written. The
-identifier first in a group, the function, is always the Racket binding. So a
+otherwise the Racket binding of that name where the formula is written. So a
 constant of the program can scale a column:
 
 @examples[#:eval ev #:label #f
@@ -464,13 +473,25 @@ constant of the program can scale a column:
 
 In this chapter @racket[age] is also a Racket variable, the list of ages that
 @racket[patients] was built from, but inside the formula it names the
-column. Names that the transform binds itself, with @racket[let] or
-@racket[for/sum], are its own. A name that is neither a column nor bound is an
-error when the formula is fitted, which names it:
+column. The identifier first in a group, the function, is always the Racket
+binding, even when the table has a column of that name, as R looks up a
+function by name and skips a column: with a column @racket[max],
+@racket[(max max x)] is the larger of that column and @racket[x], R's
+@tt{pmax(max, x)}. Names that the transform binds itself, with @racket[let],
+@racket[lambda] or @racket[for/sum], are its own, and so are not read from the
+table, and neither are the names in quoted data; @racket[predict] needs only
+the columns that a transform reads. A name that is neither a column nor bound
+is an error when the formula is fitted, which names it:
 
 @examples[#:eval ev #:label #f
 (eval:error (formula-fit (~ bp (I (* age scale)) dose) patients #:lambda 0.1))
 ]
+
+At the top level, as in the REPL and in this chapter, a transform's function
+must be defined before the formula, since a later definition cannot be seen
+there; in a module it can be defined anywhere in the module. A name in
+argument position can be defined later in both, since the transform reads it
+when it runs.
 
 A transform is elementwise: it sees one row at a time. R's @tt{scale(x)} and
 @tt{x - mean(x)} read the whole column; compute such a column in the table
@@ -880,13 +901,26 @@ The formula language is smaller than R's:
        them again on the new data, where a name that the new data lacks
        falls back on a variable of the same name.}
  @item{The response is a column, not a transform: R's @tt{log(y) ~ x} has no
-       counterpart; add the column to the table.}
+       counterpart, and @racket[(~ (log y) x)] is a syntax error that says
+       so; add the column to the table. A response of several columns whose
+       first name is a function where the formula is written reads as such
+       a transform, so write those columns as strings.}
  @item{R's @tt{.} is written @racket[all]. R's @tt{%in%} and @tt{/}
-       (nesting) are syntax errors that say the language does not have them,
-       and @tt{offset()} has no counterpart.}
+       (nesting) are syntax errors that say the language does not have them;
+       for @tt{/}, the error says to write a ratio as
+       @racket[(I (/ x z))], R's @tt{I(x / z)}. @tt{offset()} has no
+       counterpart.}
  @item{An operator needs spaces around it, since the reader reads
-       @tt{wt:hp} as one name, and a power is an exact integer of at least 2,
-       where R truncates @tt{x^2.5} to @tt{x^2}.}
+       @tt{wt:hp} as one name and @tt{-0} as @racket[0], and a power is an
+       exact integer of at least 2, where R truncates @tt{x^2.5} to @tt{x^2}.}
+ @item{A column keeps the table's name in the design matrix, where R's
+       @tt{model.matrix} puts backticks around a name that R's syntax does
+       not allow, such as @tt{@literal{`blood pressure`}}. So a column named
+       @racket["wt:hp"] beside the interaction of @racket[wt] and @racket[hp],
+       which R names @tt{@literal{`wt:hp`}} and @tt{wt:hp}, gives two columns
+       of the same name here, which is an error, since @racket[coef] keys the
+       coefficients by name; and so is a column named
+       @racket["(Intercept)"], the intercept's name.}
  @item{The columns of a @racket[(surv time status)] or multi-column response
        are each dropped from the right-hand side, as R drops a one-column
        response. R's response there is the one variable @tt{Surv(time, status)}

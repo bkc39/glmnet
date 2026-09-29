@@ -10,7 +10,7 @@
 ;; expanded terms, so that `coef` is keyed by name and `predict` rebuilds the
 ;; design matrix from a new table (core/model.rkt).
 
-(require (for-syntax racket/base racket/list syntax/parse syntax/transformer
+(require (for-syntax racket/base racket/list syntax/parse
                      (submod "terms.rkt" words))
          racket/contract
          racket/generic
@@ -169,7 +169,12 @@
   (define (infix-id? stx)
     (or (operator-id? stx) (unsupported-id? stx)))
   (define (any-operator? stx)
-    (ormap infix-id? (syntax->list stx)))
+    (define elements (syntax->list stx))
+    (and elements (ormap infix-id? elements)))
+  ;; What follows the dot of an improper list, as syntax.
+  (define (dotted-tail stx)
+    (define e (syntax-e stx))
+    (if (pair? e) (dotted-tail (datum->syntax stx (cdr e) stx)) stx))
   (define (infix-group? stx)
     (define elements (syntax->list stx))
     (and (pair? elements) (ormap infix-id? (cdr elements))))
@@ -180,11 +185,46 @@
   (define (unsupported-message stx)
     (format "~a is an operator of R's formulas that this formula language does not have"
             (syntax-e stx)))
+  ;; A 0 or 1 whose source is longer than its digit, such as -0, which the
+  ;; reader reads as 0, dropping the sign that R reads as an operator.
+  (define (glued-number? stx)
+    (define span (syntax-span stx))
+    (and span (> span 1)))
+  (define (glued-number-message stx)
+    (define n (syntax-e stx))
+    (define sign (if (eqv? n 0) "-" "+"))
+    (format "~a has a sign glued to it, which the reader drops, reading ~a~a as ~a; put a space after the sign, as in (~a ~a)"
+            n sign n n sign n))
 
-  ;; Whether id can have a binding where it is written: it has one, or it is
-  ;; at the top level, where a definition can come after the formula.
-  (define (maybe-bound? id)
-    (or (and (identifier-binding id) #t) (not (syntax-source-module id))))
+  (define (ratio-hint o operands)
+    (cond
+      [(eq? (syntax-e o) '/)
+       (format "; for a ratio, write ~s"
+               (syntax-parse operands
+                 [(a b) `(I (/ ,(syntax->datum #'a) ,(syntax->datum #'b)))]
+                 [_ '(I (/ x z))]))]
+      [else ""]))
+
+  (define (quote-id? stx)
+    (and (identifier? stx)
+         (or (free-identifier=? stx #'quote) (free-identifier=? stx #'quasiquote))))
+  (define (quoted-message g d)
+    (define v (syntax-e d))
+    (format "~a is quoted, and ~~ quotes the names of a formula itself: ~a"
+            (parameterize ([print-reader-abbreviations #t])
+              (format "~s" (syntax->datum g)))
+            (cond
+              [(symbol? v) (format "write the column as ~a or ~s" v (symbol->string v))]
+              [(string? v) (format "write the column as ~s" v)]
+              [else (format "write ~s without the quote" (syntax->datum d))])))
+
+  (define transformed-response-message
+    "a transformed response is not supported; add the transformed column to the table, or write the columns of a response of several columns as strings")
+
+  ;; Whether id has a binding where it is written. At the top level that is a
+  ;; definition already evaluated, as a later one cannot be seen there.
+  (define (bound-here? id)
+    (and (identifier-binding id (syntax-local-phase-level) #t) #t))
 
   ;; Whether id can be referred to as an expression where it is written: a
   ;; variable, not a macro such as time, or any name at the top level.
@@ -210,25 +250,13 @@
                     [_ '()]))
                 stxs))
 
-  ;; The first ^ in a transform that is not bound: R's power, which Racket
-  ;; does not have.
-  (define (unbound-power stx)
-    (syntax-parse stx
-      [x:id (and (eq? (syntax-e #'x) '^) (not (identifier-binding #'x)) #'x)]
-      [(e ...) (ormap unbound-power (syntax->list #'(e ...)))]
-      [_ #f]))
-
-  ;; The first group in a transform that is R's infix arithmetic, such as
-  ;; (hp * wt), whose head is not bound; and what to write instead.
-  (define (infix-arithmetic stx)
-    (syntax-parse stx
-      [(a:id op:id b . _)
-       #:when (and (memq (syntax-e #'op) '(+ - * /)) (not (maybe-bound? #'a)))
-       this-syntax]
-      [(e ...) (ormap infix-arithmetic (syntax->list #'(e ...)))]
-      [_ #f]))
-  (define (infix-arithmetic-message stx)
-    (syntax-parse stx
+  ;; A transform's body is checked as it is expanded, where every binding is
+  ;; known, so that a name bound in the transform, by let or lambda, and
+  ;; quoted data are what Racket makes of them.
+  (define power-message
+    "^ is not a Racket function; inside a transform, write a power as (expt x 2), or a square as (sqr x)")
+  (define (infix-arithmetic-message group)
+    (syntax-parse group
       [(a op b . _)
        (format "~a is not bound, and inside a transform the operators are Racket's, which come first: write ~s"
                (syntax-e #'a) (syntax->datum #'(op a b)))]))
@@ -244,45 +272,122 @@
   (define (not-an-expression g f)
     (format "~s is not a Racket expression: ~a is not bound" (syntax->datum g) (syntax-e f)))
 
-  ;; A transform, compiled into a procedure with an argument for each name in
-  ;; its argument positions. In its body, each name reads its argument through
-  ;; transform-argument: the table's column when the table has one, and
-  ;; otherwise the Racket binding of the name where the formula is written,
-  ;; which a thunk captures when the name has one.
+  ;; Raises a syntax error when `group`, an application in the transform `t`
+  ;; whose function is `head`, is R's infix arithmetic, such as (hp * wt):
+  ;; `head` is not bound and an operator comes second. `power?` is whether ^
+  ;; is R's power, not bound where the formula is written.
+  (define (check-infix head group t power?)
+    (syntax-parse group
+      [(_ op:id _ . _)
+       #:when (and (identifier? head) (not (bound-here? head)))
+       (define o (syntax-e #'op))
+       (cond
+         [(and (eq? o '^) power?) (raise-syntax-error '~ power-message t #'op)]
+         [(memq o '(+ - * / ^)) (raise-syntax-error '~ (infix-arithmetic-message group) t group)]
+         [else (void)])]
+      [_ (void)]))
+
+  ;; While a transform's body is expanded, a box of the indices of the names
+  ;; in argument position that it reads.
+  (define current-reads (make-parameter #f))
+
+  ;; The transformer of the `i`th name in argument position of the transform
+  ;; `t`. The name alone reads the name's value with `ref`. A group that it
+  ;; starts calls `orig`, the name's Racket binding where the formula is
+  ;; written, as R looks up the function of a call by name, skipping columns.
+  (define ((argument-transformer i ref orig t power?) stx)
+    (syntax-parse stx
+      [_:id
+       (define reads (current-reads))
+       (when reads (set-box! reads (cons i (unbox reads))))
+       ref]
+      [(_ . args)
+       (check-infix orig stx t power?)
+       (datum->syntax stx (cons orig #'args) stx stx)]))
+
+  ;; `app` is the #%app where the formula is written.
+  (define ((application-transformer app t power?) stx)
+    (syntax-parse stx
+      [(_ . group)
+       (syntax-parse #'group
+         [(head . _) (check-infix #'head #'group t power?)]
+         [_ (void)])
+       (datum->syntax stx (cons app #'group) stx stx)]))
+
+  (define ((power-transformer t) stx)
+    (raise-syntax-error '~ power-message t (syntax-parse stx [(o . _) #'o] [_ stx])))
+
+  ;; The transform `t`, whose expression is `body`, as a procedure with an
+  ;; argument for each of `names`, the names in its argument positions. In the
+  ;; body, each name reads its argument through transform-argument, unless
+  ;; the transform binds it itself; the function of a group is the Racket
+  ;; binding; and #%app and an unbound ^ are the checking transformers above.
+  ;; The names quoted in the transformers' expressions are outside the scope
+  ;; of let-syntax, so they keep the bindings where the formula is written.
+  (define (transform-lambda t body names power?)
+    (define tmps (generate-temporaries names))
+    (define app (datum->syntax t '#%app))
+    (define power (datum->syntax t '^))
+    #`(lambda #,tmps
+        (let-syntax (#,@(for/list ([name (in-list names)] [tmp (in-list tmps)] [i (in-naturals)])
+                          #`[#,name (argument-transformer
+                                     #,i (quote-syntax (transform-argument #,tmp '#,name))
+                                     (quote-syntax #,name) (quote-syntax #,t) #,power?)])
+                     [#,app (application-transformer (quote-syntax #,app) (quote-syntax #,t) #,power?)]
+                     #,@(if power? (list #`[#,power (power-transformer (quote-syntax #,t))]) '()))
+          #,body)))
+
+  ;; A transform, compiled into a procedure with an argument for each name
+  ;; that it reads: the table's column when the table has one, and otherwise
+  ;; the Racket binding of the name where the formula is written, which a
+  ;; thunk captures when the name has one. The names it reads are those in
+  ;; argument position that its body, once expanded, refers to, so not a name
+  ;; that it binds itself; the body is expanded here to find them.
   (define-syntax-class transform
     #:attributes (expr)
     (pattern (~and t (~or* ((~datum I) body) (~and body (_ arg ...))))
-             #:do [(define ids
-                     (remove-duplicates (argument-identifiers (or (attribute arg) (list #'body)))
-                                        bound-identifier=?))]
-             #:with (id ...) ids
-             #:with (tmp ...) (generate-temporaries ids)
-             #:with (fallback ...) (map fallback-thunk ids)
+             #:do [(define power? (not (bound-here? (datum->syntax #'t '^))))
+                   (define names
+                     (for/list ([id (in-list (remove-duplicates
+                                              (argument-identifiers (or (attribute arg) (list #'body)))
+                                              bound-identifier=?))]
+                                #:unless (and power? (eq? (syntax-e id) '^)))
+                       id))
+                   (define reads (box '()))
+                   (define proc
+                     (parameterize ([current-reads reads])
+                       (local-expand (transform-lambda #'t #'body names power?) 'expression '())))
+                   (define read? (for/list ([i (in-range (length names))]) (memv i (unbox reads))))
+                   (define tmps (generate-temporaries names))]
+             #:with (id ...) (for/list ([name (in-list names)] [r (in-list read?)] #:when r) name)
+             #:with (tmp ...) (for/list ([tmp (in-list tmps)] [r (in-list read?)] #:when r) tmp)
+             #:with (slot ...) (for/list ([tmp (in-list tmps)] [r (in-list read?)]) (if r tmp #'#f))
+             #:with proc proc
+             #:with (fallback ...) (map fallback-thunk (syntax->list #'(id ...)))
              #:with name (format "~s" (syntax->datum #'t))
              #:with expr
              #'(source-transform
                 'name '(id ...)
-                (lambda (tmp ...)
-                  (let-syntax ([id (make-variable-like-transformer
-                                    (quote-syntax (transform-argument tmp 'id)))]
-                               ...)
-                    body))
+                (let ([expanded proc]) (lambda (tmp ...) (expanded slot ...)))
                 (list fallback ...))))
+
+  ;; R's quote, which ~ does not need. It always fails, with a message that
+  ;; says what to write.
+  (define-syntax-class quoted
+    (pattern (~and g ((~and q (~fail #:unless (quote-id? #'q))) d))
+             #:fail-when #'g (quoted-message #'g #'d)))
 
   ;; A transform written as a call, (proc-id arg ...) or (I expr), checked so
   ;; that its errors say what to write; `unbound` makes the message for a
   ;; proc-id that is not bound from the group and the id.
   (define-syntax-class (call unbound)
     #:attributes (expr)
-    (pattern (~and g (f:id _ ...))
+    (pattern (~and g (f:id _ ...) (~fail #:when (quote-id? #'f)))
              #:do [(define I? (eq? (syntax-e #'f) 'I))]
              #:fail-when (and I? (not (= (length (syntax->list #'g)) 2)) #'g)
              "I takes one Racket expression, as in (I (expt x 2))"
-             #:fail-when (unbound-power #'g)
-             "^ is not a Racket function; inside a transform, write a power as (expt x 2), or a square as (sqr x)"
-             #:do [(define infix (infix-arithmetic #'g))]
-             #:fail-when infix (and infix (infix-arithmetic-message infix))
-             #:fail-when (and (not I?) (not (maybe-bound? #'f)) #'g)
+             #:do [(check-infix #'f #'g #'g (not (bound-here? (datum->syntax #'g '^))))]
+             #:fail-when (and (not I?) (not (bound-here? #'f)) #'g)
              (unbound #'g #'f)
              #:with t:transform #'g
              #:with expr #'t.expr))
@@ -296,6 +401,8 @@
              #:with expr #''c)
     (pattern (~and s (~fail #:unless (string? (syntax-e #'s))))
              #:with expr #'s)
+    (pattern q:quoted
+             #:with expr #'q)
     (pattern (~and g (_ _ ...) (~var c (call not-an-expression)))
              #:with expr #'c.expr))
 
@@ -340,7 +447,7 @@
     (pattern (~seq o:infix-operator t:term)
              #:with (expr ...) #'('o t.expr))
     (pattern (~seq (~and o (~fail #:unless (unsupported-id? #'o))) _ ...)
-             #:fail-when #'o (unsupported-message #'o)
+             #:fail-when #'o (string-append (unsupported-message #'o) (ratio-hint #'o #'()))
              #:with (expr ...) #'()))
 
   (define-syntax-class term
@@ -349,8 +456,10 @@
     (pattern (~and a (~datum all))
              #:with expr #''a)
     (pattern (~and n (~fail #:unless (memv (syntax-e #'n) '(0 1))))
+             #:fail-when (and (glued-number? #'n) #'n) (glued-number-message #'n)
              #:with expr #''n)
-    (pattern (~and n (~fail #:unless (real? (syntax-e #'n))))
+    (pattern (~and n (~fail #:unless (let ([v (syntax-e #'n)])
+                                       (and (real? v) (not (memv v '(0 1)))))))
              #:fail-when #'n
              (if (negative? (syntax-e #'n))
                  (format "~a is a number; to remove a term, put a space after the sign, as in - ~a"
@@ -381,6 +490,13 @@
                    (~fail #:when (let ([args (syntax->list #'args)]) (and args (= (length args) 1)))))
              #:fail-when #'g "factor takes one column or Racket expression, as in (factor cyl)"
              #:with expr #'g)
+    (pattern q:quoted
+             #:with expr #'q)
+    (pattern (~and g ((~and o (~fail #:unless (unsupported-id? #'o))) operand ...)
+                   (~fail #:when (infix-group? #'g)))
+             #:fail-when #'o
+             (string-append (unsupported-message #'o) (ratio-hint #'o #'(operand ...)))
+             #:with expr #'g)
     (pattern (~and g (f:id _ ...)
                    (~fail #:when (or (reserved-id? #'f) (factor-id? #'f) (infix-group? #'g)))
                    (~var c (call not-a-term)))
@@ -394,22 +510,63 @@
   (define-syntax-class right-hand-side
     #:description "the right-hand side of a formula"
     #:attributes ((expr 1))
-    (pattern (~and rhs (~fail #:when (any-operator? #'rhs)) (t:term ...))
+    (pattern (~and rhs (~fail #:unless (syntax->list #'rhs)) (~fail #:when (any-operator? #'rhs))
+                   (t:term ...))
              #:with (expr ...) #'(t.expr ...))
     (pattern (~and rhs (~fail #:unless (any-operator? #'rhs))
                    ((~optional s:sign) t:term step:infix-step ...))
-             #:with (expr ...) #'((~? 's) t.expr step.expr ... ...)))
+             #:with (expr ...) #'((~? 's) t.expr step.expr ... ...))
+    (pattern (~and rhs (~fail #:when (syntax->list #'rhs)))
+             #:with tail (dotted-tail #'rhs)
+             #:fail-when #'tail
+             (format "the right-hand side of a formula is a list of terms, and this one has a dot before ~s"
+                     (syntax->datum #'tail))
+             #:with (expr ...) #'()))
 
+  ;; A response is columns, not a transform. A group that starts with I, or
+  ;; with a bound name and has more than column names, is a transform, and
+  ;; so is a group of columns whose first name is a procedure where the
+  ;; formula is written, which only the running program knows, so its `expr`
+  ;; checks it.
   (define-syntax-class response
     #:description "a response: a column name, (surv time status) or (column ...)"
-    (pattern _:column)
-    (pattern ((~datum surv) _:column _:column))
-    (pattern (_:column ...+))))
+    #:attributes (expr)
+    (pattern c:column
+             #:with expr #''c)
+    (pattern (~and r ((~datum surv) _:column _:column))
+             #:with expr #''r)
+    (pattern q:quoted
+             #:with expr #'q)
+    (pattern (~and g (h:id e ...)
+                   (~fail #:unless
+                          (or (eq? (syntax-e #'h) 'I)
+                              (and (bound-here? #'h)
+                                   (not (quote-id? #'h))
+                                   (not (andmap (lambda (e) (or (identifier? e) (string? (syntax-e e))))
+                                                (syntax->list #'(e ...))))))))
+             #:fail-when #'g transformed-response-message
+             #:with expr #'g)
+    (pattern (~and g ((~and h:column (~fail #:when (or (eq? (syntax-e #'h) 'I) (quote-id? #'h))))
+                      _:column ...))
+             #:with expr (if (referable? #'h)
+                             #`(checked-response 'g (lambda () h) (quote-syntax g)
+                                                 #,transformed-response-message)
+                             #''g))))
 
 (define-syntax (~ stx)
   (syntax-parse stx
     [(_ response:response . rhs:right-hand-side)
-     #'(make-formula 'response rhs.expr ...)]))
+     #'(make-formula response.expr rhs.expr ...)]))
+
+;; The response of several columns `response`, unless its first name has a
+;; procedure as its Racket binding where the formula is written, as `head`
+;; returns it: the response is then a transform, such as (log mpg), and
+;; `form`, the response as written, is a syntax error with `message`.
+(define (checked-response response head form message)
+  (define v (with-handlers ([exn:fail:contract:variable? (lambda (e) #f)]) (head)))
+  (when (procedure? v)
+    (raise-syntax-error '~ message form))
+  response)
 
 ;; The response columns of formula f, as strings.
 (define (response-columns f)
@@ -425,7 +582,8 @@
 ;; and distinct, and so must every column the formula names, even one it
 ;; removes, as R's model.frame evaluates them all. A transform must read a
 ;; column, from which its rows come. The design matrix's column names must be
-;; distinct, as coef keys the coefficients by them.
+;; distinct, and none "(Intercept)", as coef keys the coefficients by them and
+;; the intercept by that name.
 (define (formula-expansion who f table)
   (define columns (table-names table who))
   (define responses (response-columns f))
@@ -451,7 +609,11 @@
     (log-glmnet-warning "~a: the response column ~s appeared on the right-hand side and was dropped"
                         who (variable-label v)))
   (define resolved (resolve-levels who kept table))
-  (define same-name (check-duplicates (model-terms-column-names resolved)))
+  (define names (model-terms-column-names resolved))
+  (when (member "(Intercept)" names)
+    (raise-arguments-error who "a column of the formula's design matrix has the intercept's name"
+                           "name" "(Intercept)" "formula" f))
+  (define same-name (check-duplicates names))
   (when same-name
     (raise-arguments-error who "two columns of the formula's design matrix have the same name"
                            "name" same-name "formula" f))

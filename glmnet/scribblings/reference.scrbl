@@ -1309,10 +1309,16 @@ interaction the product of its variables' columns, named by joining their
 names with colons, as R names them: @racket["wt:hp"]. A factor has a column
 for each of its levels, or for each but the first (see below), and an
 interaction a column for each combination of its variables' columns, the
-first variable's varying fastest. It has no intercept column, since the
-family's procedure fits the intercept. Every column the formula names, even one that it
+first variable's varying fastest. A column of the table keeps its name, where
+R puts backticks around a name that R's syntax does not allow, such as
+@racket["blood pressure"]. It has no intercept column, since the family's
+procedure fits the intercept. Every column the formula names, even one that it
 removes, must be a column of the table, and so must the response columns, which
-must be distinct. Names are compared as strings.
+must be distinct. Names are compared as strings. The design matrix's column
+names must be distinct, and none can be @racket["(Intercept)"], since
+@racket[coef] keys the coefficients by them and the intercept by
+@racket["(Intercept)"]; the formula procedures raise an error that names the
+column otherwise.
 
 A group that starts with an identifier other than the operators, such as
 @racket[(log hp)], is a @emph{transform}, as R's @tt{log(hp)} is: a Racket
@@ -1325,7 +1331,13 @@ the design matrix named by the transform's source, @racket["(log hp)"].
 not first in a group, is the table's column of that name when the table has
 one, and otherwise the Racket binding of that name where the formula is
 written, as R looks for a name in the data and then in the formula's
-environment; an identifier first in a group is always the Racket binding. The
+environment. An identifier first in a group is always the Racket binding, even
+when the table has a column of that name, as R looks up the function of a
+call by name and skips a column: with a column @racket[max],
+@racket[(max max x)] is the larger of that column and @racket[x], R's
+@tt{pmax(max, x)}. A name that the transform binds itself, with
+@racket[let], @racket[lambda] or a @racket[for] form, is its own, and a name
+in quoted data is data; the columns a transform reads are the others. The
 expression is evaluated once for each row, with each column name standing for
 the row's value, so a transform is elementwise. A column of numbers gives its
 value as a flonum, and a column of strings, symbols or booleans gives the
@@ -1448,9 +1460,16 @@ Trend road tests, and R's @tt{iris}, 150 irises of three species, which
   right-hand side as written. Each transform becomes a
   @racket[transform-term?] value that computes it, whose name is its source,
   the datum written as @racket[write] writes it. A transform's
-  @racket[proc-id] must be bound, and an @racket[arg-expr] or the
-  @racket[expr] of @racket[I] is any Racket expression, in which @racket[^],
-  R's power, is a syntax error that says to write @racket[expt]. A column is
+  @racket[proc-id] must be bound where the formula is written: in a module,
+  anywhere in it; at the top level, as in the REPL, by a definition evaluated
+  before the formula, since a later one cannot be seen there. A name in
+  argument position is read when the transform runs, so at the top level it
+  can be defined after the formula. An @racket[arg-expr] or the @racket[expr]
+  of @racket[I] is any Racket expression, checked as it is expanded, where
+  the names bound in it are known: @racket[^], R's power, is a syntax error
+  that says to write @racket[expt] unless it is bound, and so is R's infix
+  arithmetic, such as @racket[(hp * wt)], whose first name is not bound,
+  which says to write @racket[(* hp wt)]. A column is
   written as an identifier or a string, and as a string when its name is a
   word of the formula language (@racket[all], @racket[surv], the operators,
   and R's @tt{/} and @tt{%in%}, which it does not have), starts with
@@ -1458,10 +1477,16 @@ Trend road tests, and R's @tt{iris}, 150 irises of three species, which
   or @litchar{+}. The reader reads @tt{wt:hp} and @tt{-wt} as one name, so an
   operator needs spaces around it; written as an identifier, such a name is a
   syntax error that says so. So is a number other than @racket[0] and
-  @racket[1], and a group that is neither a prefix form, an infix form nor a
-  transform, such as @racket[(1 x z)]. The error points at the form that is
-  wrong. Inside a transform, a column whose name is not an identifier is
-  written with bars, as @racket[(log |blood pressure|)].
+  @racket[1]; a @racket[0] or @racket[1] with a sign glued to it, since the
+  reader reads @tt{-0} as @racket[0] and drops the sign that R reads as an
+  operator, so that R's @tt{-0} is written @racket[(- 0)]; a group that is
+  neither a prefix form, an infix form nor a transform, such as
+  @racket[(1 x z)]; a quoted name, such as @racket['hp], since @racket[~]
+  quotes the names itself; and R's @tt{/} or @tt{%in%}, between terms or at
+  the head of a group, where the error for @tt{/} says to write a ratio as
+  @racket[(I (/ hp wt))]. The error points at the form that is wrong. Inside a transform, a column whose name
+  is not an identifier is written with bars, as
+  @racket[(log |blood pressure|)].
 
   @racket[(factor column)] is R's @tt{factor(column)}, and is quoted as the
   list @racket[(factor column)]. @racket[factor] of a transform is the list of
@@ -1472,6 +1497,13 @@ Trend road tests, and R's @tt{iris}, 150 irises of three species, which
 
   The response is one column, @racket[(surv time-column status-column)] for
   the Cox family, or a list of columns for the multi-response Gaussian family.
+  It is not a transform: a response that starts with @racket[I], or with a
+  bound name and holds more than column names, such as
+  @racket[(log (+ mpg 1))], is a syntax error that says a transformed response
+  is not supported. So is a list of columns whose first name is a procedure
+  where the formula is written, such as @racket[(log mpg)], an error raised
+  when the formula is made, as only then is the value known; the columns of
+  such a response are written as strings, as in @racket[("log" "mpg")].
 
   @examples[#:eval ev
   (~ mpg (* wt hp))
@@ -1536,8 +1568,9 @@ Trend road tests, and R's @tt{iris}, 150 irises of three species, which
   booleans. Each of the @racket[columns] must be a column of the table that
   holds one kind of value, and whose numbers are finite. @racket[~] makes the
   same value from a transform written in a formula, with its source as the
-  name, except that a name of that transform that is not a column of the
-  table is the Racket binding of that name.
+  name and the names it reads as the columns, except that a name of that
+  transform that is not a column of the table is the Racket binding of that
+  name.
 
   A procedure has no source and names no columns, so a transform as data
   names both. Two transforms are @racket[equal?] when their names and columns

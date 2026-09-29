@@ -27,15 +27,19 @@
   (require rackunit)
   (define-values (quadratic trap log-path curve log-predictions) (run-example))
 
+  ;; Six significant digits: a tolerance relative to R's value, with a floor
+  ;; for a coefficient that is zero.
+  (define (digits e) (max (* 1e-6 (abs e)) 1e-12))
+
   ;; A name-keyed coef against R's coefficients, in R's order and names.
   (define (check-coef got names expected)
     (check-equal? (map car got) names)
     (for ([g (in-list (map cdr got))] [e (in-list expected)] [name (in-list names)])
-      (check-within g e (* 1e-6 (+ 1 (abs e))) name)))
+      (check-within g e (digits e) name)))
 
   (define (check-values got expected)
     (for ([g (in-list got)] [e (in-list expected)])
-      (check-within g e 1e-6)))
+      (check-within g e (digits e))))
 
   ;; R: mpg ~ hp + I(hp^2), 78 λ from 4.604254 down to 0.003565; I(hp^2) is
   ;; its column "(sqr hp)", which enters at the 32nd λ, 0.2574.
@@ -55,7 +59,8 @@
               '(36.372373459285334718 -0.158108169758438666 0.000265072072077869))
   (check-coef (coef quadratic #:lambda 0.01) square
               '(39.974599695276616274 -0.207377580883709334 0.000404113706006007))
-  (check-within (vector-ref (glmnet-path-dev-ratio fit) 77) 0.75606931709776 1e-6)
+  (check-within (vector-ref (glmnet-path-dev-ratio fit) 77) 0.75606931709776
+                (digits 0.75606931709776))
   (check-values curve '(23.2779786669658 14.6636317587750 14.1315589707045))
 
   ;; R: mpg ~ hp + hp^2 is mpg ~ hp.
@@ -74,5 +79,6 @@
               '(58.77272600056763 -5.79844993972794 -3.22465784595786))
   (check-coef (coef log-path #:lambda 0.01) log-names
               '(59.30243753404763 -5.88049630716284 -3.26480632856807))
-  (check-within (vector-ref (glmnet-path-dev-ratio log-fit) 54) 0.85910638527768 1e-6)
+  (check-within (vector-ref (glmnet-path-dev-ratio log-fit) 54) 0.85910638527768
+                (digits 0.85910638527768))
   (check-values log-predictions '(24.0082325982934 16.7643955249952 12.8009974703447)))
