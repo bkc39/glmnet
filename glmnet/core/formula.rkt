@@ -156,6 +156,16 @@
   (define (unsupported-message stx)
     (format "~a is an operator of R's formulas that this formula language does not have"
             (syntax-e stx)))
+  ;; A 0 or 1 whose source is longer than its digit, such as -0, which the
+  ;; reader reads as 0, dropping the sign that R reads as an operator.
+  (define (glued-number? stx)
+    (define span (syntax-span stx))
+    (and span (> span 1)))
+  (define (glued-number-message stx)
+    (define n (syntax-e stx))
+    (define sign (if (eqv? n 0) "-" "+"))
+    (format "~a has a sign glued to it, which the reader drops, reading ~a~a as ~a; put a space after the sign, as in (~a ~a)"
+            n sign n n sign n))
 
   (define-syntax-class column
     #:description "a column name"
@@ -199,8 +209,10 @@
   (define-syntax-class term
     #:description "a term: a column, all, 1, 0, or a group such as (* x z) or (x + z)"
     (pattern (~datum all))
-    (pattern (~and n (~fail #:unless (memv (syntax-e #'n) '(0 1)))))
-    (pattern (~and n (~fail #:unless (real? (syntax-e #'n))))
+    (pattern (~and n (~fail #:unless (memv (syntax-e #'n) '(0 1))))
+             #:fail-when (and (glued-number? #'n) #'n) (glued-number-message #'n))
+    (pattern (~and n (~fail #:unless (let ([v (syntax-e #'n)])
+                                       (and (real? v) (not (memv v '(0 1)))))))
              #:fail-when #'n
              (if (negative? (syntax-e #'n))
                  (format "~a is a number; to remove a term, put a space after the sign, as in - ~a"
@@ -216,6 +228,8 @@
     (pattern ((~datum *) _:term _:term ...+))
     (pattern ((~datum :) _:term _:term ...+))
     (pattern ((~datum ^) _:term _:power))
+    (pattern ((~and o (~fail #:unless (unsupported-id? #'o))) _ ...)
+             #:fail-when #'o (unsupported-message #'o))
     (pattern (~and g (f:id _ ...) (~fail #:when (or (reserved-id? #'f) (infix-group? #'g))))
              #:fail-when #'g
              (format "~s is a function call, a transform, which the formula language does not support yet"

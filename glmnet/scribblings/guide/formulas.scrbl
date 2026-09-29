@@ -331,12 +331,16 @@ prefix forms mix:
 ]
 
 An operator needs spaces around it. The reader reads @tt{age:dose} and
-@tt{-age} as one name each, and @tt{-1} as a number, and a formula that uses
-one is a syntax error that says so:
+@tt{-age} as one name each, @tt{-1} as a number, and @tt{-0} as @racket[0],
+dropping the sign that R reads as an operator, and a formula that uses one is
+a syntax error that says so:
 
 @examples[#:eval ev #:label #f
 (eval:error (~ bp age:dose))
 ]
+
+R's @tt{-0}, which in @tt{y ~ x + -0} keeps the intercept, is therefore
+written @racket[(- 0)], as in @racketfont{(y . ~ . x + (- 0))}.
 
 @subsection[#:tag "formulas-response-rhs"]{The response on the right-hand side}
 
@@ -476,8 +480,8 @@ The formula language is smaller than R's:
        (nesting) are syntax errors that say the language does not have them,
        and @tt{offset()} has no counterpart.}
  @item{An operator needs spaces around it, since the reader reads
-       @tt{wt:hp} as one name, and a power is an exact integer of at least 2,
-       where R truncates @tt{x^2.5} to @tt{x^2}.}
+       @tt{wt:hp} as one name and @tt{-0} as @racket[0], and a power is an
+       exact integer of at least 2, where R truncates @tt{x^2.5} to @tt{x^2}.}
  @item{The columns of a @racket[(surv time status)] or multi-column response
        are each dropped from the right-hand side, as R drops a one-column
        response. R's response there is the one variable @tt{Surv(time, status)}

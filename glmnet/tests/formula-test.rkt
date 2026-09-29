@@ -329,6 +329,31 @@
                   '("(Intercept)" . 0.0))
     (check-same (formula-fit (~ mpg wt hp) mtcars #:lambda 0.1 #:intercept? #f) without))
 
+  ;; R 4.5.3's attr(terms(f), "intercept"): 1 for mpg ~ wt + hp + -0, whose
+  ;; unary minus flips what 0 means, and 0 for mpg ~ wt + hp - -0, which flips
+  ;; it twice. The reader reads -0 as 0, which would invert both.
+  (test-case "a sign glued to 0 or 1 is a syntax error; (- 0) is R's -0, both ways"
+    (define (message-of thunk)
+      (with-handlers ([exn:fail:syntax? exn-message]) (thunk) #f))
+    (check-regexp-match
+     #rx"~: 0 has a sign glued to it, which the reader drops, reading -0 as 0; put a space after the sign, as in \\(- 0\\)\n  at: 0"
+     (message-of (lambda () (convert-compile-time-error (mpg . ~ . wt + hp + -0)))))
+    (check-regexp-match #rx"~: 0 has a sign glued to it"
+                        (message-of (lambda () (convert-compile-time-error (mpg . ~ . wt + hp - -0)))))
+    (check-regexp-match #rx"~: 0 has a sign glued to it"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg wt hp -0)))))
+    (check-regexp-match #rx"~: 0 has a sign glued to it"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (- (+ wt hp) +0))))))
+    (check-regexp-match
+     #rx"~: 1 has a sign glued to it, which the reader drops, reading \\+1 as 1; put a space after the sign, as in \\(\\+ 1\\)\n  at: 1"
+     (message-of (lambda () (convert-compile-time-error (mpg . ~ . +1 + wt + hp)))))
+    (define without (elnet-fit mtcars-rows mpg #:lambda 0.1 #:intercept? #f))
+    (define with (elnet-fit mtcars-rows mpg #:lambda 0.1))
+    (for ([f (list (mpg . ~ . wt + hp + (- 0)) (~ mpg wt hp (- 0)) (mpg . ~ . - 0 + wt + hp))])
+      (check-same (formula-fit f mtcars #:lambda 0.1) with))
+    (for ([f (list (mpg . ~ . wt + hp - (- 0)) (~ mpg (- (+ wt hp) (- 0))))])
+      (check-same (formula-fit f mtcars #:lambda 0.1) without)))
+
   (test-case "an #:intercept? that contradicts the formula's 1, 0 or - 1 blames the caller"
     (check-exn (blame-matching
                 #rx"^formula-fit: contract violation;\n the intercept\\? argument contradicts the formula's intercept\n  expected: #f, since the formula \\(~ mpg 0 wt hp\\) has no intercept\n  given: #t")
@@ -429,6 +454,10 @@
                (lambda () (convert-compile-time-error (~ y (a %in% b)))))
     (check-exn #rx"~: / is an operator"
                (lambda () (convert-compile-time-error (~ y a /))))
+    (check-exn #rx"~: / is an operator of R's formulas that this formula language does not have\n  at: /"
+               (lambda () (convert-compile-time-error (~ y (/ a b)))))
+    (check-exn #rx"~: %in% is an operator of R's formulas that this formula language does not have\n  at: %in%"
+               (lambda () (convert-compile-time-error (~ y a (+ b (%in% a b))))))
     (check-exn #rx"~: a/b reads as one name"
                (lambda () (convert-compile-time-error (~ y a/b))))
     (check-exn exn:fail:contract? (lambda () (make-formula 'y 'a '/ 'b))))

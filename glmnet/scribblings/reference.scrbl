@@ -1351,10 +1351,14 @@ as a table:
   @litchar{:}, @litchar{*}, @litchar{^}, @litchar{/} or @litchar{+}. The reader
   reads @tt{wt:hp} and @tt{-wt} as one name, so an operator needs spaces
   around it; written as an identifier, such a name is a syntax error that says
-  so. So is a number other than @racket[0] and @racket[1], a group that is
-  neither a prefix nor an infix form, such as @racket[(1 x z)], and a function
-  call such as @racket[(log x)], which the formula language does not support
-  yet. The error points at the form that is wrong.
+  so. So is a number other than @racket[0] and @racket[1]; a @racket[0] or
+  @racket[1] with a sign glued to it, since the reader reads @tt{-0} as
+  @racket[0] and drops the sign that R reads as an operator, so that R's
+  @tt{-0} is written @racket[(- 0)]; a group headed by R's @tt{/} or
+  @tt{%in%}; a group that is neither a prefix nor an infix form, such as
+  @racket[(1 x z)]; and a function call such as @racket[(log x)], which the
+  formula language does not support yet. The error points at the form that is
+  wrong.
 
   The response is one column, @racket[(surv time-column status-column)] for
   the Cox family, or a list of columns for the multi-response Gaussian family.
