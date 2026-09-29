@@ -126,9 +126,9 @@ error:
 (eval:error (formula-predictor-names (~ bp age weight) patients))
 ]
 
-The formula language has R's whole algebra of terms: interactions,
-crossing, powers and the intercept, written prefix as here or infix as R
-writes them. @secref["formulas-algebra"] describes it.
+The formula language also has R's operators for interactions, crossing,
+powers and the intercept, written prefix as here or infix as R writes them.
+@secref["formulas-algebra"] describes them.
 
 The response is one column for most families. For the Cox family it is
 @racket[(surv time status)], as R's @tt{Surv(time, status)}, and for the
