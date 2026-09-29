@@ -321,16 +321,18 @@ f
 The formula prints as the @racket[~] form that the reader makes of it. The
 operators have R's precedence: @racket[^] binds tightest, then a leading
 @racket[-] or @racket[+], then @racket[:], then @racket[*], then @racket[+]
-and @racket[-], and each groups from the left. A parenthesized group can be
-infix too, and infix and prefix forms mix:
+and @racket[-], and each groups from the left, except that a power cannot be
+raised again, as in R. A parenthesized group can be infix too, and infix and
+prefix forms mix:
 
 @examples[#:eval ev #:label #f
 (formula-predictor-names (bp . ~ . (age + dose + marker) ^ 2 - age : dose) patients)
 (formula-predictor-names (bp . ~ . - 1 + (* age dose) + marker) patients)
 ]
 
-An operator needs spaces around it. The reader reads @tt{age:dose} as one
-name, and a formula that uses such a name is a syntax error that says so:
+An operator needs spaces around it. The reader reads @tt{age:dose} and
+@tt{-age} as one name each, and @tt{-1} as a number, and a formula that uses
+one is a syntax error that says so:
 
 @examples[#:eval ev #:label #f
 (eval:error (~ bp age:dose))
@@ -471,7 +473,8 @@ The formula language is smaller than R's:
        into indicator columns, and no transforms such as @tt{log(x)} or
        @tt{I(x^2)}; add such columns to the table instead.}
  @item{R's @tt{.} is written @racket[all]. R's @tt{%in%} and @tt{/}
-       (nesting) and @tt{offset()} have no counterpart.}
+       (nesting) are syntax errors that say the language does not have them,
+       and @tt{offset()} has no counterpart.}
  @item{An operator needs spaces around it, since the reader reads
        @tt{wt:hp} as one name, and a power is an exact integer of at least 2,
        where R truncates @tt{x^2.5} to @tt{x^2}.}

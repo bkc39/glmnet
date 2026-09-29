@@ -136,21 +136,32 @@
 (begin-for-syntax
   (define (operator-id? stx)
     (and (identifier? stx) (memq (syntax-e stx) operators) #t))
+  (define (unsupported-id? stx)
+    (and (identifier? stx) (memq (syntax-e stx) unsupported-operators) #t))
   (define (reserved-id? stx)
     (and (identifier? stx) (memq (syntax-e stx) reserved) #t))
+  ;; R's operators that the language lacks count as operators here, so that
+  ;; the error is about the operator.
+  (define (infix-id? stx)
+    (or (operator-id? stx) (unsupported-id? stx)))
   (define (any-operator? stx)
-    (ormap operator-id? (syntax->list stx)))
+    (ormap infix-id? (syntax->list stx)))
   (define (infix-group? stx)
     (define elements (syntax->list stx))
-    (and (pair? elements) (ormap operator-id? (cdr elements))))
+    (and (pair? elements) (ormap infix-id? (cdr elements))))
   (define (group-shape? stx)
     (define elements (syntax->list stx))
     (and (pair? elements)
          (or (identifier? (car elements)) (infix-group? stx))))
+  (define (unsupported-message stx)
+    (format "~a is an operator of R's formulas that this formula language does not have"
+            (syntax-e stx)))
 
   (define-syntax-class column
     #:description "a column name"
     (pattern name:id
+             #:fail-when (and (unsupported-id? #'name) #'name)
+             (unsupported-message #'name)
              #:fail-when (and (reserved-id? #'name) #'name)
              (format "~a is a word of the formula language; write a column with this name as a string, ~s"
                      (syntax-e #'name) (symbol->string (syntax-e #'name)))
@@ -177,13 +188,25 @@
 
   (define-splicing-syntax-class infix-step
     #:description "an infix operator and the term after it"
-    (pattern (~seq (~datum ^) _:power))
-    (pattern (~seq _:infix-operator _:term)))
+    (pattern (~seq (~datum ^) _:power (~peek-not (~datum ^))))
+    (pattern (~seq (~datum ^) _:power (~and again (~datum ^)))
+             #:fail-when #'again
+             "a power cannot be raised again; R reads x ^ 2 ^ 3 as x ^ (2 ^ 3), which is not a power")
+    (pattern (~seq _:infix-operator _:term))
+    (pattern (~seq (~and o (~fail #:unless (unsupported-id? #'o))) _ ...)
+             #:fail-when #'o (unsupported-message #'o)))
 
   (define-syntax-class term
     #:description "a term: a column, all, 1, 0, or a group such as (* x z) or (x + z)"
     (pattern (~datum all))
     (pattern (~and n (~fail #:unless (memv (syntax-e #'n) '(0 1)))))
+    (pattern (~and n (~fail #:unless (real? (syntax-e #'n))))
+             #:fail-when #'n
+             (if (negative? (syntax-e #'n))
+                 (format "~a is a number; to remove a term, put a space after the sign, as in - ~a"
+                         (syntax-e #'n) (- (syntax-e #'n)))
+                 (format "~a is not a term; a formula's numbers are 1, 0 and a power after ^"
+                         (syntax-e #'n))))
     (pattern (~and _:id (~not _:operator) _:column))
     (pattern _:str)
     (pattern (~and g (~fail #:unless (infix-group? #'g))
@@ -231,11 +254,13 @@
 ;; response column that stands alone as a term, which R's model.matrix drops
 ;; with a warning, as this does. The response columns must be columns of the
 ;; table and distinct, and so must every column the formula names, even one
-;; it removes, as R's model.frame evaluates them all.
+;; it removes, as R's model.frame evaluates them all. The design matrix's
+;; column names must be distinct, as coef keys the coefficients by them.
 (define (formula-expansion who f columns)
   (define responses (response-columns f))
+  (define present (for/hash ([c (in-list columns)]) (values c #t)))
   (define (check-column name)
-    (unless (member name columns)
+    (unless (hash-ref present name #f)
       (raise-arguments-error who "the table has no column with this name"
                              "column" name "formula" f "columns of the table" columns)))
   (for-each check-column responses)
@@ -250,6 +275,10 @@
   (for ([v (in-list dropped)])
     (log-glmnet-warning "~a: the response column ~s appeared on the right-hand side and was dropped"
                         who (variable-label v)))
+  (define same-name (check-duplicates (model-terms-column-names kept)))
+  (when same-name
+    (raise-arguments-error who "two columns of the formula's design matrix have the same name"
+                           "name" same-name "formula" f))
   kept)
 
 (define (check-predictors who f mt)

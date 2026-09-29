@@ -1251,7 +1251,9 @@ The terms of a formula expand as R's @tt{terms} expands them:
        combined with every term of @racket[b]: an interaction, whose variables
        are those of both.}
  @item{@racket[(* a b)], or @racket[a * b], crosses them: the terms of
-       @racket[a + b + a : b].}
+       @racket[a + b + a : b]. When @racket[a] has no terms, as @racket[1] and
+       @racket[0] have none, neither has @racket[a * b], as in R, whose
+       @tt{y ~ 0*x + z} is @tt{y ~ z - 1}.}
  @item{@racket[(^ a n)], or @racket[a ^ n], crosses @racket[a] with itself:
        every interaction of at most @racket[n] of the terms of @racket[a], for
        an exact integer @racket[n] of at least 2. A variable crossed with
@@ -1305,7 +1307,7 @@ as a table:
 
 @defform*[#:literals (all surv + - * : ^)
           [(~ response term ...)
-           (~ response maybe-sign term operation ...+)]
+           (~ response maybe-sign term operation ...)]
           #:grammar
           [(response column
                      (surv time-column status-column)
@@ -1332,7 +1334,8 @@ as a table:
   terms side by side, which are joined as by @racket[+], or terms with infix
   operators between them. The infix operators have R's precedence: @racket[^]
   binds tightest, then a leading sign, then @racket[:], then @racket[*], then
-  @racket[+] and @racket[-]; each groups from the left. A parenthesized group
+  @racket[+] and @racket[-]; each groups from the left, except that a power
+  cannot be raised again, which R does not allow either. A parenthesized group
   is a prefix form when it starts with an operator and has no operators
   between its terms, and an infix one otherwise. A @racket[power] is an exact
   integer of at least 2. The Racket reader's infix dots make
@@ -1343,13 +1346,15 @@ as a table:
   @racket[(make-formula 'response 'rhs ...)], with the elements of the
   right-hand side as written. A column is written as an identifier or a
   string, and as a string when its name is a word of the formula language
-  (@racket[all], @racket[surv] and the operators) or contains @litchar{:},
-  @litchar{*}, @litchar{^} or @litchar{+}. The reader reads @tt{wt:hp} as one
-  name, so an operator needs spaces around it; written as an identifier, such
-  a name is a syntax error that says so. So is a group that is neither a prefix
-  nor an infix form, such as @racket[(1 x z)], and a function call such as
-  @racket[(log x)], which the formula language does not support yet. The error
-  points at the form that is wrong.
+  (@racket[all], @racket[surv], the operators, and R's @tt{/} and
+  @tt{%in%}, which it does not have), starts with @litchar{-}, or contains
+  @litchar{:}, @litchar{*}, @litchar{^}, @litchar{/} or @litchar{+}. The reader
+  reads @tt{wt:hp} and @tt{-wt} as one name, so an operator needs spaces
+  around it; written as an identifier, such a name is a syntax error that says
+  so. So is a number other than @racket[0] and @racket[1], a group that is
+  neither a prefix nor an infix form, such as @racket[(1 x z)], and a function
+  call such as @racket[(log x)], which the formula language does not support
+  yet. The error points at the form that is wrong.
 
   The response is one column, @racket[(surv time-column status-column)] for
   the Cox family, or a list of columns for the multi-response Gaussian family.
@@ -1367,8 +1372,7 @@ as a table:
 
 @defthing[formula-term/c flat-contract?]{
   Accepts a term as data, as @racket[~] quotes it: a column name (a string,
-  or a symbol that is not a word of the formula language and has no
-  @litchar{:}, @litchar{*}, @litchar{^} or @litchar{+} in it), @racket['all],
+  or a symbol that @racket[~] accepts as a column name), @racket['all],
   @racket[0], @racket[1], a prefix form, or a group of terms with infix
   operators between them.
 
@@ -1379,10 +1383,10 @@ as a table:
   (formula-term/c '(log wt))]}
 
 @defthing[formula-rhs/c flat-contract?]{
-  Accepts the right-hand side of a formula as data: a list of terms, joined as
-  by @racket[+], or of terms with infix operators between them and possibly a
-  leading sign, as @racket[~] takes them. The empty list is the right-hand side
-  of a formula without predictors.
+  Accepts the right-hand side of a formula as data, as @racket[~] takes it: a
+  list of terms, joined as by @racket[+], or an infix sequence, a term with a
+  leading sign or with infix operators and terms after it. The empty list is
+  the right-hand side of a formula without predictors.
 
   @examples[#:eval ev
   (formula-rhs/c '(wt hp (: wt hp)))

@@ -27,7 +27,7 @@ glmnet/                        Racket collection
   core/formula.rkt             formula front end: (~ y all) on a table -> any family,
                                a formula-model with name-keyed coef and predict
   core/terms.rkt               formula terms: R's terms() expansion (+ - * : ^, 0/1)
-                               and model.matrix(); variables are column structs
+                               and model.matrix(); terms are sorted index lists
   examples/data/mtcars.rkt     R's mtcars as a table, for formula examples and parity
   main.rkt                     public API (require glmnet)
   plot.rkt                     glmnet/plot: R's plot.glmnet / plot.cv.glmnet on plot-lib
@@ -227,8 +227,8 @@ arc #44: regularization paths (#10), the design-matrix layer (#35), the
 generic model interface (#25), cross-validation (#27), plots (#28) and the
 formula front end (#26); and R's formula algebra (#53, leg 1).
 
-Next: transforms and factors in formulas (#53, legs 2 and 3); the per-fit knobs, weights, `penalty.factor`, coefficient limits,
-offsets and `exclude` (#12); sparse input through `spelnet` / `splognet` /
-`spfishnet` (#11), already present in `vendor/`; the data-source adapters of
-the input-formats arc (#41); and parity fixtures from glmnet's example
-datasets (#17).
+Next: transforms and factors in formulas (#53, legs 2 and 3); the per-fit
+knobs, weights, `penalty.factor`, coefficient limits, offsets and `exclude`
+(#12); sparse input through `spelnet` / `splognet` / `spfishnet` (#11),
+already present in `vendor/`; the data-source adapters of the input-formats
+arc (#41); and parity fixtures from glmnet's example datasets (#17).

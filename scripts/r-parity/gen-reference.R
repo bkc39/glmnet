@@ -462,6 +462,8 @@ formula_fixtures <- list(
        rkt = c("(~ mpg (^ wt 2) hp)", "(mpg . ~ . wt ^ 2 + hp)", "(~ mpg wt hp)")),
   list(id = "formula-mtcars-cross-sums", dataset = "mtcars", r = "mpg ~ (wt + hp) * (qsec + drat)",
        rkt = c("(~ mpg (* (+ wt hp) (+ qsec drat)))", "(mpg . ~ . (wt + hp) * (qsec + drat))")),
+  list(id = "formula-mtcars-cross-empty-left", dataset = "mtcars", r = "mpg ~ 1*wt + hp + qsec",
+       rkt = c("(mpg . ~ . 1 * wt + hp + qsec)", "(~ mpg (* 1 wt) hp qsec)")),
   list(id = "formula-mtcars-remove", dataset = "mtcars", r = "mpg ~ (wt + hp + qsec)^2 - wt:hp",
        rkt = c("(~ mpg (- (^ (+ wt hp qsec) 2) (: wt hp)))", "(mpg . ~ . (wt + hp + qsec) ^ 2 - wt : hp)")),
   list(id = "formula-mtcars-remove-absent", dataset = "mtcars", r = "mpg ~ wt * hp - qsec",

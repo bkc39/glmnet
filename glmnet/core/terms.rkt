@@ -9,27 +9,29 @@
 ;; builds the design matrix of those terms from a table, as model.matrix()
 ;; does without its intercept column.
 ;;
-;; A term is a set of variables, held as a bit mask over the variables vector,
-;; as R holds it; the response columns are the first variables. A variable is a
-;; struct; this module has one kind, `column-variable`, and every procedure
-;; that reads a variable dispatches on its kind with `match`, so another kind
-;; adds a struct and a clause to each of `leaf-variable`, `variable-label`,
-;; `variable-inputs` and `variable-columns`. `variable-columns` receives R's
-;; coding of the variable in its term (`codings`), which only a variable that
-;; expands into several columns needs.
+;; A term is a set of variables, held as an ascending list of indices into the
+;; variables vector, where R holds a bit set, so that a formula of many main
+;; effects stays linear in their number; the response columns are the first
+;; variables. A variable is a struct; this module has one kind,
+;; `column-variable`, and every procedure that reads a variable dispatches on
+;; its kind with `match`, so another kind adds a struct and a clause to each of
+;; `leaf-variable`, `variable-label`, `variable-inputs` and `variable-columns`.
+;; `variable-columns` receives R's coding of the variable in its term
+;; (`codings`), which only a variable that expands into several columns needs.
 
 (module words racket/base
-  (provide operators reserved glued-operator?)
-  ;; The words of the formula language. A column with one of these names is
-  ;; written as a string.
+  (provide operators unsupported-operators reserved glued-operator?)
+  ;; The words of the formula language, and R's operators that it does not
+  ;; have. A column with one of these names is written as a string.
   (define operators '(+ - * : ^))
-  (define reserved (list* 'all 'surv operators))
-  ;; A symbol such as wt:hp, which the reader reads as one name where R reads
-  ;; an interaction. A column with such a name is written as a string, too. A
-  ;; hyphen is left out, since Racket names use it.
+  (define unsupported-operators '(/ %in%))
+  (define reserved (list* 'all 'surv (append operators unsupported-operators)))
+  ;; A symbol such as wt:hp or -wt, which the reader reads as one name where R
+  ;; reads an operator. A column with such a name is written as a string, too.
+  ;; A hyphen inside a name is allowed, since Racket names use it.
   (define (glued-operator? sym)
     (and (not (memq sym reserved))
-         (regexp-match? #rx"[+*:^]" (symbol->string sym)))))
+         (regexp-match? #rx"[+*:^/]|%in%|^-." (symbol->string sym)))))
 
 (require racket/flonum
          racket/list
@@ -83,7 +85,8 @@
     [(list '^ (? term?) (? power?)) #t]
     [_ #f]))
 
-;; [sign] term {operator term | ^ power} ...
+;; [sign] term {operator term | ^ power} ..., without a power raised again,
+;; which R rejects: it reads x^2^3 as x^(2^3).
 (define (infix? elements)
   (define after-sign
     (if (and (pair? elements) (sign? (car elements))) (cdr elements) elements))
@@ -92,6 +95,7 @@
        (let loop ([rest (cdr after-sign)])
          (match rest
            ['() #t]
+           [(list* '^ (? power?) '^ _) #f]
            [(list* '^ (? power?) more) (loop more)]
            [(list* (or '+ '- '* ':) (? term?) more) (loop more)]
            [_ #f]))))
@@ -125,7 +129,7 @@
     [leaf leaf]))
 
 ;; R's precedence: ^ binds tightest, then a leading sign, then :, *, and + and
-;; -, each left-associative.
+;; -, each but ^ left-associative.
 (define precedence (hasheq '+ 1 '- 1 '* 2 ': 3 '^ 5))
 (define sign-precedence 4)
 
@@ -184,8 +188,9 @@
 ;;  variables      : a vector of variables, the response columns first and then
 ;;                   the others in the order they first appear
 ;;  response-count : how many of the first variables are response columns
-;;  terms          : the terms, each a bit mask over `variables`, ordered as R
-;;                   orders them: by degree, then by first appearance
+;;  terms          : the terms, each an ascending list of indices into
+;;                   `variables`, ordered as R orders them: by degree, then by
+;;                   first appearance
 ;;  codings        : for each term, R's factors attribute: for each of its
 ;;                   variables, in order, 1 if the term without it is empty or
 ;;                   in an earlier term, else 2
@@ -200,7 +205,7 @@
 ;; other way round inside the right operand of -, and the last one wins.
 (define (expand-terms rhs responses columns)
   (define-values (variables terms intercept) (encode rhs responses columns))
-  (define ordered (sort terms < #:key bit-count))
+  (define ordered (sort terms < #:key length #:cache-keys? #t))
   (model-terms variables (length responses) ordered (term-codings ordered)
                (not (eq? intercept #f))))
 
@@ -219,20 +224,21 @@
                 (hash-set! index v (hash-count index))
                 (set! installed (cons v installed))
                 (hash-ref index v))))
-  (define (variable-term v) (arithmetic-shift 1 (install! v)))
+  (define (variable-term v) (list (install! v)))
   (for ([r (in-list responses)]) (install! (column-variable r)))
+  (define response-set (for/hash ([r (in-list responses)]) (values r #t)))
   (define intercept 'unspecified)
   (define parity #t)
   (define (set-intercept! on?) (set! intercept (eq? on? parity)))
   (define (remove-from left t)
     (set! parity (not parity))
-    (define removed (encode-tree t))
+    (define removed (for/hash ([term (in-list (encode-tree t))]) (values term #t)))
     (set! parity (not parity))
-    (filter (lambda (term) (not (memv term removed))) left))
+    (filter (lambda (term) (not (hash-ref removed term #f))) left))
   (define (encode-tree t)
     (match t
       [#f '()]
-      ['all (for/list ([c (in-list columns)] #:unless (member c responses))
+      ['all (for/list ([c (in-list columns)] #:unless (hash-ref response-set c #f))
               (variable-term (column-variable c)))]
       [1 (set-intercept! #t) '()]
       [0 (set-intercept! #f) '()]
@@ -240,8 +246,12 @@
       [(list '- a) (remove-from '() a)]
       [(list '- a b) (remove-from (encode-tree a) b)]
       [(list ': a b) (let* ([l (encode-tree a)] [r (encode-tree b)]) (interact l r))]
+      ;; R's CrossTerms appends to the left operand's list in place, so an
+      ;; empty left operand, as in 0 * b, loses everything: R's y ~ 0*b + c
+      ;; is y ~ c - 1.
       [(list '* a b)
-       (let* ([l (encode-tree a)] [r (encode-tree b)]) (trim (append l r (interact l r))))]
+       (let* ([l (encode-tree a)] [r (encode-tree b)])
+         (if (null? l) '() (trim (append l r (interact l r)))))]
       [(list '^ a n)
        (define l (encode-tree a))
        (for/fold ([crossed l]) ([i (in-range 1 n)]) (interact l crossed))]
@@ -251,28 +261,41 @@
 
 ;; Every term of a with every term of b, as R's InteractTerms.
 (define (interact a b)
-  (trim (for*/list ([l (in-list a)] [r (in-list b)]) (bitwise-ior l r))))
+  (trim (for*/list ([l (in-list a)] [r (in-list b)]) (term-union l r))))
 
 ;; Without empty and repeated terms, as R's TrimRepeats.
 (define (trim terms)
-  (remove-duplicates (filter positive? terms)))
+  (remove-duplicates (filter pair? terms)))
 
-(define (bit-count term)
-  (for/sum ([i (in-range (integer-length term))]) (if (bitwise-bit-set? term i) 1 0)))
+(define (term-union a b)
+  (cond
+    [(null? a) b]
+    [(null? b) a]
+    [(< (car a) (car b)) (cons (car a) (term-union (cdr a) b))]
+    [(> (car a) (car b)) (cons (car b) (term-union a (cdr b)))]
+    [else (cons (car a) (term-union (cdr a) (cdr b)))]))
 
-(define (term-bits term)
-  (for/list ([i (in-range (integer-length term))] #:when (bitwise-bit-set? term i)) i))
+;; Whether every variable of term a is in term b.
+(define (subterm? a b)
+  (cond
+    [(null? a) #t]
+    [(null? b) #f]
+    [(= (car a) (car b)) (subterm? (cdr a) (cdr b))]
+    [(> (car a) (car b)) (subterm? a (cdr b))]
+    [else #f]))
 
 ;; R's TermCode for each variable of each term.
 (define (term-codings terms)
-  (for/list ([term (in-list terms)] [k (in-naturals)])
-    (define earlier (take terms k))
-    (for/list ([i (in-list (term-bits term))])
-      (define margin (bitwise-and term (bitwise-not (arithmetic-shift 1 i))))
-      (if (or (zero? margin)
-              (for/or ([e (in-list earlier)]) (= (bitwise-and margin e) margin)))
-          1
-          2))))
+  (for/fold ([earlier '()] [codings '()] #:result (reverse codings))
+            ([term (in-list terms)])
+    (values (cons term earlier)
+            (cons (for/list ([i (in-list term)])
+                    (define margin (remv i term))
+                    (if (or (null? margin)
+                            (for/or ([e (in-list earlier)]) (subterm? margin e)))
+                        1
+                        2))
+                  codings))))
 
 ;; --- the response on the right-hand side ------------------------------------------
 
@@ -282,19 +305,19 @@
 (define (drop-response-terms mt)
   (match-define (model-terms variables k terms codings intercept?) mt)
   (define (response-term? term)
-    (and (= (bit-count term) 1) (< (integer-length term) (add1 k))))
+    (and (null? (cdr term)) (< (car term) k)))
   (define kept
     (for/list ([term (in-list terms)] [coding (in-list codings)] #:unless (response-term? term))
       (cons term coding)))
   (values (model-terms variables k (map car kept) (map cdr kept) intercept?)
           (for/list ([term (in-list terms)] #:when (response-term? term))
-            (vector-ref variables (sub1 (integer-length term))))))
+            (vector-ref variables (car term)))))
 
 ;; --- names and design matrices -----------------------------------------------------
 
 ;; The variables of a term, in the order of the variables.
 (define (term-variables mt term)
-  (for/list ([i (in-list (term-bits term))])
+  (for/list ([i (in-list term)])
     (vector-ref (model-terms-variables mt) i)))
 
 ;; R's term labels: each term's variables joined by colons.
@@ -308,11 +331,12 @@
 ;; The names of the table's columns that the terms read, each once, in the
 ;; order of the variables.
 (define (model-terms-inputs mt)
-  (define used (apply bitwise-ior 0 (model-terms-terms mt)))
+  (define used (for*/hasheqv ([term (in-list (model-terms-terms mt))] [i (in-list term)])
+                 (values i #t)))
   (remove-duplicates
    (append* (for/list ([v (in-vector (model-terms-variables mt))]
                        [i (in-naturals)]
-                       #:when (bitwise-bit-set? used i))
+                       #:when (hash-ref used i #f))
               (variable-inputs v)))))
 
 ;; The design matrix of the terms on `table`: one or more columns per term, in
@@ -324,7 +348,8 @@
 (define (terms->design-matrix who mt table)
   (define needed (model-terms-inputs mt))
   (define available (table-names table who))
-  (define missing (filter (lambda (name) (not (member name available))) needed))
+  (define present (for/hash ([name (in-list available)]) (values name #t)))
+  (define missing (filter (lambda (name) (not (hash-ref present name #f))) needed))
   (match missing
     ['() (void)]
     [(list name)

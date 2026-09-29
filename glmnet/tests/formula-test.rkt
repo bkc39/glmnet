@@ -199,6 +199,11 @@
     (check-exn #rx"no column with this name.*column: \"w\""
                (lambda () (names (~ w all))))
     (check-exn #rx"names a column twice.*column: \"a\"" (lambda () (names (~ (a a) all))))
+    (define with-colon (cons (cons "a:b" '(0 1 0)) letters))
+    (check-exn #rx"^formula-predictor-names: two columns of the formula's design matrix have the same name\n  name: \"a:b\""
+               (lambda () (formula-predictor-names (~ y "a:b" (: a b)) with-colon)))
+    (check-exn #rx"^formula-fit: two columns of the formula's design matrix have the same name"
+               (lambda () (formula-fit (~ y "a:b" (: a b)) with-colon #:lambda 0.1)))
     (check-exn #rx"no column with this name.*column: \"z\""
                (lambda () (formula-fit (~ y a z) letters #:lambda 0.1))))
 
@@ -253,6 +258,16 @@
     ;; mpg ~ wt + (hp - wt): the removal is inside the group
     (check-equal? (mtcars-names (~ mpg wt (- hp wt))) '("wt" "hp"))
     (check-equal? (mtcars-names (~ mpg (- wt wt))) '()))
+
+  (test-case "* with an empty left operand is empty, as R's CrossTerms makes it"
+    ;; R: mpg ~ 0*wt + hp is mpg ~ hp - 1; mpg ~ wt*0 is mpg ~ wt - 1;
+    ;; mpg ~ 1*wt*hp has no terms.
+    (check-equal? (mtcars-names (mpg . ~ . 0 * wt + hp)) '("hp"))
+    (check-equal? (mtcars-names (~ mpg (* wt 0))) '("wt"))
+    (check-equal? (mtcars-names (~ mpg (* 1 wt hp))) '())
+    (check-equal? (formula-model-fit (formula-fit (mpg . ~ . 0 * wt + hp + qsec) mtcars #:lambda 0.1))
+                  (elnet-fit (rows-of mtcars '("hp" "qsec")) (cdr (assoc "mpg" mtcars)) #:lambda 0.1
+                             #:intercept? #f)))
 
   (test-case "infix operators take R's precedence, left to right, and mix with prefix groups"
     (define (same? a b) (equal? (mtcars-names a) (mtcars-names b)))
@@ -403,7 +418,20 @@
                (lambda () (convert-compile-time-error (~ y x^2))))
     (check-exn #rx"~: a\\*b reads as one name"
                (lambda () (convert-compile-time-error (~ y (+ c a*b)))))
+    (check-exn #rx"~: -wt reads as one name"
+               (lambda () (convert-compile-time-error (~ mpg -wt + hp))))
     (check-equal? (formula-response (~ blood-pressure age)) 'blood-pressure))
+
+  (test-case "R's operators that the language lacks are errors that say so"
+    (check-exn #rx"~: / is an operator of R's formulas that this formula language does not have\n  at: /"
+               (lambda () (convert-compile-time-error (y . ~ . a / b))))
+    (check-exn #rx"~: %in% is an operator of R's formulas"
+               (lambda () (convert-compile-time-error (~ y (a %in% b)))))
+    (check-exn #rx"~: / is an operator"
+               (lambda () (convert-compile-time-error (~ y a /))))
+    (check-exn #rx"~: a/b reads as one name"
+               (lambda () (convert-compile-time-error (~ y a/b))))
+    (check-exn exn:fail:contract? (lambda () (make-formula 'y 'a '/ 'b))))
 
   (test-case "a malformed term is an error at the form that is wrong"
     (define (message-of thunk)
@@ -426,8 +454,13 @@
                         (message-of (lambda () (convert-compile-time-error (~ y (* a))))))
     (check-regexp-match #rx"~: expected a term.*\n  at: \\+"
                         (message-of (lambda () (convert-compile-time-error (~ y x * + z)))))
-    (check-regexp-match #rx"~: expected a term.*\n  at: 3"
+    (check-regexp-match #rx"~: 3 is not a term; a formula's numbers are 1, 0 and a power after \\^\n  at: 3"
                         (message-of (lambda () (convert-compile-time-error (~ y 3)))))
+    (check-regexp-match #rx"~: -1 is a number; to remove a term, put a space after the sign, as in - 1\n  at: -1"
+                        (message-of (lambda () (convert-compile-time-error (y . ~ . -1 + x)))))
+    (check-regexp-match #rx"~: a power cannot be raised again; R reads x \\^ 2 \\^ 3 as x \\^ \\(2 \\^ 3\\), which is not a power\n  at: \\^"
+                        (message-of (lambda () (convert-compile-time-error (y . ~ . (a + b) ^ 2 ^ 3)))))
+    (check-equal? (format "~a" (y . ~ . ((a + b) ^ 2) ^ 3)) "(~ y ((a + b) ^ 2) ^ 3)")
     (check-regexp-match #rx"~: expected more terms starting with a column name"
                         (message-of (lambda () (convert-compile-time-error (~ (surv t) all))))))
 
@@ -437,7 +470,7 @@
     (check-equal? (make-formula 'y '- 1 '+ '(a + b) '^ 2) (~ y - 1 + (a + b) ^ 2))
     (check-equal? (make-formula 'y '(- 1 + a)) (~ y (- 1 + a)))
     (for ([bad (list '((* a)) '(a b + c) '((^ a 1)) '(a ^ b) '((sqr x)) '(a:b) '(3) '(+)
-                     '(a +) '((1 x)) '(()))])
+                     '(a +) '((1 x)) '(()) '(a ^ 2 ^ 3) '(-a) '(-1 + a) '(a / b))])
       (check-exn (blame-matching #rx"make-formula: contract violation.*expected: formula-rhs/c")
                  (lambda () (apply make-formula 'y bad))
                  (format "~s" bad)))
