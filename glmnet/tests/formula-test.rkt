@@ -204,6 +204,13 @@
                (lambda () (formula-predictor-names (~ y "a:b" (: a b)) with-colon)))
     (check-exn #rx"^formula-fit: two columns of the formula's design matrix have the same name"
                (lambda () (formula-fit (~ y "a:b" (: a b)) with-colon #:lambda 0.1)))
+    (define with-intercept-name (cons (cons "(Intercept)" '(2 0 1)) letters))
+    (check-exn #rx"^formula-fit: a column of the formula's design matrix has the intercept's name\n  name: \"\\(Intercept\\)\"\n  formula: \\(~ y \"\\(Intercept\\)\" a\\)"
+               (lambda () (formula-fit (~ y "(Intercept)" a) with-intercept-name #:lambda 0.1)))
+    (check-exn #rx"^formula-predictor-names: a column of the formula's design matrix has the intercept's name"
+               (lambda () (formula-predictor-names (~ y all) with-intercept-name)))
+    (check-equal? (formula-predictor-names (~ y (: "(Intercept)" a)) with-intercept-name)
+                  '("(Intercept):a"))
     (check-exn #rx"no column with this name.*column: \"z\""
                (lambda () (formula-fit (~ y a z) letters #:lambda 0.1))))
 

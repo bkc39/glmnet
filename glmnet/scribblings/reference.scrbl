@@ -1276,10 +1276,16 @@ folded from the left: @racket[(* a b c)] is @racket[a * b * c].
 The design matrix, which @racket[formula-design-matrix] returns, has one
 column per term: a column of the table, or for an interaction the product of
 its variables' columns, named by joining their names with colons, as R names
-them: @racket["wt:hp"]. It has no intercept column, since the family's
+them: @racket["wt:hp"]. A column of the table keeps its name, where R puts
+backticks around a name that R's syntax does not allow, such as
+@racket["blood pressure"]. It has no intercept column, since the family's
 procedure fits the intercept. Every column the formula names, even one that it
 removes, must be a column of the table, and so must the response columns, which
-must be distinct. Names are compared as strings.
+must be distinct. Names are compared as strings. The design matrix's column
+names must be distinct, and none can be @racket["(Intercept)"], since
+@racket[coef] keys the coefficients by them and the intercept by
+@racket["(Intercept)"]; the formula procedures raise an error that names the
+column otherwise.
 
 A response column that stands alone as a term on the right-hand side is
 dropped from it, and a warning naming the procedure called is logged on the

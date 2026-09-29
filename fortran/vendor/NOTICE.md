@@ -87,7 +87,7 @@ R's R-level wrappers do some work before and after calling the Fortran. What our
   - *An explicit `#:intercept?`.* R's formula decides the intercept alone. The formula procedures' `#:intercept?` defaults to the formula's intercept, and when given must agree with a formula that writes `1`, `0` or `- 1` (a contract error otherwise); with a formula that writes none, it decides, as it did before #53.
   - *New data.* R's `predict` with a formula evaluates every variable of `terms`, even one a `-` removed, so new data needs them all; `predict` here needs only the columns the fitted terms read.
   - *Not reproduced:* `offset()`, `.` inside a function call, and R's `specials`. Transforms and factors are the next legs of #53.
-  - *Duplicate column names.* R's `model.matrix` allows two columns with the same name, such as a column named `wt:hp` beside the interaction `wt:hp`; the formula procedures raise an error naming it, since `coef` keys the coefficients by name.
+  - *Names that R's syntax does not allow.* R's `model.matrix` puts backticks around a column name like `blood pressure` or `blood-pressure`, alone and inside an interaction: `` `blood pressure` `` and `` `blood pressure`:wt ``. The design matrix here keeps the table's name, `blood pressure` and `blood pressure:wt`, and so do `coef` and `predict`. As a consequence, a column named `wt:hp` beside the interaction of `wt` and `hp`, which R names `` `wt:hp` `` and `wt:hp`, gives two columns with the same name here, and a column named `(Intercept)`, which R names `` `(Intercept)` ``, has the name `coef` gives the intercept. Either is an error naming the column, since `coef` keys the coefficients by name.
 
 ## Build notes
 

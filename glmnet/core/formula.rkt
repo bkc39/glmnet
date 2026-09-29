@@ -269,7 +269,8 @@
 ;; with a warning, as this does. The response columns must be columns of the
 ;; table and distinct, and so must every column the formula names, even one
 ;; it removes, as R's model.frame evaluates them all. The design matrix's
-;; column names must be distinct, as coef keys the coefficients by them.
+;; column names must be distinct, and none "(Intercept)", as coef keys the
+;; coefficients by them and the intercept by that name.
 (define (formula-expansion who f columns)
   (define responses (response-columns f))
   (define present (for/hash ([c (in-list columns)]) (values c #t)))
@@ -289,7 +290,11 @@
   (for ([v (in-list dropped)])
     (log-glmnet-warning "~a: the response column ~s appeared on the right-hand side and was dropped"
                         who (variable-label v)))
-  (define same-name (check-duplicates (model-terms-column-names kept)))
+  (define names (model-terms-column-names kept))
+  (when (member "(Intercept)" names)
+    (raise-arguments-error who "a column of the formula's design matrix has the intercept's name"
+                           "name" "(Intercept)" "formula" f))
+  (define same-name (check-duplicates names))
   (when same-name
     (raise-arguments-error who "two columns of the formula's design matrix have the same name"
                            "name" same-name "formula" f))

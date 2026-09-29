@@ -482,6 +482,14 @@ The formula language is smaller than R's:
  @item{An operator needs spaces around it, since the reader reads
        @tt{wt:hp} as one name and @tt{-0} as @racket[0], and a power is an
        exact integer of at least 2, where R truncates @tt{x^2.5} to @tt{x^2}.}
+ @item{A column keeps the table's name in the design matrix, where R's
+       @tt{model.matrix} puts backticks around a name that R's syntax does
+       not allow, such as @tt{@literal{`blood pressure`}}. So a column named
+       @racket["wt:hp"] beside the interaction of @racket[wt] and @racket[hp],
+       which R names @tt{@literal{`wt:hp`}} and @tt{wt:hp}, gives two columns
+       of the same name here, which is an error, since @racket[coef] keys the
+       coefficients by name; and so is a column named
+       @racket["(Intercept)"], the intercept's name.}
  @item{The columns of a @racket[(surv time status)] or multi-column response
        are each dropped from the right-hand side, as R drops a one-column
        response. R's response there is the one variable @tt{Surv(time, status)}
