@@ -735,7 +735,7 @@
     ;; Quoted data is data: its names are not read.
     (check-equal? (hash-ref (columns-of (formula-design-matrix
                                          (~ mpg (I (+ hp (length '(wt * qsec ^ 2))))) mtcars))
-                            "(I (+ hp (length (quote (wt * qsec ^ 2)))))")
+                            "(I (+ hp (length '(wt * qsec ^ 2))))")
                   (map (lambda (v) (+ v 5)) (mtcars-column "hp"))))
 
   (test-case "a function or ^ that a transform binds itself is Racket's, not R's infix arithmetic"
@@ -836,6 +836,19 @@
     (check-not-equal? (~ mpg (log hp)) (~ mpg (log wt)))
     (check-equal? (make-formula 'mpg (transform-term "(log hp)" '(hp) log) '* 'wt)
                   (mpg . ~ . (log hp) * wt)))
+
+  (test-case "a transform's name writes quoted data with the reader's abbreviations"
+    (define f (~ mpg wt (I (if (memv cyl '(4.0 6.0)) 1 0)) (I (length `(,hp x ,@(list wt))))))
+    (check-equal? (mtcars-names f)
+                  '("wt" "(I (if (memv cyl '(4.0 6.0)) 1 0))" "(I (length `(,hp x ,@(list wt))))"))
+    (check-equal? (format "~a" f)
+                  "(~ mpg wt (I (if (memv cyl '(4.0 6.0)) 1 0)) (I (length `(,hp x ,@(list wt)))))")
+    (check-equal? (map car (coef (formula-fit f mtcars #:lambda 0.1)))
+                  '("(Intercept)" "wt" "(I (if (memv cyl '(4.0 6.0)) 1 0))"
+                    "(I (length `(,hp x ,@(list wt))))"))
+    (check-equal? (hash-ref (columns-of (formula-design-matrix f mtcars))
+                            "(I (if (memv cyl '(4.0 6.0)) 1 0))")
+                  (for/list ([c (in-list (mtcars-column "cyl"))]) (if (= c 8.0) 0.0 1.0))))
 
   (test-case "transform-term makes a transform from a procedure, its name and its columns"
     (define ratio (transform-term "hp/wt" '("hp" wt) /))

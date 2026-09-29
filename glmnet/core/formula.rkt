@@ -203,14 +203,19 @@
                  [_ '(I (/ x z))]))]
       [else ""]))
 
+  ;; The source of stx as it is written, 'x rather than (quote x): the name
+  ;; of a transform's column, and so a key of coef.
+  (define (syntax->source-string stx)
+    (parameterize ([print-reader-abbreviations #t])
+      (format "~s" (syntax->datum stx))))
+
   (define (quote-id? stx)
     (and (identifier? stx)
          (or (free-identifier=? stx #'quote) (free-identifier=? stx #'quasiquote))))
   (define (quoted-message g d)
     (define v (syntax-e d))
     (format "~a is quoted, and ~~ quotes the names of a formula itself: ~a"
-            (parameterize ([print-reader-abbreviations #t])
-              (format "~s" (syntax->datum g)))
+            (syntax->source-string g)
             (cond
               [(symbol? v) (format "write the column as ~a or ~s" v (symbol->string v))]
               [(string? v) (format "write the column as ~s" v)]
@@ -354,7 +359,7 @@
              #:with (slot ...) (for/list ([tmp (in-list tmps)] [r (in-list read?)]) (if r tmp #'#f))
              #:with proc proc
              #:with (fallback ...) (map fallback-thunk (syntax->list #'(id ...)))
-             #:with name (format "~s" (syntax->datum #'t))
+             #:with name (syntax->source-string #'t)
              #:with expr
              #'(source-transform
                 'name '(id ...)

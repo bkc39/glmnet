@@ -543,6 +543,16 @@ column @racket["(log hp)"] here:
 R's vectorized @tt{pmin} is Racket's @racket[min] here, since a transform
 sees one row at a time.
 
+A name is the source as the reader writes it, so quoted data keeps its
+abbreviation, @racket['x] and not @racket[(quote x)]. A transform reads a
+column's values as flonums, so the data it compares them with are flonums
+too, @racket['(40.0 50.0)] and not @racket['(40 50)], which @racket[memv]
+would never find:
+
+@examples[#:eval ev #:label #f
+(formula-predictor-names (~ bp (I (if (memv age '(40.0 50.0)) 1 0))) patients)
+]
+
 @section[#:tag "formulas-binomial"]{A binomial fit}
 
 With @racket[#:family 'binomial], the response column holds 0/1 labels. Here
