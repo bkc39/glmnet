@@ -738,6 +738,17 @@
                             "(I (+ hp (length '(wt * qsec ^ 2))))")
                   (map (lambda (v) (+ v 5)) (mtcars-column "hp"))))
 
+  (test-case "=>, else, unquote and the pattern literals keep their Racket meaning in a transform"
+    (define f (~ mpg (I (cond [(memv hp '(110.0)) => (lambda (l) 1.0)] [else 0.0]))
+                 (I (cdr `(,hp . ,wt)))
+                 (I (match (list hp wt) [(list _ _) 1.0]))))
+    (define x (columns-of (formula-design-matrix f mtcars)))
+    (check-equal? (hash-ref x "(I (cond ((memv hp '(110.0)) => (lambda (l) 1.0)) (else 0.0)))")
+                  (for/list ([v (in-list (mtcars-column "hp"))]) (if (= v 110.0) 1.0 0.0)))
+    (check-equal? (hash-ref x "(I (cdr `(,hp . ,wt)))") (mtcars-column "wt"))
+    (check-equal? (hash-ref x "(I (match (list hp wt) ((list _ _) 1.0)))")
+                  (for/list ([v (in-list (mtcars-column "hp"))]) 1.0)))
+
   (test-case "a function or ^ that a transform binds itself is Racket's, not R's infix arithmetic"
     (define x (columns-of (formula-design-matrix
                            (~ mpg (I (let ([combine (lambda (f a b) (f a b))]) (combine * hp wt)))

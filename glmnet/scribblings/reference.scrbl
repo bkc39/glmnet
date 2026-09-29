@@ -1306,8 +1306,11 @@ when the table has a column of that name, as R looks up the function of a
 call by name and skips a column: with a column @racket[max],
 @racket[(max max x)] is the larger of that column and @racket[x], R's
 @tt{pmax(max, x)}. A name that the transform binds itself, with
-@racket[let], @racket[lambda] or a @racket[for] form, is its own, and a name
-in quoted data is data; the columns a transform reads are the others. The
+@racket[let], @racket[lambda] or a @racket[for] form, is its own, a name
+in quoted data is data, and a name that Racket's forms match as a literal,
+@racket[=>], @racket[else], @racket[unquote], @racket[unquote-splicing],
+@racket[...] or @racket[_], keeps its Racket meaning; the columns a
+transform reads are the others. The
 expression is evaluated once for each row, with each column name standing for
 the row's value, so a transform is elementwise. A name that is neither a
 column nor bound is an error, naming it, when the transform is evaluated, not

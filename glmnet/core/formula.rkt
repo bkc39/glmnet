@@ -253,6 +253,16 @@
                     [_ '()]))
                 stxs))
 
+  ;; Names that Racket's forms match as literals, by binding: cond's => and
+  ;; else, quasiquote's unquote and unquote-splicing, and the patterns' ...
+  ;; and _. A transform never rebinds them, which would break the match.
+  (define racket-literals
+    (list (quote-syntax =>) (quote-syntax else) (quote-syntax unquote)
+          (quote-syntax unquote-splicing) (quote-syntax ...) (quote-syntax _)))
+  (define (racket-literal? id)
+    (for/or ([literal (in-list racket-literals)])
+      (free-identifier=? id literal)))
+
   ;; A transform's body is checked as it is expanded, where every binding is
   ;; known, so that a name bound in the transform, by let or lambda, and
   ;; quoted data are what Racket makes of them.
@@ -346,7 +356,8 @@
                      (for/list ([id (in-list (remove-duplicates
                                               (argument-identifiers (or (attribute arg) (list #'body)))
                                               bound-identifier=?))]
-                                #:unless (and power? (eq? (syntax-e id) '^)))
+                                #:unless (or (and power? (eq? (syntax-e id) '^))
+                                             (racket-literal? id)))
                        id))
                    (define reads (box '()))
                    (define proc

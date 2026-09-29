@@ -473,8 +473,10 @@ function by name and skips a column: with a column @racket[max],
 @racket[(max max x)] is the larger of that column and @racket[x], R's
 @tt{pmax(max, x)}. Names that the transform binds itself, with @racket[let],
 @racket[lambda] or @racket[for/sum], are its own, and so are not read from the
-table, and neither are the names in quoted data; @racket[predict] needs only
-the columns that a transform reads. A name that is neither a column nor bound
+table, and neither are the names in quoted data, nor the names that Racket's
+forms match as literals, such as @racket[cond]'s @racket[=>] and @racket[else]
+and @racket[quasiquote]'s @racket[unquote]; @racket[predict] needs only the
+columns that a transform reads. A name that is neither a column nor bound
 is an error when the formula is fitted, which names it:
 
 @examples[#:eval ev #:label #f
