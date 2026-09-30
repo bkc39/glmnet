@@ -211,7 +211,8 @@
 ;; What a table's value is to Polars: a kind of number, boolean, string or
 ;; symbol; #f for a value that no dtype holds. An exact integer is 'natural
 ;; (0 to 2^63 - 1), 'integer (negative, down to -2^63) or 'large (2^63 to
-;; 2^64 - 1).
+;; 2^64 - 1). Any other real that is not a flonum is 'real, or 'not-finite
+;; when its flonum is an infinity.
 (define int64-min (- (expt 2 63)))
 (define uint64-min (expt 2 63))
 (define uint64-limit (expt 2 64))
@@ -227,7 +228,7 @@
        [(< x uint64-min) 'natural]
        [(< x uint64-limit) 'large]
        [else #f])]
-    [(real? x) 'real]
+    [(real? x) (if (rational? (real->double-flonum x)) 'real 'not-finite)]
     [(boolean? x) 'boolean]
     [(string? x) 'string]
     [(symbol? x) 'symbol]
@@ -263,6 +264,8 @@
                [conflict-row #f])
               ([x (in-vector xs)] [i (in-naturals)])
       (define k (value-kind x))
+      (when (eq? k 'not-finite)
+        (element-error who "the table" "not finite" x #:row i #:column name))
       (cond
         [(and k (eq? k kind)) (values kind conflict-row)]
         [else

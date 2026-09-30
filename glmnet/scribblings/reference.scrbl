@@ -744,9 +744,10 @@ Nothing is dropped or filled in.
    @item{@racket['boolean] for booleans, @racket['categorical] for symbols,
          and @racket['string] for strings, or for strings and symbols mixed.}]
   The contract requires @racket[columns] to name distinct columns of
-  @racket[t]. An exact integer outside both ranges, a column of integers that
-  needs both (a negative one and one of @math{2@superscript{63}} or more),
-  and a column whose values no one dtype holds are errors naming the row.
+  @racket[t]. An exact integer outside both ranges, any other exact number
+  too large for a flonum, a column of integers that needs both (a negative
+  one and one of @math{2@superscript{63}} or more), and a column whose values
+  no one dtype holds are errors naming the column, the row and the element.
 
   @examples[#:eval ev
   (define cars (table->polars mtcars '("mpg" "cyl" "wt")))
