@@ -17,8 +17,7 @@
            glmnet
            glmnet/data/tabular-asa
            (prefix-in asa: tabular-asa)
-           glmnet/examples/data/mtcars
-           (only-in glmnet/examples/data/iris [iris iris-species])
+           (only-in glmnet/datasets mtcars [iris iris-species])
            (file "../private/demo-utils.rkt"))
 
   (define-runtime-path data-dir "../private/data")
@@ -127,10 +126,8 @@
                   (list (cons "q" #(2.0 4.0)))))
 
   (test-case "mtcars and iris survive a round trip"
-    (define (as-vectors t)
-      (for/list ([column (in-list t)]) (cons (car column) (list->vector (cdr column)))))
-    (check-equal? (tabular-asa->table (table->tabular-asa mtcars)) (as-vectors mtcars))
-    (check-equal? (tabular-asa->table (table->tabular-asa iris-species)) (as-vectors iris-species)))
+    (check-equal? (tabular-asa->table (table->tabular-asa mtcars)) mtcars)
+    (check-equal? (tabular-asa->table (table->tabular-asa iris-species)) iris-species))
 
   ;; --- errors ---------------------------------------------------------------------------------
 
@@ -324,7 +321,7 @@
     (define model (formula-fit (~ am wt hp) t #:family 'binomial #:lambda 0.05))
     (check-equal? model (formula-fit (~ am wt hp) mtcars #:family 'binomial #:lambda 0.05))
     (check-equal? (predict model (tabular-asa->table (asa:table-head cars 3)) #:type 'response)
-                  (predict model (for/list ([c (in-list mtcars)]) (cons (car c) (take (cdr c) 3)))
+                  (predict model (for/list ([c (in-list mtcars)]) (cons (car c) (for/list ([x (in-vector (cdr c) 0 3)]) x)))
                            #:type 'response)))
 
   (test-case "every family's formula fit is the same through tabular-asa as through the list"

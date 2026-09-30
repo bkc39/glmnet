@@ -2,7 +2,7 @@
 
 @(require (for-label racket/base
                      glmnet
-                     glmnet/examples/data/mtcars))
+                     glmnet/datasets))
 
 @section[#:tag "ex-formula-interactions"]{Formula interactions}
 
@@ -16,11 +16,11 @@ columns @racket["wt"], @racket["hp"] and @racket["wt:hp"], the last one the
 product of the other two.
 
 The data are R's @tt{mtcars}: 32 cars from the 1974 Motor Trend road tests,
-which @racketmodname[glmnet/examples/data/mtcars] provides as a table.
+which @racketmodname[glmnet/datasets] provides as a table.
 
 @chunk[<require>
 (require glmnet
-         glmnet/examples/data/mtcars)]
+         glmnet/datasets)]
 
 @chunk[<provide>
 (provide run-example)]

@@ -12,6 +12,9 @@
            racket/logging
            racket/math
            racket/vector
+           racket/flonum
+           (only-in racket/contract contract-first-order-passes?)
+           ffi/vector
            glmnet
            (submod glmnet/core/cv support))
 
@@ -530,4 +533,22 @@
     (check-contract-error (lambda () (mgaussian-cv X (cdr Y)))
                           #rx"^mgaussian-cv: Y does not have one row per row of X")
     (check-exn #rx"^cox-cv: at least one observation must be an event"
-               (lambda () (cox-cv X times (map (lambda (s) 0) statuses))))))
+               (lambda () (cox-cv X times (map (lambda (s) 0) statuses)))))
+
+  (test-case "fold ids can be a vector, an flvector or an f64vector, as a response can"
+    (define fold-list (for/list ([i (in-range n)]) (modulo i 5)))
+    (define as-list (elnet-cv X y #:fold-ids fold-list))
+    (for ([ids (list (list->vector fold-list)
+                     (apply flvector (map exact->inexact fold-list))
+                     (list->f64vector (map exact->inexact fold-list)))])
+      (check-equal? (elnet-cv X y #:fold-ids ids) as-list))
+    (check-equal? (glmnet-cv-fold-ids (elnet-cv X y #:fold-ids (list->vector fold-list))) fold-list)
+    (check-contract-error (lambda () (elnet-cv X y #:fold-ids (vector 0 1 2 0.5)))
+                          #rx"expected: integer\\?\n  given: 0.5" #rx"the element at position 3 of")
+    (check-contract-error (lambda () (elnet-cv X y #:fold-ids (make-flvector n 0.0)))
+                          #rx"cross-validation needs at least 3 folds")
+    (check-contract-error (lambda () (elnet-cv X y #:fold-ids (for/vector ([i n]) (* 2 (modulo i 3)))))
+                          #rx"a fold has no observations; fold ids must cover 0 to 4")
+    (check-true (contract-first-order-passes? fold-ids/c #f))
+    (check-true (contract-first-order-passes? fold-ids/c (f64vector 0.0 1.0 2.0)))
+    (check-false (contract-first-order-passes? fold-ids/c (f64vector 0.0 2.0 2.0)))))

@@ -21,16 +21,26 @@
          (for-syntax racket/base))
 
 (require (for-label glmnet
+                    glmnet/data/nested
                     glmnet/plot
+                    glmnet/data/csv
+                    glmnet/data/math
+                    glmnet/data/polars
+                    (only-in polars
+                             dataframe? series? dataframe series read-csv ref column-names
+                             dtype polars-null dataframe->f64vector cast)
                     glmnet/data/tabular-asa
                     (prefix-in asa: tabular-asa)
-                    glmnet/examples/data/mtcars
-                    glmnet/examples/data/iris
+                    glmnet/datasets
                     racket/base
                     racket/contract
                     racket/file
+                    racket/flonum
                     racket/match
                     ffi/vector
+                    math/array
+                    math/matrix
+                    math/distributions
                     (only-in pict pict?)
                     (only-in plot
                              plot-pict plot-width plot-height plot-title plot-font-size vrule)
@@ -39,16 +49,24 @@
 (provide (all-from-out scribble/manual)
          (all-from-out scribble/example)
          (for-label (all-from-out glmnet
+                                  glmnet/data/nested
                                   glmnet/plot
+                                  glmnet/data/csv
+                                  glmnet/data/math
+                                  glmnet/data/polars
+                                  polars
                                   glmnet/data/tabular-asa
                                   tabular-asa
-                                  glmnet/examples/data/mtcars
-                                  glmnet/examples/data/iris
+                                  glmnet/datasets
                                   racket/base
                                   racket/contract
                                   racket/file
+                                  racket/flonum
                                   racket/match
                                   ffi/vector
+                                  math/array
+                                  math/matrix
+                                  math/distributions
                                   pict
                                   plot
                                   plot/utils))

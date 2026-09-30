@@ -3,7 +3,8 @@
 
 @title[#:tag "examples" #:style 'toc]{Examples}
 
-One section per model, then three on formulas. Each starts from the literate
+First the Quick Start of R glmnet's vignette, on R's own data, then one
+section per model, then three on formulas. Each starts from the literate
 program of the same name in @filepath{glmnet/examples/}, whose companion under
 @filepath{glmnet/examples/test/} runs it and checks the result the prose
 promises, then goes further: it varies @math{λ} or @math{α} to show what the
@@ -13,11 +14,12 @@ The small fixtures of the model sections are chosen so that the right answer is
 known in advance: a response built from some predictors plus a column of pure
 noise, which a good fit should leave out. Where a section prints a sweep over
 @math{λ}, it rounds the numbers to three decimal places so the rows line up.
-The formula sections use R's @tt{mtcars} and @tt{iris}, and their numbers are
-R's.
+The Quick Start uses R glmnet's @tt{QuickStartExample}, and the formula
+sections R's @tt{mtcars} and @tt{iris}; their numbers are R's.
 
 @local-table-of-contents[]
 
+@include-section["examples/quick-start.scrbl"]
 @include-section["examples/ols.scrbl"]
 @include-section["examples/ridge.scrbl"]
 @include-section["examples/lasso.scrbl"]

@@ -1,0 +1,14 @@
+id,site,age,dose,response,note
+p01,Boston,34,2.5,3.1,""
+p02,"Portland, ME",51,5,5.2,"said ""fine"""
+p03,"Portland, OR",67,1,1.9,"line one
+line two"
+p04,Boston,45,3.5,4,none
+p05,Boston,29,4.5,4.9,none
+p06,"Portland, ME",58,2,2.4,follow up
+p07,"Portland, OR",62,6,5.6,none
+p08,Boston,41,1.5,2.2,none
+p09,"Portland, ME",38,3,3.7,follow up
+p10,"Portland, OR",55,4,4.4,none
+p11,Boston,49,5.5,6.1,none
+p12,"Portland, ME",33,2.5,2.6,none

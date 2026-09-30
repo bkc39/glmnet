@@ -18,6 +18,12 @@
 ;; or longley and glmnet fitted on that matrix; each Racket spelling of the
 ;; formula must expand to R's terms, build R's matrix and fit R's path, with
 ;; R's name of each transform, such as log(hp), read as its Racket source.
+;; Dataset goldens (kind "dataset", #61) hold R's own copy of each CSV that
+;; glmnet/datasets ships, which must read back bit for bit, and vignette
+;; goldens (kind "vignette") the vignette's calls on R glmnet's example
+;; datasets, which are loaded through glmnet/datasets. The csv-cells golden
+;; holds how R's read.csv types a column of one cell, for many spellings of
+;; numbers, logicals and missing values, which csv->table must match.
 ;;
 ;; Goldens are generated on demand, never committed: the Nix `checks.parity` gate
 ;; regenerates them with the pinned R glmnet and points GLMNET_PARITY_GOLDENS at
@@ -31,12 +37,12 @@
            json
            racket/list
            racket/match
-           (only-in racket/math pi sqr)
+           (only-in racket/math nan? pi sqr)
            racket/runtime-path
            racket/string
            glmnet
-           glmnet/examples/data/mtcars
-           glmnet/examples/data/iris
+           glmnet/data/csv
+           glmnet/datasets
            ;; The collection's instance, whose transform structs `~` makes;
            ;; the checks run this file from the source tree against an
            ;; installed copy of the package.
@@ -236,41 +242,45 @@
   ;; stops, and the fit at every lambda. A golden may fix #:nlambda and
   ;; #:lambda-min-ratio, and `nobs` restricts it to the first nobs observations.
   (define (run-path-golden g)
+    (define p (fit-golden-path g (golden-dataset g)))
+    (test-case (hash-ref g 'id)
+      (check-path p g)))
+
+  ;; Path p against the golden's lambda_path, dev_ratio_path, df_path,
+  ;; coefficients_path and intercepts_path.
+  (define (check-path p g)
     (define id     (hash-ref g 'id))
     (define tols   (hash-ref (hash-ref g 'meta) 'tolerances))
     (define ctol   (hash-ref tols 'coef))
     (define itol   (hash-ref tols 'intercept))
     (define dtol   (hash-ref tols 'dev_ratio))
-    (define p      (fit-golden-path g (golden-dataset g)))
     (define expected-lambda (hash-ref g 'lambda_path))
-    (test-case id
-      (check-equal? (vector-length (glmnet-path-lambda p)) (length expected-lambda)
-                    (format "~a: number of lambdas fitted" id))
-      (check-vec-close (vector->list (glmnet-path-lambda p)) expected-lambda 1e-8 "lambda")
-      (check-vec-close (vector->list (glmnet-path-dev-ratio p))
-                       (hash-ref g 'dev_ratio_path) dtol "dev-ratio")
-      (check-equal? (vector->list (glmnet-path-df p)) (hash-ref g 'df_path) "df")
-      (for ([coefs (in-vector (glmnet-path-coefficients p))]
-            [expected (in-list (hash-ref g 'coefficients_path))]
+    (check-equal? (vector-length (glmnet-path-lambda p)) (length expected-lambda)
+                  (format "~a: number of lambdas fitted" id))
+    (check-vec-close (vector->list (glmnet-path-lambda p)) expected-lambda 1e-8 "lambda")
+    (check-vec-close (vector->list (glmnet-path-dev-ratio p))
+                     (hash-ref g 'dev_ratio_path) dtol "dev-ratio")
+    (check-equal? (vector->list (glmnet-path-df p)) (hash-ref g 'df_path) "df")
+    (for ([coefs (in-vector (glmnet-path-coefficients p))]
+          [expected (in-list (hash-ref g 'coefficients_path))]
+          [m (in-naturals)])
+      (if (vector? (vector-ref coefs 0))
+          (for ([c (in-vector coefs)] [e (in-list expected)] [k (in-naturals)])
+            (check-vec-close (vector->list c) e ctol (format "coef[lambda ~a, group ~a]" m k)))
+          (check-vec-close (vector->list coefs) expected ctol (format "coef[lambda ~a]" m))))
+    (when (glmnet-path-intercepts p)
+      (for ([a0 (in-vector (glmnet-path-intercepts p))]
+            [expected (in-list (hash-ref g 'intercepts_path))]
             [m (in-naturals)])
-        (if (vector? (vector-ref coefs 0))
-            (for ([c (in-vector coefs)] [e (in-list expected)] [k (in-naturals)])
-              (check-vec-close (vector->list c) e ctol (format "coef[lambda ~a, group ~a]" m k)))
-            (check-vec-close (vector->list coefs) expected ctol (format "coef[lambda ~a]" m))))
-      (when (glmnet-path-intercepts p)
-        (for ([a0 (in-vector (glmnet-path-intercepts p))]
-              [expected (in-list (hash-ref g 'intercepts_path))]
-              [m (in-naturals)])
-          (if (vector? a0)
-              (check-vec-close (vector->list a0) expected itol (format "intercepts[lambda ~a]" m))
-              (check-close a0 expected itol (format "intercept[lambda ~a]" m)))))))
+        (if (vector? a0)
+            (check-vec-close (vector->list a0) expected itol (format "intercepts[lambda ~a]" m))
+            (check-close a0 expected itol (format "intercept[lambda ~a]" m))))))
 
   ;; Cross-validation (#27): R's cv.glmnet on the golden's folds (numbered from
   ;; 1 there, from 0 here), for one type measure.
   (define (run-cv-golden g)
     (define id       (hash-ref g 'id))
     (define tols     (hash-ref (hash-ref g 'meta) 'tolerances))
-    (define ptol     (hash-ref tols 'pred))
     (define ctol     (hash-ref tols 'coef))
     (define ds       (load-dataset (hash-ref g 'dataset)))
     (define X        (first ds))
@@ -301,21 +311,7 @@
          (mgaussian-cv X (second ds) #:type-measure measure #:fold-ids fold-ids
                        #:grouped? grouped? #:alpha alpha #:lambda lambda #:thresh thresh)]))
     (test-case id
-      (check-equal? (symbol->string (glmnet-cv-measure cv)) (hash-ref g 'measure) "measure")
-      (check-equal? (glmnet-cv-name cv) (hash-ref g 'name) "name")
-      (check-equal? (glmnet-cv-fold-ids cv) fold-ids "fold ids")
-      (check-vec-close (vector->list (glmnet-cv-lambda cv)) (hash-ref g 'lambda) 1e-8 "lambda")
-      (for ([field (list glmnet-cv-cvm glmnet-cv-cvsd glmnet-cv-cvup glmnet-cv-cvlo)]
-            [key '(cvm cvsd cvup cvlo)])
-        (check-vec-close (vector->list (field cv)) (hash-ref g key) ptol (symbol->string key)))
-      (check-equal? (vector->list (glmnet-cv-nzero cv)) (hash-ref g 'nzero) "nzero")
-      (check-close (glmnet-cv-lambda-min cv) (hash-ref g 'lambda_min) 1e-8 "lambda-min")
-      (check-close (glmnet-cv-lambda-1se cv) (hash-ref g 'lambda_1se) 1e-8 "lambda-1se")
-      (check-equal? (add1 (glmnet-cv-index-min cv)) (hash-ref g 'index_min) "index-min")
-      (check-equal? (add1 (glmnet-cv-index-1se cv)) (hash-ref g 'index_1se) "index-1se")
-      (check-nested-close (coef cv #:lambda 'lambda-min) (hash-ref g 'coef_min) ctol
-                          "coef at lambda-min")
-      (check-nested-close (coef cv) (hash-ref g 'coef_1se) ctol "coef, default lambda"))
+      (check-cv cv g fold-ids tols))
     (test-case (format "~a (formula)" id)
       (define fcv (formula-cv (golden-formula g) (golden-table g)
                               #:family (golden-family g) #:type-measure measure
@@ -323,6 +319,141 @@
                               #:lambda lambda #:thresh thresh))
       (check-named-coef (list (coef fcv #:lambda 'lambda-min)) (list (hash-ref g 'coef_min))
                         (hash-ref g 'coef_names) ctol)))
+
+  ;; A cross-validated model against R's cv.glmnet as golden g records it,
+  ;; on the golden's folds, which `fold-ids` numbers from 0.
+  (define (check-cv cv g fold-ids tols)
+    (define ptol (hash-ref tols 'pred))
+    (define ctol (hash-ref tols 'coef))
+    (check-equal? (symbol->string (glmnet-cv-measure cv)) (hash-ref g 'measure) "measure")
+    (check-equal? (glmnet-cv-name cv) (hash-ref g 'name) "name")
+    (check-equal? (glmnet-cv-fold-ids cv) fold-ids "fold ids")
+    (check-vec-close (vector->list (glmnet-cv-lambda cv)) (hash-ref g 'lambda) 1e-8 "lambda")
+    (for ([field (list glmnet-cv-cvm glmnet-cv-cvsd glmnet-cv-cvup glmnet-cv-cvlo)]
+          [key '(cvm cvsd cvup cvlo)])
+      (check-vec-close (vector->list (field cv)) (hash-ref g key) ptol (symbol->string key)))
+    (check-equal? (vector->list (glmnet-cv-nzero cv)) (hash-ref g 'nzero) "nzero")
+    (check-close (glmnet-cv-lambda-min cv) (hash-ref g 'lambda_min) 1e-8 "lambda-min")
+    (check-close (glmnet-cv-lambda-1se cv) (hash-ref g 'lambda_1se) 1e-8 "lambda-1se")
+    (check-equal? (add1 (glmnet-cv-index-min cv)) (hash-ref g 'index_min) "index-min")
+    (check-equal? (add1 (glmnet-cv-index-1se cv)) (hash-ref g 'index_1se) "index-1se")
+    (check-nested-close (coef cv #:lambda 'lambda-min) (hash-ref g 'coef_min) ctol
+                        "coef at lambda-min")
+    (check-nested-close (coef cv) (hash-ref g 'coef_1se) ctol "coef, default lambda"))
+
+  ;; C's %a of a double, such as "-0x1.8p+1", as that flonum.
+  (define (hex->flonum s)
+    (match-define (list _ sign lead fraction exponent)
+      (regexp-match #px"^(-?)0x([01])(?:[.]([0-9a-f]+))?p([+-][0-9]+)$" s))
+    (define digits (or fraction ""))
+    (define mantissa
+      (+ (string->number lead)
+         (if (string=? digits "")
+             0
+             (/ (string->number digits 16) (expt 16 (string-length digits))))))
+    (define v (exact->inexact (* mantissa (expt 2 (string->number exponent)))))
+    (if (string=? sign "-") (- v) v))
+
+  ;; R's %a of a double, or its Inf, -Inf or NaN.
+  (define (r-hex->flonum s)
+    (match s
+      ["Inf" +inf.0]
+      ["-Inf" -inf.0]
+      ["NaN" +nan.0]
+      [_ (hex->flonum s)]))
+
+  ;; Each cell of the csv-cells golden, alone in its column, as csv->table
+  ;; reads it against R's read.csv. Where the manual says they differ, the
+  ;; difference is checked instead: a quoted blank cell is a string where R
+  ;; reads NA, and a complex number is a string.
+  (define (run-csv-cells-golden g)
+    (for ([c (in-list (hash-ref g 'cells))])
+      (define cell (hash-ref c 'cell))
+      (define token (hash-ref c 'token))
+      (define (ours)
+        (vector-ref (cdr (assoc "a" (csv->table (open-input-string (string-append "a,b\n" cell ",z\n")))))
+                    0))
+      (define blank? (regexp-match? #px"^\\s*$" token))
+      (test-case (format "csv-cells ~s is R's ~a ~a" cell (hash-ref c 'class) (hash-ref c 'value))
+        (cond
+          [(and (hash-ref c 'na) (hash-ref c 'quoted) blank?) (check-equal? (ours) token)]
+          [(hash-ref c 'na)
+           (check-exn (lambda (e) (regexp-match? #rx"has a missing value" (exn-message e))) ours)]
+          [else
+           (match (hash-ref c 'class)
+             ["logical" (check-eq? (ours) (hash-ref c 'value))]
+             ["integer" (check-true (and (flonum? (ours)) (= (ours) (r-hex->flonum (hash-ref c 'value)))))]
+             ["numeric"
+              (define r (r-hex->flonum (hash-ref c 'value)))
+              (if (eqv? r +nan.0)
+                  (check-true (and (flonum? (ours)) (nan? (ours))))
+                  (check-eqv? (ours) r))]
+             ["complex" (check-equal? (ours) token)]
+             ["character" (check-equal? (ours) (hash-ref c 'value))])]))))
+
+  ;; A CSV that glmnet/datasets ships (#61), read as a table, against R's own
+  ;; copy of its data: every number the same double, every string the same.
+  (define (run-dataset-golden g)
+    (define file (hash-ref g 'file))
+    (test-case (hash-ref g 'id)
+      (define table (csv-file->table (collection-file-path file "glmnet" "datasets")))
+      (check-equal? (map car table)
+                    (for/list ([column (in-list (hash-ref g 'columns))]) (hash-ref column 'name))
+                    "column names")
+      (for ([column (in-list table)]
+            [expected (in-list (hash-ref g 'columns))])
+        (define cells (vector->list (cdr column)))
+        (define exact
+          (or (hash-ref expected 'strings #f)
+              (map hex->flonum (hash-ref expected 'hex))))
+        (check-equal? (length cells) (hash-ref g 'nrow) (format "~a: rows" (car column)))
+        (check-true (andmap equal? cells exact)
+                    (format "~a ~a: every value is R's" file (car column))))))
+
+  ;; A glmnet dataset as its loader returns it: the fitter's arguments.
+  (define (vignette-dataset name)
+    (call-with-values
+     (case name
+       [("QuickStartExample")    quick-start-example]
+       [("BinomialExample")      binomial-example]
+       [("MultinomialExample")   multinomial-example]
+       [("PoissonExample")       poisson-example]
+       [("CoxExample")           cox-example]
+       [("MultiGaussianExample") multi-gaussian-example]
+       [("SparseExample")        sparse-example])
+     list))
+
+  ;; The vignette's calls on a glmnet dataset (#61), loaded through
+  ;; glmnet/datasets: the default path, printed, coef and predict at the
+  ;; vignette's s on its rows of x, and cross-validation on R's folds, with
+  ;; predict at lambda-min.
+  (define (run-vignette-golden g)
+    (define id (hash-ref g 'id))
+    (define tols (hash-ref (hash-ref g 'meta) 'tolerances))
+    (define args (vignette-dataset (hash-ref g 'dataset)))
+    (define newx (design-matrix-select-rows (first args) (map sub1 (hash-ref g 'rows))))
+    (define-values (path-proc cv-proc)
+      (case (hash-ref g 'family)
+        [("gaussian")    (values elnet-path elnet-cv)]
+        [("binomial")    (values logistic-path logistic-cv)]
+        [("multinomial") (values multinomial-path multinomial-cv)]
+        [("poisson")     (values poisson-path poisson-cv)]
+        [("cox")         (values cox-path cox-cv)]
+        [("mgaussian")   (values mgaussian-path mgaussian-cv)]))
+    (test-case id
+      (define p (apply path-proc args))
+      (check-path p g)
+      (check-equal? (printed-table p) (hash-ref g 'print) "printed table")
+      (check-generic p newx (hash-ref g 'generic) tols))
+    (test-case (format "~a (cv)" id)
+      (define gcv (hash-ref g 'cv))
+      (define fold-ids (map sub1 (hash-ref gcv 'foldid)))
+      (define cv (keyword-apply cv-proc '(#:fold-ids #:type-measure)
+                                (list fold-ids (string->symbol (hash-ref gcv 'type_measure)))
+                                args))
+      (check-cv cv gcv fold-ids tols)
+      (check-predict cv newx (list (glmnet-cv-lambda-min cv)) (hash-ref gcv 'predict_min)
+                     (hash-ref tols 'pred) "predict at lambda-min")))
 
   ;; This module's namespace, in which `~` expands the formula goldens' Racket
   ;; sources to formulas of this module's instance of glmnet.
@@ -348,8 +479,8 @@
       (define entries (hash-ref column 'values))
       (cons name (if (member name symbols) (map string->symbol entries) entries))))
 
-  ;; The table of a formula golden: R's mtcars or iris as the example modules
-  ;; hold them, a committed dataset, or the table the golden carries.
+  ;; The table of a formula golden: R's mtcars or iris as glmnet/datasets
+  ;; holds them, a committed dataset, or the table the golden carries.
   (define (formula-golden-table g symbols)
     (define table
       (cond
@@ -360,7 +491,7 @@
                 [name (load-table name)])]))
     (for/list ([column (in-list table)])
       (if (member (car column) symbols)
-          (cons (car column) (map string->symbol (cdr column)))
+          (cons (car column) (for/list ([v (cdr column)]) (string->symbol v)))
           column)))
 
   ;; The formula algebra (#53): for each Racket spelling of the golden's
@@ -400,9 +531,9 @@
                            (string-append (cdr pair) (substring part (string-length (car pair)))))
                          part))
                    ":"))
+    (define r-coef-names (hash-ref gen 'coef_names))
     (define coef-names
-      (let ([names (hash-ref gen 'coef_names)])
-        (hash-set names 'rows (map racket-name (hash-ref names 'rows)))))
+      (hash-set r-coef-names 'rows (map racket-name (hash-ref r-coef-names 'rows))))
     (define levels
       (for/list ([l (in-list (hash-ref g 'levels))])
         (cons (racket-name (hash-ref l 'name)) (hash-ref l 'levels))))
@@ -594,6 +725,9 @@
          [("predict") (run-predict-golden g)]
          [("cv")      (run-cv-golden g)]
          [("formula") (run-formula-golden g)]
+         [("dataset") (run-dataset-golden g)]
+         [("csv-cells") (run-csv-cells-golden g)]
+         [("vignette") (run-vignette-golden g)]
          [else        (run-golden g)]))]
     [explicit-goldens?
      ;; The CI gate sets GLMNET_PARITY_GOLDENS; an empty dir there means R

@@ -10,6 +10,7 @@
 ;; new predictors.
 
 (require racket/contract
+         racket/flonum
          ffi/vector
          "marshal.rkt"
          "model.rkt"
@@ -26,7 +27,7 @@
  (struct-out poisson-result)
  (contract-out
   [poisson-fit
-   (->* (design-matrix/c count-response/c #:lambda (>=/c 0))
+   (->* (design-matrix/c (response/c count/c) #:lambda (>=/c 0))
         (#:alpha (real-in 0 1)
          #:standardize? boolean?
          #:intercept? boolean?
@@ -39,7 +40,7 @@
 (provide
  (contract-out
   [poisson-path
-   (->* (design-matrix/c count-response/c)
+   (->* (design-matrix/c (response/c count/c))
            (#:lambda lambda-sequence/c
             #:nlambda exact-positive-integer?
             #:lambda-min-ratio lambda-min-ratio/c
@@ -50,7 +51,7 @@
             #:max-iters exact-positive-integer?)
         glmnet-path?)]
   [poisson-cv
-   (->* (design-matrix/c count-response/c)
+   (->* (design-matrix/c (response/c count/c))
         (#:type-measure (or/c 'deviance 'mse 'mae)
          #:nfolds nfolds/c
          #:fold-ids fold-ids/c
@@ -78,11 +79,6 @@
                       (poisson-result-coefficients r) (poisson-result-dev-ratio r)
                       (poisson-result-num-passes r)))])
 
-;; --- input contract --------------------------------------------------------
-
-;; The response is a non-empty list of non-negative counts (or rates).
-(define count-response/c (and/c (listof (>=/c 0)) pair?))
-
 ;; Poisson adds the 8888 (negative response counts) fatal code on top of the
 ;; shared cases in `check-jerr`.
 (define (check-poisson-jerr jerr who [lmu #f])
@@ -93,8 +89,11 @@
 
 ;; With no positive count the null model's log mean is -inf and glmnet cannot
 ;; converge (R warns and returns an empty model).
-(define (check-some-count y who)
-  (unless (for/or ([v (in-list y)]) (positive? v))
+;; A count, or a rate: a non-negative real.
+(define count/c (>=/c 0))
+
+(define (check-some-count yv who)
+  (unless (for/or ([k (in-range (f64vector-length yv))]) (fl> (f64vector-ref yv k) 0.0))
     (error who "the response has no positive count; Poisson needs at least one y > 0")))
 
 ;; --- public API ------------------------------------------------------------
@@ -109,8 +108,8 @@
   (define x (as-design-matrix X 'poisson-fit "X"))
   (define no (design-matrix-nrows x))
   (define ni (design-matrix-ncols x))
-  (define yv (as-response y no 'poisson-fit "y"))
-  (check-some-count y 'poisson-fit)
+  (define yv (as-response y no 'poisson-fit "y" count/c))
+  (check-some-count yv 'poisson-fit)
   (define beta (make-f64vector ni 0.0))
   (define-values (intercept dev-ratio lam nlp jerr)
     (glmnet-fishnet-solo/raw (exact->inexact alpha) no ni (design-matrix-data x) yv
@@ -143,8 +142,8 @@
   (define x (as-design-matrix X 'poisson-path "X"))
   (define no (design-matrix-nrows x))
   (define ni (design-matrix-ncols x))
-  (define yv (as-response y no 'poisson-path "y"))
-  (check-some-count y 'poisson-path)
+  (define yv (as-response y no 'poisson-path "y" count/c))
+  (check-some-count yv 'poisson-path)
   (define-values (nlam flmin ulam)
     (path-lambdas lambda nlambda lambda-min-ratio no ni))
   (define a0 (make-f64vector nlam 0.0))
@@ -180,7 +179,7 @@
                     #:max-iters [max-iters 100000])
   (define x (as-design-matrix X 'poisson-cv "X"))
   (define ys
-    (list->vector (f64vector->list (as-response y (design-matrix-nrows x) 'poisson-cv "y"))))
+    (response->vector (as-response y (design-matrix-nrows x) 'poisson-cv "y" count/c)))
   (define (fit x y)
     (poisson-path x y
                   #:lambda lambda #:nlambda nlambda #:lambda-min-ratio lambda-min-ratio

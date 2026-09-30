@@ -19,6 +19,9 @@ predict from it.
 
 The package ships a prebuilt native library, @tt{libglmnetcompat}, for Linux
 (x86-64) and macOS (arm64), and a pre-install hook stages it at install time.
+It depends on rkt-polars (the package @tt{polars}), which ships its own native
+library for the same two platforms only, so on any other the install fails
+when it reaches @tt{polars}.
 To check that it loaded:
 
 @examples[#:eval ev #:label #f
@@ -36,11 +39,14 @@ module of their own, which @racket[(require glmnet)] does not load:
 
 @racketblock[(require glmnet/plot)]
 
+R glmnet's example datasets, such as the vignette's @tt{QuickStartExample},
+load with @racket[(require glmnet/datasets)] (see @secref["data-datasets"]).
+
 @section[#:tag "gs-first-fit"]{A first fit}
 
 The simplest form of a @tech{design matrix} is a list of rows, one per
 observation; the response is a list with one entry per row (see
-@secref["concepts-data"] for the other form). Here the response is exactly
+@secref["concepts-data"] for the other forms, vectors among them). Here the response is exactly
 @math{y = 1 + 2x₁ − x₂}, and the third column, @math{x₃ = x₁²}, carries no
 signal:
 

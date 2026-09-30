@@ -8,11 +8,11 @@
 @declare-exporting[glmnet]
 
 Every binding below is provided by @racketmodname[glmnet], except those of
-@secref["ref-data-tabular-asa"] and @secref["ref-plot"], which
-@racketmodname[glmnet/data/tabular-asa] and @racketmodname[glmnet/plot]
-provide. Each model family has a fit procedure, a path fitter, a
-cross-validation procedure, a transparent result struct and prediction
-helpers. The formula front end
+@secref["ref-data-nested"], @secref["ref-data-csv"], @secref["ref-data-math"],
+@secref["ref-data-polars"], @secref["ref-data-tabular-asa"], @secref["ref-datasets"]
+and @secref["ref-plot"], whose sections name the modules that provide them. Each
+model family has a fit procedure, a path fitter, a cross-validation procedure, a
+transparent result struct and prediction helpers. The formula front end
 (@secref["ref-formula"]) fits any family from a @tech{table}. Every result
 type, @racket[glmnet-path], @racket[glmnet-cv] and @racket[formula-model] also
 implement the generic interface of @secref["ref-model"]: @racket[predict],
@@ -25,10 +25,15 @@ The fit procedures share their argument conventions:
 
 @itemlist[
  @item{@racket[X] is a @tech{design matrix}, one row per observation: a
-       @racket[design-matrix?] value or a non-empty list of equal-length rows
-       of reals (see @racket[design-matrix/c] and @secref["ref-data"]).
-       Prediction helpers take new data in the same forms, with as many columns
-       as the fit has coefficients.}
+       @racket[design-matrix?] value, or a non-empty list or vector of
+       equal-length rows of reals, each row a list or a vector (see
+       @racket[design-matrix/c], @secref["ref-data"] and
+       @secref["ref-data-nested"]). Prediction helpers take new data in the
+       same forms, with as many columns as the fit has coefficients.}
+ @item{A @tech{response} @racket[y], and a Cox model's @racket[times] and
+       @racket[statuses], is a non-empty list, vector, @racket[flvector] or
+       @racket[f64vector] with one entry per row of @racket[X] (see
+       @racket[response/c]).}
  @item{@racket[#:lambda] is the penalty strength @math{λ ≥ 0}. It is
        required.}
  @item{@racket[#:alpha] is the mixing parameter @math{α ∈ [0, 1]}:
@@ -86,16 +91,52 @@ matrix can be passed to any number of fits.
 
 @defthing[design-matrix/c flat-contract?]{
   The contract on the @racket[X] argument of every fit and prediction
-  procedure, and on the response matrix @racket[Y] of @racket[mgaussian-fit]
-  and @racket[mgaussian-path]. It accepts a @racket[design-matrix?] value, or a
-  list of lists that @racket[rows->design-matrix] then converts and checks.
-  Equivalent to @racket[(or/c design-matrix? (listof list?))].
+  procedure, and on the response matrix @racket[Y] of @racket[mgaussian-fit],
+  @racket[mgaussian-path] and @racket[mgaussian-cv]. It accepts a
+  @racket[design-matrix?] value, or rows in any of four nestings: a list or a
+  vector of rows, each row a list or a vector. Each of those procedures
+  converts and checks the rows as @racket[nested->design-matrix] does, so
+  every nesting fits exactly as the same list of lists. A violation reports the contract's
+  name, @racket[(or/c design-matrix? (listof (or/c list? vector?)) (vectorof (or/c list? vector?)))];
+  unlike @racket[vectorof], the contract never wraps a vector.
 
   @examples[#:eval ev
   (require racket/contract)
   (contract-first-order-passes? design-matrix/c D)
   (contract-first-order-passes? design-matrix/c '((1.0 2.0) (3.0 4.0)))
+  (contract-first-order-passes? design-matrix/c (vector #(1.0 2.0) '(3.0 4.0)))
   (contract-first-order-passes? design-matrix/c '(1.0 2.0))]}
+
+@defproc[(response/c [elem flat-contract?]) flat-contract?]{
+  A contract for a one-dimensional input, such as a @tech{response}: a
+  non-empty list, vector, @racket[flvector] or @racket[f64vector] each of whose
+  elements is a real number that satisfies @racket[elem]. The elements are
+  checked with @racket[real?] first because a number contract such as
+  @racket[(or/c 0 1)] compares with @racket[=], which the complex number
+  @racket[1.0+0.0i] passes. The fit procedures use it for their
+  responses, for example @racket[(response/c (or/c 0 1))] for the labels of
+  @racket[logistic-fit], and check @racket[elem] again on the flonums they
+  convert the response to, so that a positive time too small for a flonum,
+  which becomes @racket[0.0], is an error. A violation names the accepted
+  shapes, or the position of the first element that fails @racket[elem],
+  counting from 0. Like @racket[design-matrix/c], it never wraps a vector.
+  Two @racket[response/c] contracts are @racket[contract-equivalent?] when
+  their element contracts are, and one is @racket[contract-stronger?] than
+  another when its element contract is.
+
+  @examples[#:eval ev
+  (require racket/flonum)
+  (define labels/c (response/c (or/c 0 1)))
+  (contract-first-order-passes? labels/c '(0 1 1))
+  (contract-first-order-passes? labels/c (flvector 0.0 1.0))
+  (contract-first-order-passes? labels/c (vector 0 2))
+  (contract-first-order-passes? labels/c (vector))
+  (define/contract (events statuses)
+    (-> (response/c (or/c 0 1)) exact-nonnegative-integer?)
+    (for/sum ([s statuses]) (if (= s 1) 1 0)))
+  (events (vector 1 0 1))
+  (eval:error (events (flvector 1.0 0.0 0.5)))
+  (contract-equivalent? (response/c (>/c 0)) (response/c (>/c 0)))]}
 
 @defproc[(rows->design-matrix [rows (listof list?)]
                               [#:column-names column-names
@@ -106,7 +147,10 @@ matrix can be passed to any number of fits.
   must have the same length, and every entry must be a real, finite number.
   @racket[column-names], when given, names the columns: one distinct string or
   symbol per column. Names are compared as strings, so @racket["x"] and
-  @racket['x] are the same name.
+  @racket['x] are the same name, and the design matrix keeps each as a
+  string, so that the same data named with symbols or with strings gives
+  @racket[equal?] design matrices, whatever it was converted from. For rows
+  that are vectors, or a vector of rows, see @racket[nested->design-matrix].
 
   @examples[#:eval ev
   (define named (rows->design-matrix '((1 2) (3 4)) #:column-names '(age dose)))
@@ -123,7 +167,8 @@ matrix can be passed to any number of fits.
                                                  #f])
          design-matrix?]{
   Builds a design matrix from a list of columns, one per predictor, under the
-  same rules as @racket[rows->design-matrix].
+  same rules as @racket[rows->design-matrix]. For columns in the other
+  nestings, see @racket[nested->design-matrix] with @racket[#:by 'columns].
 
   @examples[#:eval ev
   (design-matrix->rows (columns->design-matrix '((1 2 3) (4 5 6))))
@@ -158,8 +203,9 @@ matrix can be passed to any number of fits.
   (design-matrix-ncols D)]}
 
 @defproc[(design-matrix-column-names [dm design-matrix?])
-         (or/c #f (listof (or/c string? symbol?)))]{
-  The column names @racket[dm] was built with, or @racket[#f] if it has none.
+         (or/c #f (listof string?))]{
+  The column names @racket[dm] was built with, as strings, or @racket[#f] if it
+  has none.
   A design matrix with column names is a @tech{table}, from which the formula
   front end fits by name; the fits from a matrix do not use the names.
 
@@ -167,7 +213,7 @@ matrix can be passed to any number of fits.
   (design-matrix-column-names D)
   (define cols '((1 2) (3 4)))
   (design-matrix-column-names
-   (columns->design-matrix cols #:column-names '("x1" "x2")))]}
+   (columns->design-matrix cols #:column-names '("x1" x2)))]}
 
 @defproc[(design-matrix-ref [dm design-matrix?]
                             [i exact-nonnegative-integer?]
@@ -210,24 +256,31 @@ matrix can be passed to any number of fits.
   @examples[#:eval ev
   (f64vector->list (design-matrix->f64vector D))]}
 
-@defproc[(response->f64vector [y list?]) f64vector?]{
-  Converts a non-empty list of real, finite numbers to an @racket[f64vector],
-  the form in which a @tech{response} reaches the Fortran. The fit procedures
-  apply the same conversion to their responses, after checking that the
-  response has one entry per row of @racket[X]. An error names the position of
-  the offending entry, counting from 0.
+@defproc[(response->f64vector [y (or/c list? vector? flvector? f64vector?)])
+         f64vector?]{
+  Converts a non-empty list, vector, @racket[flvector] or @racket[f64vector] of
+  real, finite numbers to a fresh @racket[f64vector], the form in which a
+  @tech{response} reaches the Fortran. The fit procedures apply the same
+  conversion to their responses, after checking that the response has one
+  entry per row of @racket[X]. An @racket[flvector] is always copied, since
+  the FFI cannot pass one where the Fortran expects an @racket[f64vector]; so
+  is an @racket[f64vector], so that the result never shares memory with
+  @racket[y]. An error names the position of the offending entry, counting
+  from 0.
 
   @examples[#:eval ev
   (f64vector->list (response->f64vector '(1 1/2 2.5)))
-  (eval:error (response->f64vector '(1.0 +nan.0 2.0)))]}
+  (f64vector->list (response->f64vector (vector 1 1/2 2.5)))
+  (f64vector->list (response->f64vector (flvector 1.0 0.5 2.5)))
+  (eval:error (response->f64vector (flvector 1.0 +nan.0 2.0)))]}
 
 @subsection[#:tag "ref-tables"]{Tables}
 
 A @tech{table} holds named columns, and is what the formula front end
 (@secref["ref-formula"]) fits from. A column name is a string or a symbol, and
-names are compared as strings; a column is a list or vector of reals, or of
-strings, symbols or booleans, which the formula front end reads as a factor. A
-table is one of:
+names are compared as strings; a column is a list, vector, @racket[flvector]
+or @racket[f64vector] of reals, or a list or vector of strings, symbols or
+booleans, which the formula front end reads as a factor. A table is one of:
 
 @itemlist[
  @item{a non-empty association list of @racket[(name . column)] pairs, whose
@@ -246,9 +299,9 @@ tables in use.
 
 @defproc[(table? [v any/c]) boolean?]{
   Returns @racket[#t] if @racket[v] is a @tech{table}: an association list or
-  hash whose names are strings or symbols and whose columns are lists or
-  vectors, or a design matrix with column names. The entries of the columns are
-  not checked.
+  hash whose names are strings or symbols and whose columns are lists,
+  vectors, @racket[flvector]s or @racket[f64vector]s, or a design matrix with
+  column names. The entries of the columns are not checked.
 
   @examples[#:eval ev
   (define patients
@@ -285,37 +338,520 @@ tables in use.
   (eval:error (table->design-matrix patients))
   (eval:error (table->design-matrix patients '("age" "weight")))]}
 
-@subsection[#:tag "ref-mtcars"]{Example data}
+@section[#:tag "ref-data-nested"]{Nested lists and vectors}
 
-The formula examples and tests use R's @tt{mtcars} and @tt{iris}, which these
-modules provide. @racketmodname[glmnet] does not re-export them.
+@defmodule[glmnet/data/nested]
 
-@subsubsection[#:tag "ref-mtcars-table"]{Motor Trend cars}
+Racket's own data for a @tech{design matrix} is a list or a vector of rows,
+each row a list or a vector. Every fit and prediction procedure accepts these
+four nestings as they are (see @racket[design-matrix/c]). This module converts
+them to a @racket[design-matrix?] value, to check the data once and fit it
+many times or to name its columns, and converts a design matrix back to any of
+them. A @tech{response} needs no conversion of its own: a list, vector,
+@racket[flvector] or @racket[f64vector] is accepted wherever a response is
+(see @racket[response/c] and @racket[response->f64vector]).
+@racketmodname[glmnet] does not re-export this module.
 
-@defmodule[glmnet/examples/data/mtcars]
+@racket[rows->design-matrix] and @racket[columns->design-matrix] are the
+list-of-lists cases of @racket[nested->design-matrix]. The three read their
+input the same way, so the same entries give @racket[equal?] design matrices,
+and so do the fits and predictions on them.
+
+@defproc[(nested->design-matrix [xss (or/c (listof (or/c list? vector?))
+                                           (vectorof (or/c list? vector?)))]
+                                [#:by by (or/c 'rows 'columns) 'rows]
+                                [#:column-names column-names
+                                                (or/c #f (listof (or/c string? symbol?)))
+                                                #f])
+         design-matrix?]{
+  Builds a design matrix from @racket[xss], whose elements are the rows of the
+  matrix when @racket[by] is @racket['rows] and its columns when @racket[by]
+  is @racket['columns]. @racket[xss] is one list or one vector, and its rows
+  (or columns) can be any mix of lists and vectors. The
+  rules are those of @racket[rows->design-matrix]: at least one row and one
+  column, every row (or column) of the same length, every entry a real, finite
+  number, and @racket[column-names], when given, one distinct name per column.
+  A design matrix with column names is a @tech{table}, from which the formula
+  front end fits by name.
+
+  @examples[#:eval ev
+  (require glmnet/data/nested)
+  (define vrows (vector #(1.0 4.0) #(2.0 5.0) #(3.0 6.0)))
+  (define V (nested->design-matrix vrows))
+  (design-matrix->rows V)
+  (equal? V (nested->design-matrix (list #(1 2 3) '(4 5 6)) #:by 'columns))
+  (equal? V (rows->design-matrix '((1 4) (2 5) (3 6))))
+  (design-matrix-column-names (nested->design-matrix vrows #:column-names '(x z)))
+  (eval:error (nested->design-matrix (vector #(1.0 2.0) #(3.0))))]}
+
+@defproc[(design-matrix->nested [dm design-matrix?]
+                                [#:by by (or/c 'rows 'columns) 'rows]
+                                [#:outer outer (or/c 'list 'vector) 'list]
+                                [#:inner inner (or/c 'list 'vector) 'list])
+         (or/c list? vector?)]{
+  The entries of @racket[dm], as flonums: its rows when @racket[by] is
+  @racket['rows], and its columns when it is @racket['columns]. They are held
+  in an @racket[outer] (a list or a vector) of @racket[inner]s, so that the
+  defaults give the list of lists of @racket[design-matrix->rows]. The vectors
+  are fresh and mutable. The column names are not included; see
+  @racket[design-matrix-column-names].
+
+  @examples[#:eval ev
+  (design-matrix->nested V #:outer 'vector #:inner 'vector)
+  (design-matrix->nested V #:inner 'vector)
+  (design-matrix->nested V #:by 'columns #:outer 'vector)
+  (equal? (design-matrix->nested V) (design-matrix->rows V))]}
+
+@section[#:tag "ref-data-csv"]{CSV files}
+
+@defmodule[glmnet/data/csv]
+
+@racketmodname[glmnet/data/csv] reads and writes @tech{tables} as CSV files,
+following @hyperlink["https://www.rfc-editor.org/rfc/rfc4180"]{RFC 4180}.
+@racketmodname[glmnet] does not re-export it. See @secref["data-csv"].
+
+When reading, the input must be UTF-8. The first record is the header, whose
+cells name the columns: each name must be non-empty and appear once. Records
+end with a line feed, a carriage return or both, and the last one need not; a
+byte-order mark at the start is skipped. A cell in double quotes can hold
+commas, line breaks and double quotes, which are written twice. Every record
+must have one cell per column.
+
+Each cell is typed on its own, as R's @tt{read.csv} types a column that holds
+only that cell:
+
+@itemlist[
+ @item{A cell is missing when it is @tt{NA}, quoted or not, or when it is not
+       quoted and is empty or holds only white space. A missing cell is an
+       error.}
+ @item{A number is a flonum. A number is a decimal number, such as @tt{3},
+       @tt{-2.5}, @tt{.5}, @tt{5.} or @tt{1e-3}; a hexadecimal one, such as
+       @tt{0x1A}, @tt{0x.8} or @tt{0x1.8p1}; or @tt{Inf}, @tt{Infinity} or
+       @tt{NaN}, in any case; each with an optional sign. White space around a
+       number is ignored. A decimal number is rounded correctly, which R's
+       reader does not always do.}
+ @item{@tt{TRUE} and @tt{T} are @racket[#t], and @tt{FALSE} and @tt{F} are
+       @racket[#f]. Other spellings, such as @tt{true} or @tt{False}, are
+       strings, as they are in R.}
+ @item{Any other cell is a string, as it is written between the quotes, white
+       space included: @tt{" TRUE"} and @tt{"NA "} are strings, as they are in
+       R, and @tt{""} is the empty string.}
+]
+
+Quotes change the value of a cell only when it is empty or holds only white
+space: then it is a string when it is quoted, and missing when it is not,
+where R reads both as missing. A number, a logical or @tt{NA} is the same
+with or without quotes, as in R. Unlike R, which gives a whole column one
+type, a column can mix kinds: a column of the letters @tt{A}, @tt{C}, @tt{G}
+and @tt{T}, which R reads as strings, holds three strings and @racket[#t],
+and a formula that reads it raises an error naming the column. R's complex
+numbers, such as @tt{1i}, are strings.
+
+The table is an association list from each name, a string, to its column, a
+vector, in the header's order. An error names the procedure called, the
+column, the row, counting from 0, and the line of the input on which the row
+starts, counting from 1, and the file when there is one. Input that is not
+UTF-8 is an error that names the line and the offset of its first byte that
+is not, counting from 0.
+
+When writing, the header is the table's column names, in its order, and then
+there is one line per row, each ended by a line feed; a table whose columns
+are empty is its header alone. A real is written as the shortest decimal that
+reads back as the same flonum, without a trailing @tt{.0}; an infinity as
+@tt{Inf} or @tt{-Inf}, as R writes it; and a NaN as @tt{NaN}, which R reads
+back as NaN, where R's @tt{write.csv} writes @tt{NA}. A boolean is @tt{TRUE}
+or @tt{FALSE}, and a string, or a symbol's name, is written as it is. A cell
+or a name is quoted when it holds a comma, a double quote or a line break,
+starts or ends with white space, or is empty, and a string is also quoted
+when it would read as another value, such as @racket["42"] or @racket["T"],
+as R's @tt{write.csv} quotes every string. It still reads back as that value,
+as it does in R. A string that would read back as a missing value,
+@racket["NA"], cannot be written, nor can a value of another kind or a column
+without a name; an error names the column and the row.
+
+@defproc[(csv->table [in input-port? (current-input-port)]) table?]{
+  Reads a CSV file from @racket[in] to its end, and returns it as a table.
+
+  @examples[#:eval ev
+  (require glmnet/data/csv)
+  (csv->table (open-input-string "id,dose,treated\nA,2.5,TRUE\n\"B, 2\",5,F\n"))
+  (csv->table (open-input-string "note\n\"said \"\"hi\"\"\"\n\"two\nlines\"\n"))
+  (csv->table (open-input-string "x\n0x1A\n-inf\n 7 \n\" TRUE\"\ntrue\n"))
+  (eval:error (csv->table (open-input-string "x,y\n1,2\n3,NA\n")))
+  (eval:error (csv->table (open-input-bytes #"name\nM\374ller\n")))]}
+
+@defproc[(csv-file->table [path path-string?]) table?]{
+  Reads the CSV file at @racket[path] as @racket[csv->table] reads a port.
+
+  @examples[#:eval ev
+  (define mtcars-file (collection-file-path "mtcars.csv" "glmnet" "datasets"))
+  (map car (csv-file->table mtcars-file))]}
+
+@defproc[(table->csv [table table?] [out output-port? (current-output-port)]) void?]{
+  Writes @racket[table] to @racket[out] as a CSV file.
+
+  @examples[#:eval ev
+  (table->csv (list (cons "x" (list 1 0.1 1/3 +inf.0))
+                    (cons "label" '("a" "b, c" "42" say))
+                    (cons "flag" '(#t #f #t #f))))
+  (define out (open-output-string))
+  (table->csv (list (cons "x" (list 0.1 (+ 0.1 0.2) 1e-300))) out)
+  (get-output-string out)
+  (csv->table (open-input-string (get-output-string out)))
+  (table->csv (csv->table (open-input-string "id,dose\n")))
+  (eval:error (table->csv (list (cons "code" '("NA" "b")))))]}
+
+@defproc[(table->csv-file [table table?]
+                          [path path-string?]
+                          [#:exists exists
+                                    (or/c 'error 'replace 'truncate 'truncate/replace)
+                                    'error])
+         void?]{
+  Writes @racket[table] to the file at @racket[path] as @racket[table->csv]
+  writes it to a port. @racket[exists] says what to do when the file exists,
+  as for @racket[open-output-file]; none of the choices keeps the file's old
+  contents.
+
+  @examples[#:eval ev
+  (require racket/file)
+  (define path (make-temporary-file "table-~a.csv"))
+  (table->csv-file (list (cons "x" '(1 2)) (cons "y" '(3.5 4.5))) path #:exists 'replace)
+  (file->string path)
+  (csv-file->table path)]}
+
+@section[#:tag "ref-data-math"]{Matrices from @racketmodname[math/matrix]}
+
+@defmodule[glmnet/data/math]
+
+@(define math-ev (make-glmnet-eval))
+
+Conversions between the matrices of @racketmodname[math/matrix] and
+@tech[#:key "design matrix"]{design matrices}, and from
+@racketmodname[math/array] arrays to @tech[#:key "response"]{responses}. The
+rows of a matrix are observations and its columns predictors.
+@racketmodname[glmnet] does not re-export these bindings, and
+@racket[(require glmnet)] does not load @racketmodname[math/matrix]. See
+@secref["data-math"].
+
+Every array that @racketmodname[math/array] returns to untyped code carries a
+contract, and so does the procedure that computes its elements, which checks
+the index it is called with each time. The conversions' element loops are
+written in Typed Racket, so they call that procedure without adding contracts
+of their own, and they avoid it where they can. The design matrix is
+written in place, with no intermediate copy:
+
+@itemlist[
+ @item{a flonum array (an @racket[FlArray], from @racket[array->flarray],
+       @racket[flarray] or @racket[design-matrix->matrix]) is copied from its
+       @racket[flarray-data] in one pass;}
+ @item{a mutable array (a @racket[Mutable-Array], from @racket[vector->matrix]
+       or @racket[array->mutable-array]) is read from its
+       @racket[mutable-array-data];}
+ @item{any other array, such as the result of @racket[build-matrix],
+       @racket[matrix] or @racket[matrix*], is read one element at a time
+       through its contracted procedure;}
+ @item{a lazy array, made while @racket[array-strictness] is @racket[#f], is
+       read the same way, with a fresh mutable index vector for each element,
+       because its index transforms, such as those of
+       @racket[matrix-transpose] and @racket[array-slice-ref], write to the
+       vector they are given.}
+]
+
+For a large matrix, the first two take about as long as
+@racket[rows->design-matrix] takes for the same rows as lists, the third
+several times as long, and the fourth far longer.
+
+@defproc[(matrix->design-matrix [M (and/c array? matrix?)]
+                                [#:column-names column-names
+                                                (or/c #f (listof (or/c string? symbol?)))
+                                                #f])
+         design-matrix?]{
+  A design matrix of the entries of @racket[M], one row per row of
+  @racket[M]. Every entry must be a real, finite number, and exact numbers
+  become flonums; an error names the column of an entry that is not (by its
+  name, when the columns have names), its row, counting from 0, and the
+  entry. @racket[column-names] names the columns, as for
+  @racket[rows->design-matrix], and the names become strings. A design matrix with column names is a
+  @tech{table}, which the formula front end fits from by name. The response
+  matrix @racket[Y] of the multi-response Gaussian family converts the same
+  way.
+
+  @examples[#:eval math-ev
+  (require math/array math/matrix glmnet/data/math)
+  (define M (matrix [[1 2 3] [2 1 5] [3 4 11] [4 3 11] [5 6 17]]))
+  (define D (matrix->design-matrix M #:column-names '(x1 x2 y)))
+  (design-matrix->rows D)
+  (equal? D (rows->design-matrix (matrix->list* M) #:column-names '(x1 x2 y)))
+  (coef (formula-fit (~ y x1 x2) D #:lambda 0))
+  (eval:error (matrix->design-matrix (matrix [[1.0 2.0] [3.0 +nan.0]])
+                                     #:column-names '(x1 x2)))]}
+
+@defproc[(design-matrix->matrix [dm design-matrix?]) (and/c array? matrix?)]{
+  A matrix of the entries of @racket[dm], one row per row of @racket[dm]: a
+  flonum array, an @racket[FlArray], that holds a copy of them. It does not
+  carry @racket[dm]'s column names, which @racket[design-matrix-column-names]
+  gives.
+
+  @examples[#:eval math-ev
+  (design-matrix->matrix D)
+  (equal? (matrix->design-matrix (design-matrix->matrix D)) (matrix->design-matrix M))
+  (matrix* (design-matrix->matrix (rows->design-matrix '((1 2) (3 4))))
+           (col-matrix [1 -1]))]}
+
+@defproc[(array->response
+          [A (and/c array?
+                    (or/c row-matrix?
+                          col-matrix?
+                          (property/c array-shape (vector/c exact-positive-integer?))))])
+         (and/c (listof real?) pair?)]{
+  The elements of @racket[A] as a list, the form in which the fit procedures
+  take a @tech{response}. @racket[A] is a row matrix, a column matrix or a
+  one-dimensional array with at least one element. Every element must be a
+  real, finite number; an error names the position of one that is not,
+  counting from 0, and the element. The elements are returned as they are, so
+  class labels such as those of @racket[multinomial-fit] stay exact integers.
+
+  @examples[#:eval math-ev
+  (array->response (col-matrix [1 0 1]))
+  (array->response (row-matrix [2.5 1/2]))
+  (array->response (array #[0 2 1]))
+  (lasso (matrix->design-matrix M) (array->response (->col-matrix '(1 3 2 5 4)))
+         #:lambda 0.1)
+  (eval:error (array->response (matrix [[1 2] [3 4]])))]}
+
+@(close-eval math-ev)
+
+@section[#:tag "ref-data-polars"]{Polars dataframes}
+
+@defmodule[glmnet/data/polars]
+
+Conversions between the dataframes of @racketmodname[polars] and glmnet's
+@tech[#:key "design matrix"]{design matrices}, @tech{responses} and
+@tech{tables}. @racketmodname[glmnet] does not re-export them and does not
+load Polars. See @secref["data-polars"].
+
+A column that is converted to numbers must have an integer or floating-point
+dtype; Polars casts it to doubles as it copies it out. Column names are
+strings or symbols, compared as strings, and must be names of the dataframe's
+columns; the contracts check the names and the dtypes. A missing value (a
+null), anywhere in a column that is converted, is an error naming its column
+and row, and so is a value that is not finite where numbers are needed.
+Nothing is dropped or filled in.
+
+@examples[#:eval ev #:hidden
+(require glmnet/data/polars
+         glmnet/datasets
+         (only-in polars dataframe series read-csv ref column-names dtype
+                  polars-null))]
+
+@defproc[(polars->design-matrix [df dataframe?]
+                                [columns (and/c (listof (or/c string? symbol?)) pair?)])
+         design-matrix?]{
+  A design matrix of the columns of @racket[df] named by @racket[columns], in
+  that order, with their names, as strings, as its column names. The contract
+  requires @racket[df] to have at least one row, and @racket[columns] to name
+  distinct columns of @racket[df] with numeric dtypes. The matrix is Polars'
+  column-major export, @racket[dataframe->f64vector], taken over without a
+  further copy; it shares no memory with @racket[df].
+
+  @examples[#:eval ev
+  (define trial
+    (dataframe (list (series '(1 2 3) #:name "dose")
+                     (series '(0.5 1.5 2.5) #:name "age")
+                     (series '("a" "b" "a") #:name "site"))))
+  (define trial-matrix (polars->design-matrix trial '(age "dose")))
+  (design-matrix->rows trial-matrix)
+  (design-matrix-column-names trial-matrix)
+  (eval:error (polars->design-matrix trial '("dose" "site")))]}
+
+@defproc[(design-matrix->polars [dm design-matrix?]
+                                [#:column-names column-names
+                                                (listof (or/c string? symbol?))
+                                                (or (design-matrix-column-names dm)
+                                                    (list "V1" "V2" ...))])
+         dataframe?]{
+  A dataframe of the columns of @racket[dm], each a @racket['float64] series,
+  named by @racket[column-names]: by default, @racket[dm]'s column names, or
+  @racket["V1"], @racket["V2"], …, as R names the columns of a matrix, when
+  it has none. The contract requires one distinct name per column.
+  @secref["data-polars"] says why this direction is the slower one.
+
+  @examples[#:eval ev
+  (design-matrix->polars trial-matrix)
+  (column-names (design-matrix->polars (rows->design-matrix '((1 2)))))
+  (column-names (design-matrix->polars trial-matrix #:column-names '(a b)))]}
+
+@defproc[(polars->response [df dataframe?] [column (or/c string? symbol?)])
+         (and/c (listof real?) pair?)]{
+  The values of the column of @racket[df] named @racket[column] as a
+  @tech{response}: exact integers from an integer column, flonums from a
+  floating-point one. The contract requires @racket[df] to have at least one
+  row, and @racket[column] to name a column of @racket[df] with a numeric
+  dtype.
+
+  @examples[#:eval ev
+  (polars->response trial "dose")
+  (eval:error (polars->response (dataframe (list (series (list 1.0 polars-null 3.0)
+                                                         #:name "y")))
+                                "y"))]}
+
+@defproc[(polars->table [df dataframe?]
+                        [columns (and/c (listof (or/c string? symbol?)) pair?)
+                                 (column-names df)])
+         table?]{
+  A @tech{table} of the columns of @racket[df] named by @racket[columns], in
+  that order: an association list from each name to a vector of the column's
+  values. Numeric columns hold numbers, exact integers from an integer
+  column, and boolean columns booleans. String columns hold strings, and
+  categorical and enum columns symbols, which the formula front end reads as
+  factors. A factor's levels are sorted as strings, so the order of an enum's
+  categories is not kept (see @secref["data-polars"]). The contract requires
+  @racket[df] to have at least one row. When @racket[columns] is given, it
+  must name distinct columns of @racket[df] with those dtypes; when it is
+  not, every column must have one of them.
+
+  @examples[#:eval ev
+  (polars->table trial)
+  (polars->table trial '("site"))]}
+
+@defproc[(table->polars [t table?]
+                        [columns (and/c (listof (or/c string? symbol?)) pair?)
+                                 (table-column-names t)])
+         dataframe?]{
+  A dataframe of the columns of @racket[t] named by @racket[columns], in that
+  order. A column's values choose its dtype:
+  @itemlist[
+   @item{@racket['int64] for exact integers from @math{−2@superscript{63}} to
+         @math{2@superscript{63} − 1};}
+   @item{@racket['uint64] for exact integers from 0 to
+         @math{2@superscript{64} − 1}, when some are
+         @math{2@superscript{63}} or more;}
+   @item{@racket['float64] for any other reals, and for integers mixed with
+         them;}
+   @item{@racket['boolean] for booleans, @racket['categorical] for symbols,
+         and @racket['string] for strings, or for strings and symbols mixed.}]
+  The contract requires @racket[columns] to name distinct columns of
+  @racket[t]. An exact integer outside both ranges, a column of integers that
+  needs both (a negative one and one of @math{2@superscript{63}} or more),
+  and a column whose values no one dtype holds are errors naming the row.
+
+  @examples[#:eval ev
+  (define cars (table->polars mtcars '("mpg" "cyl" "wt")))
+  (map (lambda (name) (dtype (ref cars name))) (column-names cars))
+  (table->polars (list (cons "id" '(a b a)) (cons "x" '(1 2.5 3))))
+  (dtype (ref (table->polars (list (cons "n" (list 1 (expt 2 63))))) "n"))
+  (eval:error (table->polars (list (cons "x" '(1 "two")))))]}
+
+@section[#:tag "ref-datasets"]{Example datasets}
+
+@defmodule[glmnet/datasets]
+
+@racketmodname[glmnet/datasets] provides the example datasets of R's glmnet
+4.1.10, which its vignettes use, and R's @tt{mtcars} and @tt{iris}, which the
+formula examples use. @racketmodname[glmnet] does not re-export it. See
+@secref["data-datasets"].
+
+A dataset is a CSV file in the package, under @filepath{glmnet/datasets/},
+which @filepath{scripts/export-datasets.R} writes from R with 17 significant
+digits, so that every number reads back as R's double. R glmnet's datasets
+have a procedure each, which reads its file on its first call and returns the
+same values on every call. The values are the arguments of the family's
+fitter, in order: the predictors as a design matrix whose columns are named
+@racket["V1"], @racket["V2"], and so on, as R's @tt{coef} names the columns
+of these unnamed matrices, and then the response, in the shape the family
+takes (see @secref["concepts-data"]). @racket[mtcars] and @racket[iris] are
+tables, read when the module is instantiated.
+
+@defproc[(quick-start-example) (values design-matrix? (listof flonum?))]{
+  R's @tt{QuickStartExample}, the data of the vignette's Quick Start: 100
+  observations of 20 predictors and a numeric response, for
+  @racket[elnet-fit] and its relatives. See @secref["ex-quick-start"].
+
+  @examples[#:eval ev
+  (require glmnet/datasets)
+  (define-values (x y) (quick-start-example))
+  x
+  (length y)
+  (lasso x y #:lambda 0.1)]}
+
+@defproc[(binomial-example) (values design-matrix? (listof (or/c 0 1)))]{
+  R's @tt{BinomialExample}: 100 observations of 30 predictors and a 0/1
+  response, for @racket[logistic-fit] and its relatives.
+
+  @examples[#:eval ev
+  (define-values (bx by) (binomial-example))
+  (list (design-matrix-nrows bx) (design-matrix-ncols bx))
+  (for/sum ([label (in-list by)]) label)]}
+
+@defproc[(multinomial-example) (values design-matrix? (listof (or/c 0 1 2)))]{
+  R's @tt{MultinomialExample}: 500 observations of 30 predictors and a class
+  label, for @racket[multinomial-fit] and its relatives. R's classes are 1, 2
+  and 3; they are 0, 1 and 2 here, the labels @racket[multinomial-fit] takes.
+
+  @examples[#:eval ev
+  (define-values (mx my) (multinomial-example))
+  (for/list ([k (in-range 3)])
+    (for/sum ([label (in-list my)]) (if (= label k) 1 0)))]}
+
+@defproc[(poisson-example) (values design-matrix? (listof exact-nonnegative-integer?))]{
+  R's @tt{PoissonExample}: 500 observations of 20 predictors and a count,
+  for @racket[poisson-fit] and its relatives.
+
+  @examples[#:eval ev
+  (define-values (px py) (poisson-example))
+  (apply max py)]}
+
+@defproc[(cox-example)
+         (values design-matrix? (listof (and/c flonum? positive?)) (listof (or/c 0 1)))]{
+  R's @tt{CoxExample}: 1000 observations of 30 predictors, and the survival
+  times and statuses, R's columns @tt{time} and @tt{status}, for
+  @racket[cox-fit] and its relatives, which take them as two arguments. A
+  status is 1 for a death and 0 for a censored time.
+
+  @examples[#:eval ev
+  (define-values (cx time status) (cox-example))
+  (for/sum ([s (in-list status)]) s)
+  (cox-path cx time status #:nlambda 5)]}
+
+@defproc[(multi-gaussian-example) (values design-matrix? design-matrix?)]{
+  R's @tt{MultiGaussianExample}: 100 observations of 20 predictors and four
+  numeric responses, for @racket[mgaussian-fit] and its relatives. The
+  responses are a design matrix whose columns are named @racket["y1"] to
+  @racket["y4"], as R's @tt{coef} names them.
+
+  @examples[#:eval ev
+  (define-values (gx gy) (multi-gaussian-example))
+  (design-matrix-column-names gy)]}
+
+@defproc[(sparse-example) (values design-matrix? (listof flonum?))]{
+  R's @tt{SparseExample}: 100 observations of 20 predictors, 84% of whose
+  entries are zero, and a numeric response. R holds the predictors as a
+  sparse matrix; here they are a dense design matrix, until sparse input is
+  supported (@hyperlink["https://github.com/bkc39/glmnet/issues/11"]{#11}).
+
+  @examples[#:eval ev
+  (define-values (sx sy) (sparse-example))
+  (for*/sum ([row (in-list (design-matrix->rows sx))] [v (in-list row)])
+    (if (zero? v) 1 0))]}
 
 @defthing[mtcars table?]{
   R's @tt{datasets::mtcars}, from the 1974 Motor Trend road tests of 32 cars,
-  as an association list from each of R's eleven column names to its column:
+  as an association list from each of R's eleven column names to its column,
+  a vector:
   @racket["mpg"], @racket["cyl"], @racket["disp"], @racket["hp"],
   @racket["drat"], @racket["wt"], @racket["qsec"], @racket["vs"],
   @racket["am"], @racket["gear"] and @racket["carb"], in R's order, with the
-  cars in R's order, from the Mazda RX4 to the Volvo 142E. Each value is the
-  shortest decimal that R reads as the same double as its own copy holds.
+  cars in R's order, from the Mazda RX4 to the Volvo 142E. R's row names, the
+  cars' models, are not a column.
 
   @examples[#:eval ev
-  (require glmnet/examples/data/mtcars)
   (table-column-names mtcars)
   (cdr (assoc "wt" mtcars))]}
-
-@subsubsection[#:tag "ref-iris"]{Iris flowers}
-
-@defmodule[glmnet/examples/data/iris]
 
 @defthing[iris table?]{
   R's @tt{datasets::iris}, Anderson's measurements of 150 irises, 50 of each
   of three species, as an association list from each of R's five column names
-  to its column: @racket["Sepal.Length"], @racket["Sepal.Width"],
+  to its column, a vector: @racket["Sepal.Length"], @racket["Sepal.Width"],
   @racket["Petal.Length"] and @racket["Petal.Width"] in centimetres, and
   @racket["Species"], whose values are the strings @racket["setosa"],
   @racket["versicolor"] and @racket["virginica"]. R holds the species as a
@@ -323,7 +859,6 @@ modules provide. @racketmodname[glmnet] does not re-export them.
   gives. The flowers are in R's order.
 
   @examples[#:eval ev
-  (require glmnet/examples/data/iris)
   (table-column-names iris)
   (formula-predictor-names (Sepal.Length . ~ . Petal.Width + Species) iris)]}
 
@@ -488,7 +1023,7 @@ fixed @racket[#:alpha]. See @secref["ex-ols"], @secref["ex-ridge"],
   (elnet-result-coefficients fit)]}
 
 @defproc[(elnet-fit [X design-matrix/c]
-                    [y (and/c (listof real?) pair?)]
+                    [y (response/c real?)]
                     [#:lambda lambda (>=/c 0)]
                     [#:alpha alpha (real-in 0 1) 1.0]
                     [#:standardize? standardize? boolean? #t]
@@ -507,7 +1042,7 @@ fixed @racket[#:alpha]. See @secref["ex-ols"], @secref["ex-ridge"],
   (eval:error (lasso X '(2.0 2.0 2.0 2.0 2.0 2.0) #:lambda 0.5))]}
 
 @defproc[(ols [X design-matrix/c]
-              [y (and/c (listof real?) pair?)]
+              [y (response/c real?)]
               [#:standardize? standardize? boolean? #t]
               [#:intercept? intercept? boolean? #t]
               [#:thresh thresh (>/c 0) 1e-10]
@@ -524,7 +1059,7 @@ fixed @racket[#:alpha]. See @secref["ex-ols"], @secref["ex-ridge"],
         '(1.0 4.0 3.0 6.0 5.0)))]}
 
 @defproc[(ridge [X design-matrix/c]
-                [y (and/c (listof real?) pair?)]
+                [y (response/c real?)]
                 [#:lambda lambda (>=/c 0)]
                 [#:standardize? standardize? boolean? #t]
                 [#:intercept? intercept? boolean? #t]
@@ -539,7 +1074,7 @@ fixed @racket[#:alpha]. See @secref["ex-ols"], @secref["ex-ridge"],
   (elnet-result-coefficients (ridge X y #:lambda 0.1))]}
 
 @defproc[(lasso [X design-matrix/c]
-                [y (and/c (listof real?) pair?)]
+                [y (response/c real?)]
                 [#:lambda lambda (>=/c 0)]
                 [#:standardize? standardize? boolean? #t]
                 [#:intercept? intercept? boolean? #t]
@@ -553,7 +1088,7 @@ fixed @racket[#:alpha]. See @secref["ex-ols"], @secref["ex-ridge"],
   (elnet-result-coefficients (lasso X y #:lambda 0.5))]}
 
 @defproc[(elastic-net [X design-matrix/c]
-                      [y (and/c (listof real?) pair?)]
+                      [y (response/c real?)]
                       [#:alpha alpha (real-in 0 1)]
                       [#:lambda lambda (>=/c 0)]
                       [#:standardize? standardize? boolean? #t]
@@ -601,7 +1136,7 @@ The @tech{binomial family}: two-class logistic regression on 0/1 labels. See
   (logistic-result-dev-ratio fit)]}
 
 @defproc[(logistic-fit [X design-matrix/c]
-                       [y (and/c (listof (or/c 0 1)) pair?)]
+                       [y (response/c (or/c 0 1))]
                        [#:lambda lambda (>=/c 0)]
                        [#:alpha alpha (real-in 0 1) 1.0]
                        [#:standardize? standardize? boolean? #t]
@@ -662,7 +1197,7 @@ labels. See @secref["ex-multinomial"].
   (multinomial-result-coefficients fit)]}
 
 @defproc[(multinomial-fit [X design-matrix/c]
-                          [y (and/c (listof exact-nonnegative-integer?) pair?)]
+                          [y (response/c (and/c integer? (>=/c 0)))]
                           [#:lambda lambda (>=/c 0)]
                           [#:alpha alpha (real-in 0 1) 1.0]
                           [#:standardize? standardize? boolean? #t]
@@ -671,7 +1206,8 @@ labels. See @secref["ex-multinomial"].
                           [#:max-iters max-iters exact-positive-integer? 100000])
          multinomial-result?]{
   Fits a @math{K}-class multinomial elastic-net model. The labels @racket[y]
-  must cover @racket[0] to @math{K−1} with every class present; otherwise the
+  are integers, exact or inexact as in an @racket[flvector], and must cover
+  @racket[0] to @math{K−1} with every class present; otherwise the
   @exnraise[exn:fail]. As with @racket[logistic-fit], a collapsed class
   probability raises @racket[exn:fail].
 
@@ -721,8 +1257,8 @@ intercept, and so no @racket[#:intercept?] keyword. See @secref["ex-cox"].
   (cox-result-coefficients fit)]}
 
 @defproc[(cox-fit [X design-matrix/c]
-                  [times (and/c (listof (>/c 0)) pair?)]
-                  [statuses (and/c (listof (or/c 0 1)) pair?)]
+                  [times (response/c (>/c 0))]
+                  [statuses (response/c (or/c 0 1))]
                   [#:lambda lambda (>=/c 0)]
                   [#:alpha alpha (real-in 0 1) 1.0]
                   [#:standardize? standardize? boolean? #t]
@@ -780,7 +1316,7 @@ The @tech{Poisson family}: counts with a log link. See @secref["ex-poisson"].
   (poisson-result-coefficients fit)]}
 
 @defproc[(poisson-fit [X design-matrix/c]
-                      [y (and/c (listof (>=/c 0)) pair?)]
+                      [y (response/c (>=/c 0))]
                       [#:lambda lambda (>=/c 0)]
                       [#:alpha alpha (real-in 0 1) 1.0]
                       [#:standardize? standardize? boolean? #t]
@@ -951,7 +1487,7 @@ These are R's @tt{glmnet.control} defaults (@tt{fdev = 1e-5},
   (glmnet-path-df path)]}
 
 @defproc[(elnet-path [X design-matrix/c]
-                     [y (and/c (listof real?) pair?)]
+                     [y (response/c real?)]
                      [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) pair?)) #f]
                      [#:nlambda nlambda exact-positive-integer? 100]
                      [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>=/c 0) (</c 1))) #f]
@@ -970,7 +1506,7 @@ These are R's @tt{glmnet.control} defaults (@tt{fdev = 1e-5},
   (eval:error (elnet-path X y #:lambda '(0.1) #:max-iters 1))]}
 
 @defproc[(logistic-path [X design-matrix/c]
-                        [y (and/c (listof (or/c 0 1)) pair?)]
+                        [y (response/c (or/c 0 1))]
                         [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) pair?)) #f]
                         [#:nlambda nlambda exact-positive-integer? 100]
                         [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>=/c 0) (</c 1))) #f]
@@ -986,7 +1522,7 @@ These are R's @tt{glmnet.control} defaults (@tt{fdev = 1e-5},
   (glmnet-path-df (logistic-path X '(0 0 0 1 1 1) #:lambda '(0.3 0.1 0.03)))]}
 
 @defproc[(multinomial-path [X design-matrix/c]
-                           [y (and/c (listof exact-nonnegative-integer?) pair?)]
+                           [y (response/c (and/c integer? (>=/c 0)))]
                            [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) pair?)) #f]
                            [#:nlambda nlambda exact-positive-integer? 100]
                            [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>=/c 0) (</c 1))) #f]
@@ -1003,8 +1539,8 @@ These are R's @tt{glmnet.control} defaults (@tt{fdev = 1e-5},
   (vector-ref (glmnet-path-coefficients mpath) 1)]}
 
 @defproc[(cox-path [X design-matrix/c]
-                   [times (and/c (listof (>/c 0)) pair?)]
-                   [statuses (and/c (listof (or/c 0 1)) pair?)]
+                   [times (response/c (>/c 0))]
+                   [statuses (response/c (or/c 0 1))]
                    [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) pair?)) #f]
                    [#:nlambda nlambda exact-positive-integer? 100]
                    [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>=/c 0) (</c 1))) #f]
@@ -1022,7 +1558,7 @@ These are R's @tt{glmnet.control} defaults (@tt{fdev = 1e-5},
   (glmnet-path-coefficients cpath)]}
 
 @defproc[(poisson-path [X design-matrix/c]
-                       [y (and/c (listof (>=/c 0)) pair?)]
+                       [y (response/c (>=/c 0))]
                        [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) pair?)) #f]
                        [#:nlambda nlambda exact-positive-integer? 100]
                        [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>=/c 0) (</c 1))) #f]
@@ -1073,8 +1609,10 @@ it passes on to each fit, and these:
        from @racket[current-pseudo-random-generator]. It is ignored when
        @racket[#:fold-ids] is given.}
  @item{@racket[#:fold-ids], R's @tt{foldid}, assigns the observations to folds:
-       one fold id per row of @racket[X], counting from 0. Every id from 0 to
-       the largest must appear, and there must be at least 3.}
+       one fold id per row of @racket[X], counting from 0, in a list, vector,
+       @racket[flvector] or @racket[f64vector], as a response can be. Every id
+       from 0 to the largest must appear, and there must be at least 3 (see
+       @racket[fold-ids/c]).}
  @item{@racket[#:grouped?], R's @tt{grouped}, computes the error and its
        standard error from the per-fold means when true, and from the
        per-observation losses otherwise. When the folds average fewer than 3
@@ -1170,10 +1708,11 @@ carry the signal:
   @racket[path]; @racket[predict] and @racket[coef] default to
   @racket[lambda-1se], as R's @tt{predict.cv.glmnet} does, and also accept
   @racket['lambda-min], @racket['lambda-1se] or any λ; and
-  @racket[deviance-ratio] is the path's at @racket[lambda-1se]. It prints as
-  R's @tt{print.cv.glmnet} does: the measure, then for each of
-  @racket[lambda-min] and @racket[lambda-1se] its value, index, @racket[cvm],
-  @racket[cvsd] and @racket[nzero].
+  @racket[deviance-ratio] is the path's at @racket[lambda-1se]. It prints
+  like R's @tt{print.cv.glmnet}, with the index counted from 0: the measure,
+  then for each of @racket[lambda-min] and @racket[lambda-1se] its value,
+  index, @racket[cvm], @racket[cvsd] and @racket[nzero] (see
+  @secref["ref-model-printing"]).
 
   @examples[#:eval ev
   (define cv (elnet-cv X60 y60))
@@ -1186,10 +1725,10 @@ carry the signal:
   (deviance-ratio cv)]}
 
 @defproc[(elnet-cv [X design-matrix/c]
-                   [y (and/c (listof real?) pair?)]
+                   [y (response/c real?)]
                    [#:type-measure type-measure (or/c 'mse 'deviance 'mae) 'mse]
                    [#:nfolds nfolds (and/c exact-integer? (>=/c 3)) 10]
-                   [#:fold-ids fold-ids (or/c #f (and/c (listof exact-nonnegative-integer?) pair?)) #f]
+                   [#:fold-ids fold-ids fold-ids/c #f]
                    [#:grouped? grouped? boolean? #t]
                    [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) (property/c length (>=/c 2)))) #f]
                    [#:nlambda nlambda exact-positive-integer? 100]
@@ -1210,10 +1749,10 @@ carry the signal:
   (eval:error (elnet-cv X60 y60 #:fold-ids halves))]}
 
 @defproc[(logistic-cv [X design-matrix/c]
-                      [y (and/c (listof (or/c 0 1)) pair?)]
+                      [y (response/c (or/c 0 1))]
                       [#:type-measure type-measure (or/c 'deviance 'class 'auc 'mse 'mae) 'deviance]
                       [#:nfolds nfolds (and/c exact-integer? (>=/c 3)) 10]
-                      [#:fold-ids fold-ids (or/c #f (and/c (listof exact-nonnegative-integer?) pair?)) #f]
+                      [#:fold-ids fold-ids fold-ids/c #f]
                       [#:grouped? grouped? boolean? #t]
                       [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) (property/c length (>=/c 2)))) #f]
                       [#:nlambda nlambda exact-positive-integer? 100]
@@ -1238,10 +1777,10 @@ carry the signal:
   (logistic-cv X60 labels #:type-measure 'auc #:nfolds 5)]}
 
 @defproc[(multinomial-cv [X design-matrix/c]
-                         [y (and/c (listof exact-nonnegative-integer?) pair?)]
+                         [y (response/c (and/c integer? (>=/c 0)))]
                          [#:type-measure type-measure (or/c 'deviance 'class 'mse 'mae) 'deviance]
                          [#:nfolds nfolds (and/c exact-integer? (>=/c 3)) 10]
-                         [#:fold-ids fold-ids (or/c #f (and/c (listof exact-nonnegative-integer?) pair?)) #f]
+                         [#:fold-ids fold-ids fold-ids/c #f]
                          [#:grouped? grouped? boolean? #t]
                          [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) (property/c length (>=/c 2)))) #f]
                          [#:nlambda nlambda exact-positive-integer? 100]
@@ -1263,11 +1802,11 @@ carry the signal:
   (multinomial-cv X60 classes #:type-measure 'class)]}
 
 @defproc[(cox-cv [X design-matrix/c]
-                 [times (and/c (listof (>/c 0)) pair?)]
-                 [statuses (and/c (listof (or/c 0 1)) pair?)]
+                 [times (response/c (>/c 0))]
+                 [statuses (response/c (or/c 0 1))]
                  [#:type-measure type-measure (or/c 'deviance 'C) 'deviance]
                  [#:nfolds nfolds (and/c exact-integer? (>=/c 3)) 10]
-                 [#:fold-ids fold-ids (or/c #f (and/c (listof exact-nonnegative-integer?) pair?)) #f]
+                 [#:fold-ids fold-ids fold-ids/c #f]
                  [#:grouped? grouped? boolean? #t]
                  [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) (property/c length (>=/c 2)))) #f]
                  [#:nlambda nlambda exact-positive-integer? 100]
@@ -1304,10 +1843,10 @@ carry the signal:
    (cox-cv X60 times fold-0-censored #:fold-ids thirds #:grouped? #f))]}
 
 @defproc[(poisson-cv [X design-matrix/c]
-                     [y (and/c (listof (>=/c 0)) pair?)]
+                     [y (response/c (>=/c 0))]
                      [#:type-measure type-measure (or/c 'deviance 'mse 'mae) 'deviance]
                      [#:nfolds nfolds (and/c exact-integer? (>=/c 3)) 10]
-                     [#:fold-ids fold-ids (or/c #f (and/c (listof exact-nonnegative-integer?) pair?)) #f]
+                     [#:fold-ids fold-ids fold-ids/c #f]
                      [#:grouped? grouped? boolean? #t]
                      [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) (property/c length (>=/c 2)))) #f]
                      [#:nlambda nlambda exact-positive-integer? 100]
@@ -1332,7 +1871,7 @@ carry the signal:
                        [Y design-matrix/c]
                        [#:type-measure type-measure (or/c 'mse 'deviance 'mae) 'mse]
                        [#:nfolds nfolds (and/c exact-integer? (>=/c 3)) 10]
-                       [#:fold-ids fold-ids (or/c #f (and/c (listof exact-nonnegative-integer?) pair?)) #f]
+                       [#:fold-ids fold-ids fold-ids/c #f]
                        [#:grouped? grouped? boolean? #t]
                        [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) (property/c length (>=/c 2)))) #f]
                        [#:nlambda nlambda exact-positive-integer? 100]
@@ -1373,6 +1912,26 @@ carry the signal:
       (random-fold-ids 10 #:nfolds 3)))
   (equal? (draw) (draw))
   (eval:error (random-fold-ids 3 #:nfolds 5))]}
+
+@defthing[fold-ids/c flat-contract?]{
+  The contract on the @racket[#:fold-ids] argument of every cross-validation
+  procedure. It accepts @racket[#f], for folds drawn by
+  @racket[random-fold-ids], or fold ids: a non-empty list, vector,
+  @racket[flvector] or @racket[f64vector] of non-negative integers, exact or,
+  as in an @racket[flvector], inexact, that use every fold from 0 to the
+  largest id, of which there are at least 3. A violation says which fold is
+  missing. The procedures check the ids again on their own copy, with one id
+  per observation.
+
+  @examples[#:eval ev
+  (require racket/contract racket/flonum)
+  (contract-first-order-passes? fold-ids/c '(0 1 2 0 1 2))
+  (contract-first-order-passes? fold-ids/c (flvector 0.0 1.0 2.0 2.0))
+  (contract-first-order-passes? fold-ids/c #f)
+  (contract-first-order-passes? fold-ids/c '(0 1 0 1))
+  (contract-first-order-passes? fold-ids/c (vector 0 2 3 0 2 3))
+  (elnet-cv X60 y60 #:fold-ids (for/vector ([i (in-range 60)]) (modulo i 4)))
+  (eval:error (elnet-cv X60 y60 #:fold-ids (for/list ([i (in-range 60)]) (* 2 (modulo i 3)))))]}
 
 @section[#:tag "ref-formula"]{Formulas}
 
@@ -1548,11 +2107,10 @@ needs at least one predictor.
 
 The examples in this section use R's @tt{mtcars}, 32 cars of the 1974 Motor
 Trend road tests, and R's @tt{iris}, 150 irises of three species, which
-@racketmodname[glmnet/examples/data/mtcars] and
-@racketmodname[glmnet/examples/data/iris] provide as tables:
+@racketmodname[glmnet/datasets] provides as tables (see @secref["ref-datasets"]):
 
 @examples[#:eval ev #:label #f
-(require glmnet/examples/data/mtcars glmnet/examples/data/iris)
+(require glmnet/datasets)
 (table-column-names mtcars)
 (table-column-names iris)
 ]
@@ -1968,7 +2526,7 @@ Trend road tests, and R's @tt{iris}, 150 irises of three species, which
                                'gaussian]
                      [#:type-measure type-measure (or/c #f 'mse 'deviance 'mae 'class 'auc 'C) #f]
                      [#:nfolds nfolds (and/c exact-integer? (>=/c 3)) 10]
-                     [#:fold-ids fold-ids (or/c #f (and/c (listof exact-nonnegative-integer?) pair?)) #f]
+                     [#:fold-ids fold-ids fold-ids/c #f]
                      [#:grouped? grouped? boolean? #t]
                      [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) (property/c length (>=/c 2)))) #f]
                      [#:nlambda nlambda exact-positive-integer? 100]
@@ -2275,11 +2833,13 @@ digits of the column's largest value, so a @math{λ} far below the first can
 show as @racket[0], and each column is written with one number of decimals
 throughout, or in scientific notation when that is narrower.
 
-A @racket[glmnet-cv] prints as R's @tt{print.cv.glmnet}: the name of its
+A @racket[glmnet-cv] prints like R's @tt{print.cv.glmnet}: the name of its
 measure, then a row for each of @racket[glmnet-cv-lambda-min] and
 @racket[glmnet-cv-lambda-1se] with that @math{λ}, its index, the
 cross-validated error, its standard error and the number of nonzero
-coefficients, the reals to four significant digits. A @racket[formula-model]
+coefficients. It differs from R's in two ways: the index counts from 0, where
+R's counts from 1, and each real is rounded to four significant digits on
+its own, where R formats each column as a whole and can show a digit more. A @racket[formula-model]
 prints as the result it holds, with its formula after the family.
 
 Printing does not change @racket[equal?], which compares results field by
