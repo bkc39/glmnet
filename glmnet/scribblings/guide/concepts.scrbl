@@ -180,58 +180,6 @@ matching its columns by name. @secref["formulas"] covers tables, formulas and
 the models fitted from them, and @secref["data"] where data comes from: R
 glmnet's example datasets and CSV files.
 
-@subsection[#:tag "concepts-data-math"]{Matrices from @racketmodname[math/matrix]}
-
-@(define math-ev (make-glmnet-eval))
-
-The matrices of Racket's @racketmodname[math/matrix] library convert to design
-matrices and back through @racketmodname[glmnet/data/math]. A matrix's rows are
-the observations. A response can be a column matrix, a row matrix or a
-one-dimensional @racketmodname[math/array] array. @racket[(require glmnet)] does
-not load the module, so a program that does not use @racketmodname[math/matrix]
-does not wait for it to load.
-
-The Quick Start of R's @tt{glmnet} fits @tt{glmnet(x, y)} to a 100 × 20 matrix
-@tt{x} and a response vector @tt{y}. Here is the same fit, where @racket[x] is
-drawn at random and @racket[y] depends on its first five columns:
-
-@examples[#:eval math-ev #:label #f
-(require math/matrix math/distributions glmnet/data/math)
-(random-seed 29)
-(define x (build-matrix 100 20 (lambda (i j) (sample (normal-dist)))))
-(define beta
-  (->col-matrix (append '(2.0 -1.0 1.0 -0.5 0.5) (for/list ([j 15]) 0.0))))
-(define y
-  (matrix+ (matrix* x beta) (->col-matrix (sample (normal-dist 0 0.5) 100))))
-(define fit (elnet-path (matrix->design-matrix x) (array->response y)))
-(coef fit #:lambda 0.1)
-(define nx (build-matrix 5 20 (lambda (i j) (sample (normal-dist)))))
-(predict fit (matrix->design-matrix nx) #:lambda '(0.1 0.05))
-]
-
-@racket[matrix->design-matrix] copies and checks a matrix as
-@racket[rows->design-matrix] does a list of rows, and @racket[array->response]
-gives the response as a list, so the fit is the one from the same numbers as
-lists. @racket[design-matrix->matrix] converts back, to a matrix of flonums:
-
-@examples[#:eval math-ev #:label #f
-(define X (matrix->design-matrix x))
-(equal? (elnet-path X (array->response y))
-        (elnet-path (matrix->list* x) (matrix->list y)))
-(equal? (design-matrix->matrix X) x)
-(design-matrix->matrix (rows->design-matrix '((1 2) (3 4))))
-]
-
-A flonum array, from @racket[array->flarray], or a mutable array, from
-@racket[vector->matrix], is copied straight from the vector that holds its
-elements. Any other array is read one element at a time, through the contract
-that the Typed Racket library puts on each array it returns to untyped code,
-which makes a large matrix several times slower to convert. Converting once and
-passing the design matrix to every fit pays that cost once.
-@secref["ref-data-math"] has the details.
-
-@(close-eval math-ev)
-
 @section[#:tag "concepts-penalty"]{The penalty: @math{α} and @math{λ}}
 
 For the Gaussian family, glmnet solves

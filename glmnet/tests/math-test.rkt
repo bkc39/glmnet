@@ -56,6 +56,57 @@
                       (array-map exact->inexact (list*->matrix rows)))))])
       (check-equal? (matrix->design-matrix M) dm (format "~a" M))))
 
+  ;; math-lib's lazy index transforms write to the index vector they are
+  ;; given, so these read through a mutable one.
+  (define F (flarray #[#[1.0 2.0 3.0] #[4.0 5.0 6.0]]))
+  (define B (build-matrix 2 3 (lambda (i j) (exact->inexact (+ (* 3 i) j 1)))))
+  (define-values (lazy-matrices lazy-responses)
+    (parameterize ([array-strictness #f])
+      (values
+       (list (cons (matrix-transpose F) '((1.0 4.0) (2.0 5.0) (3.0 6.0)))
+             (cons (matrix-transpose B) '((1.0 4.0) (2.0 5.0) (3.0 6.0)))
+             (cons (array-axis-swap F 0 1) '((1.0 4.0) (2.0 5.0) (3.0 6.0)))
+             (cons (array-slice-ref F (list (::) (:: 1 #f))) '((2.0 3.0) (5.0 6.0)))
+             (cons (submatrix F (::) (:: 0 2)) '((1.0 2.0) (4.0 5.0)))
+             (cons (matrix-col F 1) '((2.0) (5.0)))
+             (cons (matrix-row F 1) '((4.0 5.0 6.0)))
+             (cons (matrix-augment (list F F)) '((1.0 2.0 3.0 1.0 2.0 3.0) (4.0 5.0 6.0 4.0 5.0 6.0)))
+             (cons (matrix-stack (list F B)) '((1.0 2.0 3.0) (4.0 5.0 6.0) (1.0 2.0 3.0) (4.0 5.0 6.0)))
+             (cons (array-broadcast (array-slice-ref F (list (:: 0 1) (::))) #(2 3))
+                   '((1.0 2.0 3.0) (1.0 2.0 3.0))))
+       (list (cons (matrix-col F 1) '(2.0 5.0))
+             (cons (matrix-row F 1) '(4.0 5.0 6.0))
+             (cons (matrix-transpose (matrix-row F 0)) '(1.0 2.0 3.0))
+             (cons (array-slice-ref (array #[1.0 2.0 3.0 4.0]) (list (:: 0 #f 2))) '(1.0 3.0))
+             (cons (array-slice-ref F (list (::) 1)) '(2.0 5.0))
+             (cons (array-flatten F) '(1.0 2.0 3.0 4.0 5.0 6.0))))))
+
+  (test-case "a lazy transpose, slice or column of a matrix converts"
+    (for ([M+rows (in-list lazy-matrices)])
+      (define M (car M+rows))
+      (check-false (array-strict? M))
+      (check-equal? (matrix->design-matrix M) (rows->design-matrix (cdr M+rows)) (format "~a" M))))
+
+  (test-case "a lazy column, row or slice is a response"
+    (for ([A+y (in-list lazy-responses)])
+      (define A (car A+y))
+      (check-false (array-strict? A))
+      (check-equal? (array->response A) (cdr A+y) (format "~a" A))))
+
+  (test-case "-0.0 and the smallest subnormal convert bit for bit on every path"
+    (define xs '((-0.0 5e-324) (-5e-324 0.0)))
+    (define dm (rows->design-matrix xs))
+    (for ([M (in-list (list (list*->matrix xs)
+                            (array->flarray (list*->matrix xs))
+                            (array->mutable-array (list*->matrix xs))
+                            (parameterize ([array-strictness #f])
+                              (matrix-transpose (matrix-transpose (list*->matrix xs))))))])
+      (check-equal? (matrix->design-matrix M) dm (format "~a" M))
+      (check-eqv? (design-matrix-ref (matrix->design-matrix M) 0 0) -0.0))
+    (check-equal? (matrix->design-matrix (design-matrix->matrix dm)) dm)
+    (check-eqv? (car (array->response (array #[-0.0 5e-324]))) -0.0)
+    (check-eqv? (cadr (array->response (flarray #[-0.0 5e-324]))) 5e-324))
+
   (test-case "exact entries become flonums"
     (define dm (matrix->design-matrix (matrix [[1 1/2] [-3 5/4]])))
     (check-equal? (design-matrix->rows dm) '((1.0 0.5) (-3.0 1.25)))
@@ -116,6 +167,22 @@
                  #rx"not finite" #rx"row: 0" #rx"column: 0")
     (check-error (lambda () (matrix->design-matrix (matrix [[1 (expt 10 400)]])))
                  #rx"not finite" #rx"column: 1"))
+
+  (test-case "an element error names the column by name, then the row and the element"
+    (for ([M (in-list (list (matrix [[1.0 2.0] [3.0 +nan.0]])
+                            (flarray #[#[1.0 2.0] #[3.0 +nan.0]])
+                            (vector->matrix 2 2 (vector 1.0 2.0 3.0 +nan.0))))])
+      (check-error (lambda () (matrix->design-matrix M #:column-names '(a b)))
+                   #rx"not finite\n  column: \"b\"\n  row: 1\n  element: \\+nan\\.0$"))
+    (check-error (lambda () (matrix->design-matrix (matrix [[1 'x]]) #:column-names '("a" "b")))
+                 #rx"not a real number\n  column: \"b\"\n  row: 0\n  element: 'x$"))
+
+  (test-case "bad column names are reported before bad elements"
+    (for ([M (in-list (list (matrix [[1 'x]]) (flarray #[#[1.0 +nan.0]])))])
+      (check-error (lambda () (matrix->design-matrix M #:column-names '(a)))
+                   #rx"the number of column names does not match")
+      (check-error (lambda () (matrix->design-matrix M #:column-names '(a "a")))
+                   #rx"the column names are not distinct")))
 
   (test-case "a value that is not a matrix is a contract error blaming the caller"
     (for ([v (in-list (list rows
@@ -219,10 +286,14 @@
     (for ([v (in-list (list '(1 2 3)
                             (matrix [[1 2] [3 4]])
                             (array #[])
+                            (unsafe-flarray #(0) (flvector 1.0))
                             (array 1)
                             (array #[#[#[1]]])))])
       (check-blame (lambda () (array->response v))
-                   #rx"expected: a one-dimensional array, a row matrix or a column matrix")))
+                   (regexp (regexp-quote
+                            (string-append "expected: (and/c array? (or/c row-matrix? col-matrix? "
+                                           "(property/c array-shape "
+                                           "(vector/c exact-positive-integer?))))"))))))
 
   ;; --- fits equal to the list path -------------------------------------------------
 

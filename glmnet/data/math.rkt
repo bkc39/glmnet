@@ -1,106 +1,96 @@
 #lang racket/base
 
-;; glmnet/data/math (#37): math/matrix matrices to and from design matrices,
-;; and math arrays as responses. main.rkt does not require it, so that
-;; `(require glmnet)` does not load math-lib.
-;;
-;; Every math array that untyped code holds carries the contract of math-lib's
-;; Typed Racket exports, and so does the procedure that computes its elements,
-;; which checks each call. The element loops are therefore typed, so that they
-;; add no contract of their own, and they bypass that procedure when the array
-;; has storage: a flonum array's flvector or a mutable array's vector, both in
-;; row-major order.
-
 (require racket/contract
          (only-in racket/flonum flvector? flvector-length make-flvector flvector-set!)
          (only-in ffi/vector f64vector-ref)
-         (only-in math/array array? mutable-array? mutable-array-data flarray-data)
-         (only-in math/matrix matrix? matrix-shape)
+         (only-in math/array
+                  array? array-shape mutable-array? mutable-array-data flarray-data)
+         (only-in math/matrix matrix? matrix-shape row-matrix? col-matrix?)
          ;; math/array exports flarray-data but no predicate for flonum arrays.
          (only-in (submod math/private/array/flarray-struct defs) flarray?)
          (only-in "../data.rkt" design-matrix?)
          (only-in (submod "../data.rkt" support)
                   design-matrix-data design-matrix-nrows design-matrix-ncols
-                  flat->design-matrix))
+                  check-column-names flat->design-matrix))
 
 (module typed typed/racket/base
   (require racket/flonum
-           math/array
-           (only-in math/matrix row-matrix? col-matrix?))
+           typed/racket/unsafe
+           math/array)
 
-  (provide response-array?
-           matrix-flonums
-           array-response
+  (unsafe-require/typed ffi/vector
+                        [#:opaque F64Vector f64vector?]
+                        [make-f64vector (-> Integer F64Vector)]
+                        [f64vector-set! (-> F64Vector Integer Flonum Void)])
+  (unsafe-require/typed (submod "../data.rkt" support)
+                        [->finite-flonum (-> Any Symbol String Integer (U String Integer) Flonum)]
+                        [element-error (-> Symbol String String Any #:position Integer Nothing)])
+
+  (provide matrix->f64vector
+           array->real-list
            row-major->flarray)
 
   (define-type Storage (U #f FlVector VectorTop))
 
-  (: response-array? (-> Any Boolean))
-  (define (response-array? v)
-    (and (array? v)
-         (positive? (shape-size v))
-         (or (= (array-dims v) 1) (row-matrix? v) (col-matrix? v))))
-
-  ;; The number of elements a's shape has, which is what the loops read. math's
-  ;; unsafe constructors can make an array whose storage, and array-size, is
-  ;; longer.
-  (: shape-size (-> (Array Any) Integer))
-  (define (shape-size a)
-    (for/fold ([size : Integer 1]) ([d (in-vector (array-shape a))])
-      (* size d)))
-
-  ;; Element k of a in row-major order. The index vectors are immutable, so the
-  ;; contract on a's element procedure checks them instead of wrapping them.
-  (: element-reader (-> (Array Any) Storage (-> Integer Any)))
-  (define (element-reader a storage)
+  ;; Element (i, j) of a matrix, or element j of a one-dimensional array (i is
+  ;; then 0), where n is the number of columns. A lazy array's index
+  ;; transforms write to the index vector they are given, so it is mutable
+  ;; unless the array is strict.
+  (: element-reader (-> (Array Any) Storage Index (-> Integer Integer Any)))
+  (define (element-reader a storage n)
     (cond
-      [(flvector? storage) (lambda (k) (flvector-ref storage k))]
-      [(vector? storage) (lambda (k) (vector-ref storage k))]
+      [(flvector? storage) (lambda (i j) (flvector-ref storage (+ (* i n) j)))]
+      [(vector? storage) (lambda (i j) (vector-ref storage (+ (* i n) j)))]
       [else
        (define proc (unsafe-array-proc a))
-       (define ds (array-shape a))
-       (if (= (vector-length ds) 1)
-           (lambda (k) (proc (vector-immutable (assert k index?))))
-           (let ([n (vector-ref ds 1)])
-             (lambda (k)
-               (proc (vector-immutable (assert (quotient k n) index?)
-                                       (assert (remainder k n) index?))))))]))
+       (define one-dimensional? (= (array-dims a) 1))
+       (define (index [k : Integer]) (assert k index?))
+       (cond
+         [(and one-dimensional? (array-strict? a))
+          (lambda (i j) (proc (vector-immutable (index j))))]
+         [one-dimensional? (lambda (i j) (proc (vector (index j))))]
+         [(array-strict? a) (lambda (i j) (proc (vector-immutable (index i) (index j))))]
+         [else (lambda (i j) (proc (vector (index i) (index j))))])]))
 
-  (: matrix-flonums (-> Any Storage Symbol FlVector))
-  (define (matrix-flonums M storage who)
+  ;; The shape of a matrix, or of a one-dimensional array read as one row.
+  (: rows+columns (-> (Array Any) (Values Index Index)))
+  (define (rows+columns a)
+    (define ds (array-shape a))
+    (if (= (vector-length ds) 1)
+        (values 1 (vector-ref ds 0))
+        (values (vector-ref ds 0) (vector-ref ds 1))))
+
+  (: matrix->f64vector (-> Any Storage (U #f (Listof String)) Symbol F64Vector))
+  (define (matrix->f64vector M storage names who)
     (define a (assert M array?))
-    (define n (vector-ref (array-shape a) 1))
-    (define ref (element-reader a storage))
-    (define size (shape-size a))
-    (define out (make-flvector size))
-    (for ([k (in-range size)])
-      (define x (ref k))
-      (unless (real? x) (matrix-element-error who "not a real number" x k n))
-      (define v (real->double-flonum x))
-      (unless (fl< (flabs v) +inf.0) (matrix-element-error who "not finite" x k n))
-      (flvector-set! out k v))
+    (define-values (m n) (rows+columns a))
+    (define ref (element-reader a storage n))
+    (define labels (and names (list->vector names)))
+    (define out (make-f64vector (* m n)))
+    (for* ([i (in-range m)]
+           [j (in-range n)])
+      (define x (ref i j))
+      (f64vector-set! out (+ i (* j m))
+                      (if (and (flonum? x) (fl< (flabs x) +inf.0))
+                          x
+                          (->finite-flonum x who "the matrix" i
+                                           (if labels (vector-ref labels j) j)))))
     out)
 
-  (: matrix-element-error (-> Symbol String Any Integer Integer Nothing))
-  (define (matrix-element-error who problem x k n)
-    (raise-arguments-error who (string-append "the matrix has an element that is " problem)
-                           "row" (quotient k n) "column" (remainder k n) "element" x))
-
-  (: array-response (-> Any Storage Symbol (Listof Real)))
-  (define (array-response A storage who)
+  (: array->real-list (-> Any Storage Symbol (Listof Real)))
+  (define (array->real-list A storage who)
     (define a (assert A array?))
-    (define ref (element-reader a storage))
-    (for/list : (Listof Real) ([k (in-range (shape-size a))])
-      (define x (ref k))
-      (unless (real? x) (response-element-error who "not a real number" x k))
-      (define v (real->double-flonum x))
-      (unless (fl< (flabs v) +inf.0) (response-element-error who "not finite" x k))
+    (define-values (m n) (rows+columns a))
+    (define ref (element-reader a storage n))
+    (for*/list : (Listof Real) ([i (in-range m)]
+                                [j (in-range n)])
+      (define x (ref i j))
+      (define k (+ (* i n) j))
+      (unless (real? x)
+        (element-error who "the response" "not a real number" x #:position k))
+      (unless (fl< (flabs (real->double-flonum x)) +inf.0)
+        (element-error who "the response" "not finite" x #:position k))
       x))
-
-  (: response-element-error (-> Symbol String Any Integer Nothing))
-  (define (response-element-error who problem x k)
-    (raise-arguments-error who (string-append "the response has an element that is " problem)
-                           "position" k "element" x))
 
   (: row-major->flarray (-> FlVector Index Index FlArray))
   (define (row-major->flarray data m n)
@@ -112,24 +102,25 @@
 
 (define matrix/c (flat-named-contract '(and/c array? matrix?) (and/c array? matrix?)))
 
+(define (response-array? A)
+  (and (array? A)
+       (or (row-matrix? A)
+           (col-matrix? A)
+           (let ([ds (array-shape A)])
+             (and (= (vector-length ds) 1) (positive? (vector-ref ds 0)))))))
+
 (define response-array/c
-  (flat-contract-with-explanation
-   (lambda (v)
-     (or (response-array? v)
-         (lambda (blame)
-           (raise-blame-error
-            blame v
-            '(expected: "a one-dimensional array, a row matrix or a column matrix, not empty"
-              given: "~e")
-            v))))
-   #:name 'response-array/c))
+  (flat-named-contract
+   '(and/c array?
+           (or/c row-matrix? col-matrix? (property/c array-shape (vector/c exact-positive-integer?))))
+   response-array?))
 
 (provide
  (contract-out
   [matrix->design-matrix
    (->* (matrix/c) (#:column-names column-names/c) design-matrix?)]
   [design-matrix->matrix (-> design-matrix? matrix/c)]
-  [array->response (-> response-array/c (listof real?))]))
+  [array->response (-> response-array/c (and/c (listof real?) pair?))]))
 
 (define (array-storage a)
   (cond
@@ -141,11 +132,10 @@
   (define who 'matrix->design-matrix)
   (define-values (m n) (matrix-shape M))
   (define storage (array-storage M))
-  (flat->design-matrix
-   (if (and (flvector? storage) (= (flvector-length storage) (* m n)))
-       storage
-       (matrix-flonums M storage who))
-   m n names who "the matrix" #:order 'row-major))
+  (if (and (flvector? storage) (= (flvector-length storage) (* m n)))
+      (flat->design-matrix storage m n names who "the matrix" #:order 'row-major)
+      (flat->design-matrix (matrix->f64vector M storage (check-column-names names n who) who)
+                           m n names who "the matrix" #:adopt? #t)))
 
 (define (design-matrix->matrix dm)
   (define v (design-matrix-data dm))
@@ -158,4 +148,4 @@
   (row-major->flarray rows m n))
 
 (define (array->response A)
-  (array-response A (array-storage A) 'array->response))
+  (array->real-list A (array-storage A) 'array->response))

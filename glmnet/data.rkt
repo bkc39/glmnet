@@ -80,6 +80,10 @@
 ;;     x as a flonum; otherwise element-error at row i and column c.
 ;;   (default-column-names n)
 ;;     R's names for the columns of an unnamed matrix: "V1" ... "Vn".
+;;   (check-column-names names ncols who)
+;;     names (#f, or one distinct name per column) as strings, or #f: the
+;;     check flat->design-matrix makes, for a format that labels its element
+;;     errors by name before it has a design matrix.
 (module* support #f
   (provide design-matrix-data
            design-matrix-nrows
@@ -102,6 +106,7 @@
            missing-error
            ->finite-flonum
            default-column-names
+           check-column-names
            (contract-out
             [flat->design-matrix
              (->i ([v (or/c flvector? f64vector?)]
@@ -285,16 +290,18 @@
 ;; The column names as immutable strings, or #f, after checking that there is
 ;; one per column and that they are distinct as strings.
 (define (check-column-names names ncols who)
-  (and names
-       (let ([strings (map column-name->string names)])
-         (unless (= (length strings) ncols)
-           (raise-arguments-error who "the number of column names does not match the columns"
-                                  "column names" (length strings) "columns" ncols))
-         (define dup (check-duplicates names #:key column-name->string))
-         (when dup
-           (raise-arguments-error who "the column names are not distinct"
-                                  "duplicate" dup "column names" names))
-         strings)))
+  (cond
+    [names
+     (define strings (map column-name->string names))
+     (unless (= (length strings) ncols)
+       (raise-arguments-error who "the number of column names does not match the columns"
+                              "column names" (length strings) "columns" ncols))
+     (define dup (check-duplicates names #:key column-name->string))
+     (when dup
+       (raise-arguments-error who "the column names are not distinct"
+                              "duplicate" dup "column names" names))
+     strings]
+    [else #f]))
 
 (define (default-column-names n)
   (for/list ([j (in-range n)])
@@ -388,11 +395,6 @@
     (element-error who what "not finite" x
                    #:row i #:column (if checked-names (list-ref checked-names j) j)))
   (define n (* nrows ncols))
-  ;; The column-major position of entry k of v.
-  (define (target k)
-    (if row-major?
-        (let-values ([(i j) (quotient/remainder k ncols)]) (+ i (* j nrows)))
-        k))
   (define data
     (cond
       [adopt?
@@ -402,12 +404,18 @@
        v]
       [else
        (define out (make-f64vector n))
-       (define (store! k x)
+       (define fl? (flvector? v))
+       ;; Entry k of v goes to position to of the column-major out.
+       (define (copy! k to)
+         (define x (if fl? (flvector-ref v k) (f64vector-ref v k)))
          (unless (fl< (flabs x) +inf.0) (not-finite k x))
-         (f64vector-set! out (target k) x))
-       (if (flvector? v)
-           (for ([x (in-flvector v)] [k (in-naturals)]) (store! k x))
-           (for ([k (in-range n)]) (store! k (f64vector-ref v k))))
+         (f64vector-set! out to x))
+       (if row-major?
+           (for* ([i (in-range nrows)]
+                  [j (in-range ncols)])
+             (copy! (+ (* i ncols) j) (+ i (* j nrows))))
+           (for ([k (in-range n)])
+             (copy! k k)))
        out]))
   (design-matrix data nrows ncols checked-names))
 
