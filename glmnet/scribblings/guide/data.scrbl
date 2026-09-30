@@ -77,7 +77,8 @@ in a sparse matrix, and here they are dense, until sparse input is supported
 (@hyperlink["https://github.com/bkc39/glmnet/issues/11"]{#11}).
 
 @racket[mtcars] and @racket[iris] are tables, as R's are data frames, whose
-columns are vectors:
+columns are vectors. Every module that uses them shares them, so the vectors
+are immutable:
 
 @examples[#:eval ev #:label #f
 (table-column-names mtcars)
@@ -191,7 +192,8 @@ The input must be UTF-8. A file in another encoding, such as the Windows-1252
 that Excel writes on Windows, is an error that names the line and the byte
 where it stops being UTF-8, rather than strings with characters replaced.
 
-A missing cell, an empty one or R's @tt{NA}, is an error that names the
+A missing cell, an empty one, one of white space or R's @tt{NA}, is an
+error that names the
 column, the row and the line of the file; nothing is dropped or filled in:
 
 @examples[#:eval ev #:label #f
@@ -268,8 +270,8 @@ or a mutable array, from @racket[vector->matrix], is copied straight from the
 vector that holds its elements. Any other array is read one element at a time,
 through the contract that the Typed Racket library puts on each array it
 returns to untyped code, which makes a large matrix several times slower to
-convert, and a lazy one, made while @racket[array-strictness] is @racket[#f],
-slower still. Converting once and passing the design matrix to every fit pays
+convert, and a lazy one, made while @racket[array-strictness] is @racket[#f]
+or returned by @racket[array-broadcast] or @racket[array-lazy], slower still. Converting once and passing the design matrix to every fit pays
 that cost once.
 
 @(close-eval math-ev)
