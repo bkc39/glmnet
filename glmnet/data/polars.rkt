@@ -1,23 +1,19 @@
 #lang racket/base
 
-;; The rkt-polars adapter (#40): Polars dataframes to and from design
-;; matrices, responses and tables. A design matrix comes out of Polars' bulk
-;; column-major export, dataframe->f64vector, and is adopted without a copy.
-;; `(require glmnet)` does not load this module, so it does not load Polars.
-
 (require racket/contract
          racket/list
          racket/match
          ffi/vector
          (only-in polars
-                  dataframe dataframe? series series? series-name
+                  dataframe dataframe? series
                   dataframe->f64vector dataframe->columns series->list in-series
-                  column-names height ref len dtype null-count polars-null?)
+                  column-names height ref dtype null-count polars-null?)
          (only-in "../data.rkt" design-matrix? design-matrix-column-names table?
                   table-column-names)
          (only-in (submod "../data.rkt" support)
                   design-matrix-data design-matrix-nrows design-matrix-ncols
-                  column-name->string select-table-values flat->design-matrix))
+                  column-name->string select-table-values flat->design-matrix
+                  element-error missing-error default-column-names))
 
 (define column-name/c (or/c string? symbol?))
 
@@ -27,16 +23,23 @@
    (->i ([df (and/c dataframe? dataframe-with-rows/c)]
          [columns (df) (frame-columns/c df numeric-dtype? "numeric")])
         [result design-matrix?])]
-  [design-matrix->polars (-> design-matrix? dataframe?)]
+  [design-matrix->polars
+   (->i ([dm design-matrix?])
+        (#:column-names [names (dm) (column-names-for/c (design-matrix-ncols dm))])
+        [result dataframe?])]
   [polars->response
-   (-> (and/c series? numeric-series/c)
-       (and/c (listof real?) pair?))]
+   (->i ([df (and/c dataframe? dataframe-with-rows/c)]
+         [column (df) (frame-column/c df numeric-dtype? "numeric")])
+        [result (and/c (listof real?) pair?)])]
   [polars->table
-   (->i ([df dataframe?])
-        ([columns (df) (frame-columns/c df table-dtype? "numeric, boolean, string or categorical")])
+   (->i ([df (and/c dataframe? dataframe-with-rows/c)])
+        ([columns (df) (frame-columns/c df table-dtype? table-dtypes)])
+        #:pre/desc (df columns) (or (not (unsupplied-arg? columns)) (whole-frame-problem df))
         [result table?])]
   [table->polars
-   (->* (table?) ((and/c (listof column-name/c) pair?)) dataframe?)]))
+   (->i ([t table?])
+        ([columns (t) (table-columns/c t)])
+        [result dataframe?])]))
 
 ;; --- dtypes --------------------------------------------------------------------
 
@@ -47,81 +50,119 @@
   (and (memq d '(float32 float64)) #t))
 
 ;; The dtypes whose values a table holds: numbers, booleans, strings, and the
-;; symbols that series->vector makes of a categorical or enum column.
+;; symbols that dataframe->columns makes of a categorical or enum column.
 (define (table-dtype? d)
   (match d
     [(or 'boolean 'string 'categorical (cons 'enum _)) #t]
     [_ (numeric-dtype? d)]))
 
+(define table-dtypes "numeric, boolean, string, categorical or enum")
+
 ;; --- contracts -----------------------------------------------------------------
+
+(define ((explain v expected given . args) blame)
+  (apply raise-blame-error blame v (list 'expected: expected 'given: given) args))
 
 (define dataframe-with-rows/c
   (flat-contract-with-explanation
    (lambda (df)
      (or (positive? (height df))
-         (lambda (blame)
-           (raise-blame-error blame df '(expected: "a dataframe with at least one row"
-                                         given: "a dataframe with no rows")))))
+         (explain df "a dataframe with at least one row" "a dataframe with no rows")))
    #:name 'dataframe-with-rows/c))
 
-(define numeric-series/c
-  (flat-contract-with-explanation
-   (lambda (s)
-     (cond
-       [(not (numeric-dtype? (dtype s)))
-        (lambda (blame)
-          (raise-blame-error blame s '(expected: "a numeric series" given: "~s, of dtype ~s")
-                             (series-name s) (dtype s)))]
-       [(zero? (len s))
-        (lambda (blame)
-          (raise-blame-error blame s '(expected: "a series with at least one element"
-                                       given: "~s, which is empty")
-                             (series-name s)))]
-       [else #t]))
-   #:name 'numeric-series/c))
+;; What is wrong with the column name `s` (a string) of the `what` ("dataframe"
+;; or "table") whose columns are `present`, as a string for a blame error's
+;; given: field; #f when nothing is. `problem` is #f for a column it accepts,
+;; or what is wrong with it.
+(define (column-problem s what present problem)
+  (cond
+    [(not (member s present))
+     (format "~s, which is not a column of the ~a; its columns are ~s" s what present)]
+    [(problem s) => (lambda (p) (format "column ~s, ~a" s p))]
+    [else #f]))
 
-;; What is wrong with `names` as a list of columns of df whose dtypes satisfy
-;; `accepts?`, as a string for a blame error's given: field, or #f.
-(define (column-list-problem df names accepts?)
-  (define present (column-names df))
-  (let loop ([names names] [seen '()])
-    (match names
-      ['() #f]
-      [(cons name rest)
-       (define s (column-name->string name))
-       (cond
-         [(not (member s present))
-          (format "~s, which is not a column of the dataframe; its columns are ~s" s present)]
-         [(member s seen) (format "~s twice" s)]
-         [(not (accepts? (dtype (ref df s))))
-          (format "column ~s, of dtype ~s" s (dtype (ref df s)))]
-         [else (loop rest (cons s seen))])])))
-
-;; A non-empty list of distinct names of columns of df, each with a dtype that
-;; `accepts?`, which `kind` describes.
-(define (frame-columns/c df accepts? kind)
-  (define expected
-    (format "a non-empty list of distinct names of ~a columns of the dataframe" kind))
+;; A non-empty list of distinct column names, each without a problem.
+(define (column-list/c expected what present problem)
   (flat-contract-with-explanation
    (lambda (names)
-     (define problem
-       (if (and (list? names) (pair? names) (andmap column-name/c names))
-           (column-list-problem df names accepts?)
-           (format "~e" names)))
-     (or (not problem)
-         (lambda (blame)
-           (raise-blame-error blame names '(expected: "~a" given: "~a") expected problem))))
-   #:name 'frame-columns/c))
+     (define given
+       (cond
+         [(not (and (list? names) (pair? names) (andmap column-name/c names)))
+          (format "~e" names)]
+         [(check-duplicates names #:key column-name->string)
+          => (lambda (name) (format "~s twice" (column-name->string name)))]
+         [else
+          (for/or ([name (in-list names)])
+            (column-problem (column-name->string name) what present problem))]))
+     (or (not given) (explain names "~a" "~a" expected given)))
+   #:name '(and/c (listof (or/c string? symbol?)) pair?)))
 
-;; --- nulls and non-finite values -------------------------------------------------
+;; What is wrong with column `name` of df when its dtype must satisfy
+;; `accepts?`, or #f.
+(define ((dtype-problem df accepts?) name)
+  (define d (dtype (ref df name)))
+  (and (not (accepts? d)) (format "of dtype ~s" d)))
 
-(define (first-null-row s)
-  (for/first ([x (in-series s)] [i (in-naturals)] #:when (polars-null? x)) i))
+;; A non-empty list of distinct names of columns of df whose dtypes satisfy
+;; `accepts?`, which `kind` describes.
+(define (frame-columns/c df accepts? kind)
+  (column-list/c (format "a non-empty list of distinct names of ~a columns of the dataframe" kind)
+                 "dataframe" (column-names df) (dtype-problem df accepts?)))
 
-(define (check-no-null who what s)
+;; The name of one column of df whose dtype satisfies `accepts?`.
+(define (frame-column/c df accepts? kind)
+  (define expected (format "the name of a ~a column of the dataframe" kind))
+  (define present (column-names df))
+  (flat-contract-with-explanation
+   (lambda (name)
+     (define given
+       (if (column-name/c name)
+           (column-problem (column-name->string name) "dataframe" present
+                           (dtype-problem df accepts?))
+           (format "~e" name)))
+     (or (not given) (explain name "~a" "~a" expected given)))
+   #:name '(or/c string? symbol?)))
+
+;; A non-empty list of distinct names of the table's columns.
+(define (table-columns/c t)
+  (column-list/c "a non-empty list of distinct names of columns of the table"
+                 "table" (table-column-names t) (lambda (name) #f)))
+
+;; `ncols` distinct names, strings or symbols.
+(define (column-names-for/c ncols)
+  (flat-contract-with-explanation
+   (lambda (names)
+     (define expected (format "~a distinct column names, strings or symbols" ncols))
+     (cond
+       [(not (and (list? names) (andmap column-name/c names)))
+        (explain names "~a" "~e" expected names)]
+       [(not (= (length names) ncols))
+        (explain names "~a" "~a names: ~e" expected (length names) names)]
+       [(check-duplicates names #:key column-name->string)
+        => (lambda (name) (explain names "~a" "~s twice" expected (column-name->string name)))]
+       [else #t]))
+   #:name '(listof (or/c string? symbol?))))
+
+;; Why df as a whole cannot be a table, for polars->table's precondition.
+(define (whole-frame-problem df)
+  (define names (column-names df))
+  (cond
+    [(null? names) (list "the dataframe has no columns")]
+    [(for/first ([name (in-list names)]
+                 #:unless (table-dtype? (dtype (ref df name))))
+       name)
+     => (lambda (name)
+          (list (format "every column of the dataframe must be ~a" table-dtypes)
+                (format "column ~s has dtype ~s" name (dtype (ref df name)))))]
+    [else #t]))
+
+;; --- missing and non-finite values -------------------------------------------------
+
+(define (check-no-null who s name)
   (unless (zero? (null-count s))
-    (raise-arguments-error who (format "~a has a null" what)
-                           "column" (series-name s) "row" (first-null-row s))))
+    (missing-error who "the dataframe"
+                   #:row (for/first ([x (in-series s)] [i (in-naturals)] #:when (polars-null? x)) i)
+                   #:column name)))
 
 ;; --- polars -> glmnet ------------------------------------------------------------
 
@@ -129,50 +170,37 @@
   (define who 'polars->design-matrix)
   (define names (map column-name->string columns))
   (for ([name (in-list names)])
-    (check-no-null who "the dataframe" (ref df name)))
-  (define-values (v nrows _ncols) (dataframe->f64vector df #:columns names #:null 'error))
-  (flat->design-matrix v nrows (length names) names who "the dataframe" #:adopt? #t))
+    (check-no-null who (ref df name) name))
+  (define-values (v nrows ncols) (dataframe->f64vector df #:columns names #:null 'error))
+  (flat->design-matrix v nrows ncols names who "the dataframe" #:adopt? #t))
 
-(define (polars->response s)
+(define (polars->response df column)
   (define who 'polars->response)
-  (check-no-null who "the series" s)
+  (define name (column-name->string column))
+  (define s (ref df name))
+  (check-no-null who s name)
   (define ys (series->list s))
   (when (float-dtype? (dtype s))
     (for ([y (in-list ys)] [i (in-naturals)])
       (unless (< (abs y) +inf.0)
-        (raise-arguments-error who "the series has an element that is not finite"
-                               "column" (series-name s) "row" i "element" y))))
+        (element-error who "the dataframe" "not finite" y #:row i #:column name))))
   ys)
 
-(define (polars->table df [columns #f])
+(define (polars->table df [columns (column-names df)])
   (define who 'polars->table)
-  (define names (if columns (map column-name->string columns) (all-table-columns who df)))
+  (define names (map column-name->string columns))
   (for ([name (in-list names)])
-    (check-no-null who "the dataframe" (ref df name)))
+    (check-no-null who (ref df name) name))
   (dataframe->columns df #:columns names))
-
-;; Every column of df, the columns polars->table converts when it is given
-;; none, each of which must have a dtype that a table holds.
-(define (all-table-columns who df)
-  (define names (column-names df))
-  (when (null? names)
-    (raise-arguments-error who "the dataframe has no columns"))
-  (for ([name (in-list names)])
-    (define d (dtype (ref df name)))
-    (unless (table-dtype? d)
-      (raise-arguments-error who "the dataframe has a column whose dtype a table cannot hold"
-                             "column" name "dtype" d)))
-  names)
 
 ;; --- glmnet -> polars ------------------------------------------------------------
 
-(define (design-matrix->polars dm)
+(define (design-matrix->polars dm
+                               #:column-names
+                               [names (or (design-matrix-column-names dm)
+                                          (default-column-names (design-matrix-ncols dm)))])
   (define v (design-matrix-data dm))
   (define no (design-matrix-nrows dm))
-  (define names
-    (or (design-matrix-column-names dm)
-        (for/list ([j (in-range (design-matrix-ncols dm))])
-          (format "column_~a" j))))
   (dataframe
    (for/list ([name (in-list names)] [j (in-naturals)])
      (define from (* j no))
@@ -180,12 +208,25 @@
              #:name (column-name->string name)
              #:dtype 'float64))))
 
-;; What a table's value is to Polars, or #f for a value no dtype holds.
+;; What a table's value is to Polars: a kind of number, boolean, string or
+;; symbol; #f for a value that no dtype holds. An exact integer is 'natural
+;; (0 to 2^63 - 1), 'integer (negative, down to -2^63) or 'large (2^63 to
+;; 2^64 - 1).
+(define int64-min (- (expt 2 63)))
+(define uint64-min (expt 2 63))
+(define uint64-limit (expt 2 64))
+
 (define (value-kind x)
   (cond
     [(flonum? x) 'real]
-    [(fixnum? x) 'integer]
-    [(exact-integer? x) (if (<= (- (expt 2 63)) x (sub1 (expt 2 63))) 'integer 'real)]
+    [(exact-integer? x)
+     (cond
+       [(fixnum? x) (if (negative? x) 'integer 'natural)]
+       [(< x int64-min) #f]
+       [(negative? x) 'integer]
+       [(< x uint64-min) 'natural]
+       [(< x uint64-limit) 'large]
+       [else #f])]
     [(real? x) 'real]
     [(boolean? x) 'boolean]
     [(string? x) 'string]
@@ -193,27 +234,42 @@
     [else #f]))
 
 ;; The kind of a column with values of kinds a and b, or #f when no dtype
-;; holds both: integers widen to reals, and symbols to strings.
+;; holds both: naturals widen to integers or to large ones, and symbols to
+;; strings. Integers and large ones together are a 'conflict, which no integer
+;; dtype holds, and any number with a real is a real. The join does not
+;; depend on the order of the values.
 (define (join-kinds a b)
   (match* (a b)
     [(k k) k]
-    [((or 'integer 'real) (or 'integer 'real)) 'real]
+    [('natural (or 'integer 'large 'conflict 'real)) b]
+    [((or 'integer 'large 'conflict 'real) 'natural) a]
+    [((or 'integer 'large 'conflict) (or 'integer 'large 'conflict)) 'conflict]
+    [((or 'integer 'large 'conflict 'real) (or 'integer 'large 'conflict 'real)) 'real]
     [((or 'string 'symbol) (or 'string 'symbol)) 'string]
     [(_ _) #f]))
 
 (define kind-dtypes
-  (hasheq 'integer 'int64 'real 'float64 'boolean 'boolean 'string 'string 'symbol 'categorical))
+  (hasheq 'natural 'int64 'integer 'int64 'large 'uint64 'real 'float64
+          'boolean 'boolean 'string 'string 'symbol 'categorical))
 
-;; A table's column, its values `xs` a vector, as a series with the dtype
-;; its values call for.
+;; A table's column, its values `xs` a vector, as a series with the dtype its
+;; values call for.
 (define (column->series who name xs)
-  (define kind
-    (for/fold ([kind (value-kind (vector-ref xs 0))])
+  (define (no-dtype i)
+    (raise-arguments-error who "the table has a column whose values no Polars dtype holds"
+                           "column" name "row" i "element" (vector-ref xs i)))
+  (define-values (kind conflict-row)
+    (for/fold ([kind (value-kind (vector-ref xs 0))]
+               [conflict-row #f])
               ([x (in-vector xs)] [i (in-naturals)])
       (define k (value-kind x))
-      (or (if (eq? k kind) k (and kind k (join-kinds kind k)))
-          (raise-arguments-error who "the table has a column whose values no Polars dtype holds"
-                                 "column" name "row" i "element" x))))
+      (cond
+        [(and k (eq? k kind)) (values kind conflict-row)]
+        [else
+         (define joined (or (and kind k (join-kinds kind k)) (no-dtype i)))
+         (values joined (or conflict-row (and (eq? joined 'conflict) i)))])))
+  (when (eq? kind 'conflict)
+    (no-dtype conflict-row))
   (define entries
     (if (eq? kind 'string)
         (for/vector #:length (vector-length xs) ([x (in-vector xs)])
@@ -224,9 +280,6 @@
 (define (table->polars t [columns (table-column-names t)])
   (define who 'table->polars)
   (define names (map column-name->string columns))
-  (define dup (check-duplicates names))
-  (when dup
-    (raise-arguments-error who "a column is named twice" "name" dup))
   (dataframe
    (for/list ([name (in-list names)]
               [xs (in-list (select-table-values t names who))])

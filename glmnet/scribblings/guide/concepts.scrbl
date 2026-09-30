@@ -2,7 +2,6 @@
 @(require "../utils.rkt")
 
 @(define ev (make-glmnet-eval))
-@(ev `(define iris-csv ,(path->string (collection-file-path "iris.csv" "glmnet" "datasets"))))
 
 @title[#:tag "concepts" #:style 'toc]{Concepts}
 
@@ -180,50 +179,6 @@ The model keys its coefficients by name, and predicts from a table by
 matching its columns by name. @secref["formulas"] covers tables, formulas and
 the models fitted from them, and @secref["data"] where data comes from: R
 glmnet's example datasets and CSV files.
-
-@subsection[#:tag "concepts-polars"]{Polars dataframes}
-
-@see-reference["ref-data-polars"]{the conversions}
-
-@racketmodname[glmnet/data/polars] converts between the dataframes of
-@racketmodname[polars] and glmnet's data. Reading a file with Polars'
-@racket[read-csv] and converting it is the fast way to fit real data: the
-predictors leave Polars in one bulk copy, already in the column-major layout,
-and become a design matrix without another. Here @racketid[iris-csv] is the path
-of @filepath{glmnet/datasets/iris.csv}, R's @tt{iris}:
-
-@examples[#:eval ev #:label #f
-(require glmnet/data/polars
-         (only-in polars read-csv ref column-names))
-(define flowers (read-csv iris-csv))
-(column-names flowers)
-(define measures
-  (polars->design-matrix flowers '("Sepal.Width" "Petal.Length" "Petal.Width")))
-(design-matrix-column-names measures)
-(define sepal-length (polars->response (ref flowers "Sepal.Length")))
-(elnet-result-coefficients (lasso measures sepal-length #:lambda 0.01))
-]
-
-A formula fits from a dataframe once it is a @tech{table}, which
-@racket[polars->table] makes of it. Its string column, @racket["Species"], is
-a factor:
-
-@examples[#:eval ev #:label #f
-(define flower-model
-  (formula-fit (Sepal.Length . ~ . Petal.Width + Species) (polars->table flowers)
-               #:lambda 0.01))
-(coef flower-model)
-]
-
-A null, a column that is not numeric where numbers are needed, and a value
-that is not finite are errors that name the column, and the row or the dtype.
-@racket[design-matrix->polars] and @racket[table->polars] convert back:
-
-@examples[#:eval ev #:label #f
-(design-matrix->polars (design-matrix-select-rows measures '(0 50 100)))
-(table->polars (list (cons "y" '(1.5 2.5)) (cons "group" '("a" "b"))))
-(eval:error (polars->design-matrix flowers '("Petal.Width" "Species")))
-]
 
 @section[#:tag "concepts-penalty"]{The penalty: @math{α} and @math{λ}}
 

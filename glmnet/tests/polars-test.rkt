@@ -1,12 +1,7 @@
 #lang racket/base
 
-;; The rkt-polars adapter (#40), glmnet/data/polars. Every family fits,
-;; predicts and cross-validates `equal?` from a Polars dataframe and from the
-;; same data as lists; formulas fit from a dataframe as from the table it came
-;; from; conversions keep values, names and dtypes; a null, a non-numeric
-;; column or a non-finite value is an error naming the column and the row; and
-;; `(require glmnet)` does not load Polars. The frames are built with Polars'
-;; own `series`, not with the adapter.
+;; glmnet/data/polars. The frames are built with Polars' own `series`, not
+;; with the adapter.
 
 (module+ test
   (require rackunit
@@ -18,6 +13,7 @@
                     polars-null)
            glmnet
            glmnet/data/polars
+           (only-in (submod glmnet/data support) design-matrix-data)
            (only-in glmnet/datasets mtcars [iris iris-species])
            (file "../private/demo-utils.rkt"))
 
@@ -69,8 +65,8 @@
   (test-case "a null is an error naming its column and row"
     (define gappy (dataframe (list (series '(1.0 2.0 3.0) #:name "a")
                                    (series (list 1 2 polars-null) #:name "b"))))
-    (check-exn (error-matching #rx"^polars->design-matrix: the dataframe has a null"
-                               #rx"column: \"b\"" #rx"row: 2")
+    (check-exn (error-matching #rx"^polars->design-matrix: the dataframe has a missing value"
+                               #rx"column: \"b\"\n  row: 2$")
                (lambda () (polars->design-matrix gappy '("a" "b"))))
     (check-equal? (design-matrix->rows (polars->design-matrix gappy '("a")))
                   '((1.0) (2.0) (3.0))))
@@ -79,8 +75,28 @@
     (define bad (dataframe (list (series '(1.0 2.0 3.0) #:name "a")
                                  (series '(1.0 +inf.0 +nan.0) #:name "b"))))
     (check-exn (error-matching #rx"^polars->design-matrix: the dataframe has an element that is not finite"
-                               #rx"column: \"b\"" #rx"row: 1" #rx"element: [+]inf[.]0")
+                               #rx"column: \"b\"\n  row: 1\n  element: [+]inf[.]0$")
                (lambda () (polars->design-matrix bad '("a" "b")))))
+
+  (test-case "extreme values and -0.0 convert bit for bit, both ways"
+    (define xs (list -0.0 0.0 5e-324 -5e-324 2.2250738585072014e-308 1.7976931348623157e308
+                     -1.7976931348623157e308 0.1 (/ 1.0 3.0)))
+    (define df (dataframe (list (series xs #:name "x") (series (reverse xs) #:name "y"))))
+    (define dm (polars->design-matrix df '(y x)))
+    (check-equal? dm (rows->design-matrix (map list (reverse xs) xs) #:column-names '("y" "x")))
+    (check-equal? (polars->design-matrix (design-matrix->polars dm) '("y" "x")) dm)
+    (check-eqv? (car (series->list (ref (design-matrix->polars dm) "x"))) -0.0))
+
+  (test-case "the design matrix does not share memory with the dataframe"
+    (define df (dataframe (list (series '(1.0 2.0 3.0) #:name "a")
+                                (series '(4 5 6) #:name "b"))))
+    (define dm (polars->design-matrix df '("a" "b")))
+    (f64vector-set! (design-matrix-data dm) 0 99.0)
+    (f64vector-set! (design-matrix-data dm) 3 99.0)
+    (check-equal? (series->list (ref df "a")) '(1.0 2.0 3.0))
+    (check-equal? (series->list (ref df "b")) '(4 5 6))
+    (check-equal? (design-matrix->rows (polars->design-matrix df '("a" "b")))
+                  '((1.0 4.0) (2.0 5.0) (3.0 6.0))))
 
   (test-case "a column that is not numeric breaks the contract, naming it and its dtype"
     (check-exn (blame-matching #rx"numeric columns" #rx"column \"g\", of dtype string")
@@ -110,30 +126,53 @@
     (check-equal? (polars->design-matrix df '("x" "y"))
                   (rows->design-matrix '((1 2) (3 4) (5 6)) #:column-names '("x" "y"))))
 
-  (test-case "an unnamed design matrix gets Polars' default column names"
-    (define df (design-matrix->polars (columns->design-matrix '((1 2) (3 4) (5 6)))))
-    (check-equal? (column-names df) '("column_0" "column_1" "column_2"))
+  (test-case "an unnamed design matrix gets R's column names, V1 to Vn"
+    (define dm (columns->design-matrix '((1 2) (3 4) (5 6))))
+    (define df (design-matrix->polars dm))
+    (check-equal? (column-names df) '("V1" "V2" "V3"))
     (check-equal? (height df) 2))
+
+  (test-case "#:column-names names the columns, and is checked by contract"
+    (define dm (rows->design-matrix '((1 2) (3 4)) #:column-names '("a" "b")))
+    (check-equal? (column-names (design-matrix->polars dm #:column-names '(x "y"))) '("x" "y"))
+    (check-exn (blame-matching #rx"2 distinct column names" #rx"1 names")
+               (lambda () (design-matrix->polars dm #:column-names '("x"))))
+    (check-exn (blame-matching #rx"\"x\" twice")
+               (lambda () (design-matrix->polars dm #:column-names '("x" x))))
+    (check-exn (blame-matching #rx"2 distinct column names")
+               (lambda () (design-matrix->polars dm #:column-names '(1 2)))))
 
   ;; --- polars->response -----------------------------------------------------------
 
+  (define (frame-of . columns) (dataframe columns))
+
   (test-case "a response keeps integers exact and floats as flonums"
-    (check-equal? (polars->response (series '(0 1 2) #:name "y")) '(0 1 2))
-    (check-equal? (polars->response (series '(1 2) #:name "y" #:dtype 'uint8)) '(1 2))
-    (check-equal? (polars->response (series '(0.5 1.5) #:name "y")) '(0.5 1.5)))
+    (define df (frame-of (series '(0 1 2) #:name "i")
+                         (series '(1 2 3) #:name "u" #:dtype 'uint8)
+                         (series '(0.5 1.5 2.5) #:name "f")))
+    (check-equal? (polars->response df "i") '(0 1 2))
+    (check-equal? (polars->response df 'u) '(1 2 3))
+    (check-equal? (polars->response df "f") '(0.5 1.5 2.5)))
 
-  (test-case "a null or non-finite response element is an error naming the row"
-    (check-exn (error-matching #rx"^polars->response: the series has a null"
-                               #rx"column: \"y\"" #rx"row: 1")
-               (lambda () (polars->response (series (list 1.0 polars-null) #:name "y"))))
-    (check-exn (error-matching #rx"not finite" #rx"column: \"y\"" #rx"row: 2")
-               (lambda () (polars->response (series '(1.0 2.0 +nan.0) #:name "y")))))
+  (test-case "a missing or non-finite response element is an error naming column and row"
+    (check-exn (error-matching #rx"^polars->response: the dataframe has a missing value"
+                               #rx"column: \"y\"\n  row: 1$")
+               (lambda () (polars->response (frame-of (series (list 1.0 polars-null) #:name "y"))
+                                            "y")))
+    (check-exn (error-matching #rx"^polars->response: the dataframe has an element that is not finite"
+                               #rx"column: \"y\"\n  row: 2\n  element: [+]nan[.]0$")
+               (lambda () (polars->response (frame-of (series '(1.0 2.0 +nan.0) #:name "y")) "y"))))
 
-  (test-case "a response that is not numeric, or empty, breaks the contract"
-    (check-exn (blame-matching #rx"a numeric series" #rx"\"y\", of dtype string")
-               (lambda () (polars->response (series '("a") #:name "y"))))
-    (check-exn (blame-matching #rx"at least one element")
-               (lambda () (polars->response (head (series '(1) #:name "y") 0)))))
+  (test-case "a response column that is not numeric, unknown, or in no rows breaks the contract"
+    (define df (frame-of (series '("a") #:name "s") (series '(1.0) #:name "y")))
+    (check-exn (blame-matching #rx"the name of a numeric column" #rx"column \"s\", of dtype string")
+               (lambda () (polars->response df "s")))
+    (check-exn (blame-matching #rx"\"z\", which is not a column of the dataframe")
+               (lambda () (polars->response df "z")))
+    (check-exn (blame-matching #rx"at least one row")
+               (lambda () (polars->response (head df 0) "y")))
+    (check-exn (blame-matching #rx"the name of a numeric column")
+               (lambda () (polars->response df 1))))
 
   ;; --- tables ---------------------------------------------------------------------
 
@@ -148,20 +187,33 @@
     (check-equal? t '(("n" . #(1 2)) ("s" . #("a" "b")) ("b" . #(#t #f)) ("c" . #(x y))))
     (check-equal? (polars->table with-cat '(c "n")) '(("c" . #(x y)) ("n" . #(1 2)))))
 
-  (test-case "a table refuses nulls and dtypes it cannot hold"
-    (check-exn (error-matching #rx"^polars->table: the dataframe has a null"
-                               #rx"column: \"s\"" #rx"row: 0")
+  (test-case "a table refuses missing values, and dtypes it cannot hold by contract"
+    (check-exn (error-matching #rx"^polars->table: the dataframe has a missing value"
+                               #rx"column: \"s\"\n  row: 0$")
                (lambda ()
                  (polars->table (dataframe (list (series (list polars-null "b") #:name "s"))))))
     (define dated
       (dataframe (list (series '(1 2) #:name "n")
                        (cast (series '(1 2) #:name "d" #:dtype 'int32) 'date))))
-    (check-exn (error-matching #rx"^polars->table: the dataframe has a column whose dtype a table cannot hold"
-                               #rx"column: \"d\"" #rx"dtype: 'date")
+    (check-exn (blame-matching #rx"every column of the dataframe must be numeric, boolean"
+                               #rx"column \"d\" has dtype date")
                (lambda () (polars->table dated)))
     (check-exn (blame-matching #rx"column \"d\", of dtype date")
                (lambda () (polars->table dated '("n" "d"))))
-    (check-equal? (polars->table dated '("n")) '(("n" . #(1 2)))))
+    (check-equal? (polars->table dated '("n")) '(("n" . #(1 2))))
+    (check-exn (blame-matching #rx"at least one row")
+               (lambda () (polars->table (head dated 0) '("n")))))
+
+  (test-case "an enum's levels are not kept: the formula front end sorts them as strings"
+    (define dose
+      (cast (series '("low" "high" "mid" "low" "mid" "high" "low" "mid") #:name "dose")
+            '(enum low mid high)))
+    (check-equal? (dtype dose) '(enum low mid high))
+    (define t (polars->table
+               (dataframe (list (series '(1.0 3.2 2.1 0.9 2.0 3.1 1.2 1.9) #:name "y") dose))))
+    (check-equal? (cdr (assoc "dose" t)) #(low high mid low mid high low mid))
+    (check-equal? (map car (coef (formula-fit (~ y dose) t #:lambda 0)))
+                  '("(Intercept)" "doselow" "dosemid")))
 
   (test-case "a table as a dataframe: dtypes follow the values"
     (define t
@@ -183,12 +235,39 @@
 
   (test-case "a table column Polars cannot hold is an error naming its column and row"
     (check-exn (error-matching #rx"^table->polars: the table has a column whose values no Polars dtype holds"
-                               #rx"column: \"x\"" #rx"row: 1" #rx"element: \"b\"")
+                               #rx"column: \"x\"\n  row: 1\n  element: \"b\"$")
                (lambda () (table->polars (list (cons "x" '(1 "b"))))))
-    (check-exn (error-matching #rx"a column is named twice")
+    (check-exn (blame-matching #rx"\"x\" twice")
                (lambda () (table->polars (list (cons "x" '(1 2))) '("x" x))))
-    (check-exn (error-matching #rx"no column with this name")
-               (lambda () (table->polars (list (cons "x" '(1 2))) '("y")))))
+    (check-exn (blame-matching #rx"\"y\", which is not a column of the table")
+               (lambda () (table->polars (list (cons "x" '(1 2))) '("y"))))
+    (check-exn (blame-matching #rx"a non-empty list of distinct names of columns of the table")
+               (lambda () (table->polars (list (cons "x" '(1 2))) '()))))
+
+  (test-case "integers take int64, or uint64 above its range; no other integer converts"
+    (define big (sub1 (expt 2 64)))
+    (define t (list (list "i" (- (expt 2 63)) 0 (sub1 (expt 2 63)))
+                    (list "u" big (expt 2 63) 0)
+                    (list "r" big 0.5 1)))
+    (define df (table->polars t))
+    (check-equal? (map (lambda (name) (dtype (ref df name))) (column-names df))
+                  '(int64 uint64 float64))
+    (check-equal? (series->list (ref df "u")) (list big (expt 2 63) 0))
+    (check-equal? (polars->table df '("i" "u")) (list (cons "i" (list->vector (cdr (assoc "i" t))))
+                                                      (cons "u" (list->vector (cdr (assoc "u" t))))))
+    (check-equal? (polars->response df "u") (list big (expt 2 63) 0))
+    (for ([column (in-list (list (list 1 (expt 2 64))
+                                 (list 1 (- -1 (expt 2 63)))
+                                 (list -1 (expt 2 63))
+                                 (list (expt 2 63) -1)))])
+      (check-exn (error-matching #rx"no Polars dtype holds" #rx"column: \"x\"\n  row: 1\n")
+                 (lambda () (table->polars (list (cons "x" column))))
+                 (format "~a" column)))
+    (for ([column (in-list (list (list -1 (expt 2 63) 0.5)
+                                 (list 0.5 -1 (expt 2 63))
+                                 (list -1 0.5 (expt 2 63))))])
+      (check-equal? (dtype (ref (table->polars (list (cons "x" column))) "x")) 'float64
+                    (format "~a" column))))
 
   (test-case "a design matrix with names is a table, and converts"
     (define dm (rows->design-matrix '((1 2) (3 4)) #:column-names '("a" "b")))
@@ -211,7 +290,7 @@
   (define linnerud (table->frame (load-table "linnerud")))
 
   (define (predictors df k) (polars->design-matrix df (take (column-names df) k)))
-  (define (response df name) (polars->response (ref df name)))
+  (define (response df name) (polars->response df name))
 
   (test-case "Gaussian: fit, path, cv, predict and coef"
     (define X (predictors longley 6))

@@ -8,7 +8,9 @@
     # it from this source, whose native library is the prebuilt candidate the
     # catalog install stages, and its Racket dependencies from the flake's own
     # fixed-output `racket-deps`. Its nixpkgs is not followed: that output's
-    # hash is taken with rkt-polars' own Racket.
+    # hash is taken with rkt-polars' own Racket. `racket-deps` installs from
+    # the live catalog, unpinned (bkc39/rkt-polars#146); AGENTS.md says what
+    # to do when its hash stops matching.
     rkt-polars.url = "github:bkc39/rkt-polars";
   };
 
@@ -41,21 +43,33 @@
         packages = with pkgs.rPackages; [ glmnet jsonlite survival ];
       };
 
+      # rkt-polars' prebuilt native library for each system it ships one for.
+      # Its pre-install hook picks the candidate by OS family, which would give
+      # an x86-64 library to aarch64 Linux (bkc39/rkt-polars#146), so the flake
+      # picks it by system, and refuses a system with none.
+      polarsCandidate = system:
+        {
+          x86_64-linux = "linux/libcompat.so";
+          aarch64-darwin = "darwin/libcompat.dylib";
+        }.${system} or (throw
+          "glmnet: rkt-polars ships no native library for ${system}, so glmnet/data/polars cannot be installed there (bkc39/rkt-polars#146)");
+
       # Installs polars (rkt-polars) and its dependency closure offline into
-      # $PLTUSERHOME, before glmnet. Setup must run on the dependencies: it
-      # copies the tzdata package's zoneinfo into the share directory, where
-      # gregor, which polars loads, looks for it (the sandbox has no system
-      # zoneinfo). polars is installed from a writable copy of its source with
-      # the platform's prebuilt candidate already in native-libs/, as this
-      # flake stages libglmnetcompat, and without the candidates directory, so
-      # that its pre-install hook finds the library staged and leaves it be:
-      # on macOS the hook's own copy left native-libs/ empty.
-      installPolars = pkgs: system: ''
+      # $PLTUSERHOME, before glmnet. Its Racket dependencies are installed first:
+      # setup must run on them, since it copies the tzdata package's zoneinfo
+      # into the share directory, where gregor, which polars loads, looks for
+      # it (the sandbox has no system zoneinfo). polars is installed from a
+      # writable copy of its source with the system's prebuilt candidate
+      # already in native-libs/, as this flake stages libglmnetcompat, and
+      # without the candidates directory, so that its pre-install hook finds
+      # the library staged and leaves it be: on macOS under Nix the hook's own
+      # copy left native-libs/ empty (bkc39/rkt-polars#146).
+      installPolars = system: ''
         raco pkg install --batch --copy --no-docs --scope user \
           ${rkt-polars.packages.${system}.racket-deps}/*/
         cp -r ${rkt-polars}/polars "$TMPDIR/polars"
         chmod -R u+w "$TMPDIR/polars"
-        cp ${rkt-polars}/polars/native-libs/candidates/*/libcompat${pkgs.stdenv.hostPlatform.extensions.sharedLibrary} \
+        cp ${rkt-polars}/polars/native-libs/candidates/${polarsCandidate system} \
           "$TMPDIR/polars/native-libs/"
         rm -rf "$TMPDIR/polars/native-libs/candidates"
         raco pkg install --batch --copy --no-docs --scope user \
@@ -116,7 +130,7 @@
               mkdir -p ./glmnet/native-libs
               cp ${native}/lib/libglmnetcompat.* ./glmnet/native-libs/ 2>/dev/null || true
 
-              ${installPolars pkgs system}
+              ${installPolars system}
 
               raco pkg install --batch --deps fail --no-setup --copy --scope user \
                 --name glmnet ./glmnet
@@ -194,7 +208,7 @@
               export GLMNET_NATIVE_LIB_PATH=${native}
               mkdir -p $PLTUSERHOME ./glmnet/native-libs
               cp ${native}/lib/libglmnetcompat.* ./glmnet/native-libs/ 2>/dev/null || true
-              ${installPolars pkgs system}
+              ${installPolars system}
               raco pkg install --batch --deps fail --no-setup --copy --scope user \
                 --name glmnet ./glmnet
               raco setup --no-docs --pkgs glmnet

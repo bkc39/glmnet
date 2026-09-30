@@ -16,6 +16,7 @@
 (require racket/contract
          racket/flonum
          racket/list
+         (only-in racket/unsafe/ops unsafe-f64vector-ref)
          ffi/vector)
 
 (define column-names/c (or/c #f (listof (or/c string? symbol?))))
@@ -398,8 +399,9 @@
   (define data
     (cond
       [adopt?
-       (for ([k (in-range n)])
-         (define x (f64vector-ref v k))
+       ;; The index stays below v's own length, so the unchecked read is safe.
+       (for ([k (in-range (f64vector-length v))])
+         (define x (unsafe-f64vector-ref v k))
          (unless (fl< (flabs x) +inf.0) (not-finite k x)))
        v]
       [else

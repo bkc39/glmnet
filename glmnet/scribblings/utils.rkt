@@ -28,7 +28,7 @@
                     glmnet/data/polars
                     (only-in polars
                              dataframe? series? dataframe series read-csv ref column-names
-                             dtype polars-null dataframe->f64vector)
+                             dtype polars-null dataframe->f64vector cast)
                     glmnet/datasets
                     racket/base
                     racket/contract

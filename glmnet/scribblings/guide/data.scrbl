@@ -8,9 +8,9 @@
 Every fit reads a @tech{design matrix} and a @tech{response}, and the formula
 front end reads a @tech{table}. This chapter is about where they come from:
 the example datasets that ship with the package, tables, Racket's own lists
-and vectors, CSV files and @racketmodname[math/matrix] matrices. Each data
-format is a module under
-@filepath{glmnet/data/}, which @racket[(require glmnet)] does not load.
+and vectors, CSV files, @racketmodname[math/matrix] matrices and Polars
+dataframes. Each data format is a module under @filepath{glmnet/data/}, which
+@racket[(require glmnet)] does not load.
 
 @local-table-of-contents[]
 
@@ -214,8 +214,8 @@ as the number, as it does in R. @racket[csv-file->table] and
 ]
 
 @racket[csv->table] reads the whole input into memory, and each column is a
-vector. For large files, a data frame library that reads CSV files in native
-code, such as rkt-polars, is faster.
+vector. For large files, Polars, which reads CSV files in native code, is
+faster (see @secref["data-polars"]).
 
 @section[#:tag "data-math"]{Matrices from @racketmodname[math/matrix]}
 
@@ -273,5 +273,81 @@ slower still. Converting once and passing the design matrix to every fit pays
 that cost once.
 
 @(close-eval math-ev)
+
+@section[#:tag "data-polars"]{Polars dataframes}
+
+@racketmodname[glmnet/data/polars] converts between the dataframes of
+@racketmodname[polars] (rkt-polars) and glmnet's data: design matrices,
+responses and tables, both ways. @racket[(require glmnet)] does not load it,
+and so does not load Polars.
+
+@margin-note{See @secref["ref-data-polars"] in the @secref["reference"] for the
+five procedures.}
+
+Reading a file with Polars' @racket[read-csv] and converting it is the fast
+way to fit real data: the predictors leave Polars in one bulk copy, already in
+the column-major layout, and become a design matrix without another. Here
+Polars reads R's @tt{iris} from the copy that @racketmodname[glmnet/datasets]
+ships:
+
+@examples[#:eval ev #:label #f
+(require glmnet/data/polars
+         (only-in polars read-csv column-names dataframe series cast))
+(define flowers (read-csv (collection-file-path "iris.csv" "glmnet" "datasets")))
+(column-names flowers)
+(define measures
+  (polars->design-matrix flowers '("Sepal.Width" "Petal.Length" "Petal.Width")))
+(design-matrix-column-names measures)
+(define sepal-length (polars->response flowers "Sepal.Length"))
+(elnet-result-coefficients (lasso measures sepal-length #:lambda 0.01))
+]
+
+A formula fits from a dataframe once it is a @tech{table}, which
+@racket[polars->table] makes of it. Its string column, @racket["Species"], is
+a factor:
+
+@examples[#:eval ev #:label #f
+(define flower-model
+  (formula-fit (Sepal.Length . ~ . Petal.Width + Species) (polars->table flowers)
+               #:lambda 0.01))
+(coef flower-model)
+]
+
+A categorical or enum column becomes a column of symbols, a factor too. Its
+levels are sorted as strings, as a column of strings' are: the order of an
+enum's categories is not kept. R's @tt{factor} keeps the order of its levels,
+so R takes @tt{low} as the baseline of @tt{factor(dose, levels = c("low",
+"mid", "high"))} and fits @tt{dosemid} and @tt{dosehigh}, where here
+@racket["high"] is the baseline:
+
+@examples[#:eval ev #:label #f
+(define doses
+  (dataframe
+   (list (series '(1.0 3.2 2.1 0.9 2.0 3.1) #:name "y")
+         (cast (series '("low" "high" "mid" "low" "mid" "high") #:name "dose")
+               '(enum low mid high)))))
+(polars->table doses '("dose"))
+(coef (formula-fit (~ y dose) (polars->table doses) #:lambda 0))
+]
+
+A missing value (a Polars null), a column that is not numeric where numbers
+are needed, and a value that is not finite are errors that name the column,
+and the row or the dtype. @racket[design-matrix->polars] and
+@racket[table->polars] convert back. The columns of a design matrix with no
+names are named @racket["V1"], @racket["V2"] and so on, as R names them:
+
+@examples[#:eval ev #:label #f
+(design-matrix->polars (design-matrix-select-rows measures '(0 50 100)))
+(design-matrix->polars (rows->design-matrix '((1 2) (3 4))))
+(table->polars (list (cons "y" '(1.5 2.5)) (cons "group" '("a" "b"))))
+(eval:error (polars->design-matrix flowers '("Petal.Width" "Species")))
+]
+
+@racket[design-matrix->polars] is the slower direction. rkt-polars makes a
+series only from a list or a vector, which it reads element by element, so
+each column goes through a vector of flonums. A series made from an
+@racket[f64vector] in one copy, which rkt-polars does not have yet
+(@hyperlink["https://github.com/bkc39/rkt-polars/issues/145"]{rkt-polars#145}),
+would make it as fast as the way in.
 
 @(close-eval ev)

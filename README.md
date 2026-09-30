@@ -103,10 +103,10 @@ responses and tables, and back. Reading a file with Polars and converting it
 is the fast way to fit real data. `(require glmnet)` does not load Polars:
 
 ```racket
-(require glmnet glmnet/data/polars (only-in polars read-csv ref))
+(require glmnet glmnet/data/polars (only-in polars read-csv))
 (define df (read-csv "iris.csv"))
 (lasso (polars->design-matrix df '("Sepal.Width" "Petal.Width"))
-       (polars->response (ref df "Sepal.Length"))
+       (polars->response df "Sepal.Length")
        #:lambda 0.01)
 (formula-fit (Sepal.Length . ~ . Petal.Width + Species) (polars->table df) #:lambda 0.01)
 ```
