@@ -21,6 +21,9 @@ glmnet/                        Racket collection
   foreign.rkt                  contracted wrappers + load-time precision guard
   data.rkt                     design-matrix layer (glmnet/data): the one input layout,
                                and tables (named columns) that convert into it
+  data/math.rkt                glmnet/data/math: math/matrix matrices <-> design matrices,
+                               math arrays -> responses; its element loops are a Typed
+                               Racket submodule; main.rkt does not load it (math-lib)
   core/*.rkt                   one module per family; marshal.rkt, path.rkt shared
   core/model.rkt               gen:glmnet-model: predict / coef / deviance-ratio on any result
   core/cv.rkt                  cross-validation (R's cv.glmnet) behind every family's *-cv

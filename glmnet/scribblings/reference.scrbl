@@ -8,7 +8,8 @@
 @declare-exporting[glmnet]
 
 Every binding below is provided by @racketmodname[glmnet], except those of
-@secref["ref-plot"], which @racketmodname[glmnet/plot] provides. Each model
+@secref["ref-data-math"] and @secref["ref-plot"], which
+@racketmodname[glmnet/data/math] and @racketmodname[glmnet/plot] provide. Each model
 family has a fit procedure, a path fitter, a cross-validation procedure, a
 transparent result struct and prediction helpers. The formula front end
 (@secref["ref-formula"]) fits any family from a @tech{table}. Every result
@@ -324,6 +325,95 @@ modules provide. @racketmodname[glmnet] does not re-export them.
   (require glmnet/examples/data/iris)
   (table-column-names iris)
   (formula-predictor-names (Sepal.Length . ~ . Petal.Width + Species) iris)]}
+
+@section[#:tag "ref-data-math"]{Input data from @racketmodname[math/matrix]}
+
+@defmodule[glmnet/data/math]
+
+@(define math-ev (make-glmnet-eval))
+
+Conversions between the matrices of @racketmodname[math/matrix] and
+@tech[#:key "design matrix"]{design matrices}, and from
+@racketmodname[math/array] arrays to @tech[#:key "response"]{responses}. The rows of a matrix are observations and its columns
+predictors. @racketmodname[glmnet] does not re-export these bindings, and
+@racket[(require glmnet)] does not load @racketmodname[math/matrix]. See
+@secref["concepts-data-math"].
+
+Every array that @racketmodname[math/array] returns to untyped code carries a
+contract, and so does the procedure that computes its elements, which checks
+the index it is called with each time. The conversions' element loops are
+written in Typed Racket, so they call that procedure without adding contracts
+of their own, and they avoid it where they can:
+
+@itemlist[
+ @item{a flonum array (an @racket[FlArray], from @racket[array->flarray],
+       @racket[flarray] or @racket[design-matrix->matrix]) is copied from its
+       @racket[flarray-data] in one pass;}
+ @item{a mutable array (a @racket[Mutable-Array], from @racket[vector->matrix]
+       or @racket[array->mutable-array]) is read from its
+       @racket[mutable-array-data];}
+ @item{any other array, such as the result of @racket[build-matrix],
+       @racket[matrix] or @racket[matrix*], is read one element at a time
+       through its contracted procedure.}
+]
+
+For a large matrix, the first two take about as long as
+@racket[rows->design-matrix] takes for the same rows as lists, and the third
+several times as long.
+
+@defproc[(matrix->design-matrix [M (and/c array? matrix?)]
+                                [#:column-names column-names
+                                                (or/c #f (listof (or/c string? symbol?)))
+                                                #f])
+         design-matrix?]{
+  A design matrix of the entries of @racket[M], one row per row of
+  @racket[M]. Every entry must be a real, finite number, and exact numbers
+  become flonums; an error names the row and column of an entry that is not,
+  counting from 0. @racket[column-names] names the columns, as for
+  @racket[rows->design-matrix]. A design matrix with column names is a
+  @tech{table}, which the formula front end fits from by name. The response
+  matrix @racket[Y] of the multi-response Gaussian family converts the same
+  way.
+
+  @examples[#:eval math-ev
+  (require math/array math/matrix glmnet/data/math)
+  (define M (matrix [[1 2 3] [2 1 5] [3 4 11] [4 3 11] [5 6 17]]))
+  (define D (matrix->design-matrix M #:column-names '(x1 x2 y)))
+  (design-matrix->rows D)
+  (equal? D (rows->design-matrix (matrix->list* M) #:column-names '(x1 x2 y)))
+  (coef (formula-fit (~ y x1 x2) D #:lambda 0))
+  (eval:error (matrix->design-matrix (matrix [[1.0 2.0] [3.0 +nan.0]])))]}
+
+@defproc[(design-matrix->matrix [dm design-matrix?]) (and/c array? matrix?)]{
+  A matrix of the entries of @racket[dm], one row per row of @racket[dm]: a
+  flonum array, an @racket[FlArray], that holds a copy of them. It does not
+  carry @racket[dm]'s column names, which @racket[design-matrix-column-names]
+  gives.
+
+  @examples[#:eval math-ev
+  (design-matrix->matrix D)
+  (equal? (matrix->design-matrix (design-matrix->matrix D)) (matrix->design-matrix M))
+  (matrix* (design-matrix->matrix (rows->design-matrix '((1 2) (3 4))))
+           (col-matrix [1 -1]))]}
+
+@defproc[(array->response [A array?]) (listof real?)]{
+  The elements of @racket[A] as a list, the form in which the fit procedures
+  take a @tech{response}. The contract requires @racket[A] to be a
+  one-dimensional array, a row matrix or a column matrix, with at least one
+  element. Every element must be a real, finite number; an error names the
+  position of one that is not, counting from 0. The elements are returned as
+  they are, so class labels such as those of @racket[multinomial-fit] stay
+  exact integers.
+
+  @examples[#:eval math-ev
+  (array->response (col-matrix [1 0 1]))
+  (array->response (row-matrix [2.5 1/2]))
+  (array->response (array #[0 2 1]))
+  (lasso (matrix->design-matrix M) (array->response (->col-matrix '(1 3 2 5 4)))
+         #:lambda 0.1)
+  (eval:error (array->response (matrix [[1 2] [3 4]])))]}
+
+@(close-eval math-ev)
 
 @section[#:tag "ref-gaussian"]{Gaussian models}
 

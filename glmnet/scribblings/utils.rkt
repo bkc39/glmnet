@@ -22,6 +22,7 @@
 
 (require (for-label glmnet
                     glmnet/plot
+                    glmnet/data/math
                     glmnet/examples/data/mtcars
                     glmnet/examples/data/iris
                     racket/base
@@ -29,6 +30,9 @@
                     racket/file
                     racket/match
                     ffi/vector
+                    math/array
+                    math/matrix
+                    math/distributions
                     (only-in pict pict?)
                     (only-in plot
                              plot-pict plot-width plot-height plot-title plot-font-size vrule)
@@ -38,6 +42,7 @@
          (all-from-out scribble/example)
          (for-label (all-from-out glmnet
                                   glmnet/plot
+                                  glmnet/data/math
                                   glmnet/examples/data/mtcars
                                   glmnet/examples/data/iris
                                   racket/base
@@ -45,6 +50,9 @@
                                   racket/file
                                   racket/match
                                   ffi/vector
+                                  math/array
+                                  math/matrix
+                                  math/distributions
                                   pict
                                   plot
                                   plot/utils))

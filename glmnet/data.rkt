@@ -63,7 +63,8 @@
            select-table-columns
            select-table-values
            table-column->flvector
-           flvectors->design-matrix))
+           flvectors->design-matrix
+           row-major-flvector->design-matrix))
 
 (struct design-matrix (data nrows ncols column-names)
   #:property prop:custom-write
@@ -190,6 +191,18 @@
 
 (define (columns->design-matrix columns #:column-names [names #f])
   (columns->dm columns names 'columns->design-matrix "the matrix"))
+
+;; A matrix that another library stores row by row in an flvector, element
+;; (i, j) at index i*ncols + j, as a design matrix (glmnet/data/math).
+(define (row-major-flvector->design-matrix v nrows ncols names who)
+  (define out (make-f64vector (* nrows ncols)))
+  (for* ([i (in-range nrows)]
+         [j (in-range ncols)])
+    (define x (flvector-ref v (+ (* i ncols) j)))
+    (unless (fl< (flabs x) +inf.0)
+      (element-error who "the matrix" "not finite" x "row" i "column" j))
+    (f64vector-set! out (+ i (* j nrows)) x))
+  (design-matrix out nrows ncols (check-column-names names ncols who)))
 
 (define (f64vector->design-matrix v nrows ncols #:column-names [names #f])
   (define who 'f64vector->design-matrix)
