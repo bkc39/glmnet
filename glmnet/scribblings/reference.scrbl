@@ -561,7 +561,9 @@ written in place, with no intermediate copy:
  @item{any other array, such as the result of @racket[build-matrix],
        @racket[matrix] or @racket[matrix*], is read one element at a time
        through its contracted procedure;}
- @item{a lazy array, made while @racket[array-strictness] is @racket[#f], is
+ @item{a lazy array, one made while @racket[array-strictness] is @racket[#f]
+       or one that @racket[array-broadcast] or @racket[array-lazy] returns,
+       which are lazy at the default setting too, is
        read the same way, with a fresh mutable index vector for each element,
        because its index transforms, such as those of
        @racket[matrix-transpose] and @racket[array-slice-ref], write to the

@@ -270,8 +270,8 @@ or a mutable array, from @racket[vector->matrix], is copied straight from the
 vector that holds its elements. Any other array is read one element at a time,
 through the contract that the Typed Racket library puts on each array it
 returns to untyped code, which makes a large matrix several times slower to
-convert, and a lazy one, made while @racket[array-strictness] is @racket[#f],
-slower still. Converting once and passing the design matrix to every fit pays
+convert, and a lazy one, made while @racket[array-strictness] is @racket[#f]
+or returned by @racket[array-broadcast] or @racket[array-lazy], slower still. Converting once and passing the design matrix to every fit pays
 that cost once.
 
 @(close-eval math-ev)
