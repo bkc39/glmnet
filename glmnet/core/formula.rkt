@@ -406,6 +406,8 @@
              #:fail-when (and I? (not (= (length (syntax->list #'g)) 2)) #'g)
              "I takes one Racket expression, as in (I (expt x 2))"
              #:do [(check-infix #'f #'g #'g (not (bound-here? (datum->syntax #'g '^))))]
+             #:fail-when (and (eq? (syntax-e #'f) '^) (not (bound-here? #'f)) #'f)
+             power-message
              #:fail-when (and (not I?) (not (bound-here? #'f)) #'g)
              (unbound #'g #'f)
              #:with t:transform #'g

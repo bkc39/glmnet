@@ -1291,10 +1291,31 @@
                         (message-of (lambda () (convert-compile-time-error (~ mpg (factor (hp * wt)))))))
     (check-regexp-match #rx"~: \\^ is not a Racket function; inside a transform, write a power as \\(expt x 2\\)"
                         (message-of (lambda () (convert-compile-time-error (~ mpg (factor (hp ^ 2)))))))
+    (check-regexp-match #rx"~: \\^ is not a Racket function; inside a transform, write a power as \\(expt x 2\\), or a square as \\(sqr x\\)\n  at: \\^"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (factor (^ hp 2)))))))
     (check-regexp-match #rx"~: 'cyl is quoted, and ~ quotes the names of a formula itself: write the column as cyl or \"cyl\"\n  at: \\(quote cyl\\)"
                         (message-of (lambda () (convert-compile-time-error (~ mpg (factor 'cyl))))))
     (check-regexp-match #rx"~: cyl:gear reads as one name"
                         (message-of (lambda () (convert-compile-time-error (~ mpg (factor cyl:gear)))))))
+
+  (test-case "an error after a (factor (I expr)) term is that error, not one about I"
+    (define (message-of thunk)
+      (with-handlers ([exn:fail:syntax? exn-message]) (thunk) #f))
+    (check-regexp-match #rx"~: wt:hp reads as one name.*\n  at: wt:hp"
+                        (message-of (lambda () (convert-compile-time-error
+                                                (~ mpg (factor (I (> hp 150))) wt:hp)))))
+    (check-regexp-match #rx"~: \\(1 x z\\) is not a term: a group of terms starts with an operator.*\n  at: \\(1 x z\\)"
+                        (message-of (lambda () (convert-compile-time-error
+                                                (~ mpg (factor (I (> hp 150))) (1 x z))))))
+    (check-regexp-match #rx"~: expected a power, an exact integer of at least 2\n  at: 1"
+                        (message-of (lambda () (convert-compile-time-error
+                                                (mpg . ~ . (factor (I (> hp 150))) + wt ^ 1)))))
+    (check-regexp-match #rx"~: / is an operator of R's formulas that this formula language does not have; for a ratio, write \\(I \\(/ hp wt\\)\\)\n  at: /"
+                        (message-of (lambda () (convert-compile-time-error
+                                                (~ mpg (factor (I (> hp 150))) (/ hp wt))))))
+    (check-regexp-match #rx"~: 2 is not a term; a formula's numbers are 1, 0 and a power after \\^\n  at: 2"
+                        (message-of (lambda () (convert-compile-time-error
+                                                (~ mpg (factor (I (> hp 150))) 2))))))
 
   (test-case "(factor x) is data, printed and compared as written"
     (define f (mpg . ~ . wt * (factor cyl)))
