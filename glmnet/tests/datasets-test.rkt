@@ -104,4 +104,15 @@
     (check-true (andmap (lambda (column) (vector? (cdr column))) iris))
     (check-equal? (remove-duplicates (column "iris" "Species"))
                   '("setosa" "versicolor" "virginica"))
-    (check-equal? (vector-length (cdr (assoc "Species" iris))) 150)))
+    (check-equal? (vector-length (cdr (assoc "Species" iris))) 150))
+
+  (test-case "mtcars and iris are shared, so their columns cannot be changed"
+    (for* ([table (in-list (list mtcars iris))]
+           [column (in-list table)])
+      (check-true (immutable? (cdr column)) (car column)))
+    (check-exn exn:fail:contract? (lambda () (vector-set! (cdr (assoc "mpg" mtcars)) 0 1000.0)))
+    (check-exn exn:fail:contract? (lambda () (vector-set! (cdr (assoc "Species" iris)) 0 "rose")))
+    (define fresh (dataset-table "mtcars"))
+    (check-false (immutable? (cdr (assoc "mpg" fresh))))
+    (vector-set! (cdr (assoc "mpg" fresh)) 0 1000.0)
+    (check-eqv? (vector-ref (cdr (assoc "mpg" mtcars)) 0) 21.0)))
