@@ -1,9 +1,5 @@
 #lang racket/base
 
-;; The tabular-asa adapter (#63). A tabular-asa table is a row index, a vector
-;; of positions, and an association list from each column's name to a vector
-;; that the index selects from and orders; #f is its missing value.
-
 (require racket/contract
          racket/flonum
          racket/list
@@ -12,7 +8,8 @@
          "../data.rkt"
          (only-in (submod "../data.rkt" support)
                   design-matrix-data column-name->string table-names select-table-values
-                  flvectors->design-matrix))
+                  flat->design-matrix element-error missing-error ->finite-flonum
+                  default-column-names))
 
 (provide
  (contract-out
@@ -45,6 +42,8 @@
   (apply raise-blame-error blame v (list problem 'expected: expected 'given: "~e")
          (append args (list v))))
 
+;; A tabular-asa table with a row and a column, whose columns have distinct
+;; names.
 (define non-empty-table/c
   (flat-contract-with-explanation
    (lambda (df)
@@ -52,6 +51,10 @@
        [(not (asa:table? df)) (explain df "not a tabular-asa table" "table?")]
        [(null? (asa:table-data df)) (explain df "the table has no columns" "a table with columns")]
        [(zero? (asa:table-length df)) (explain df "the table has no rows" "a table with rows")]
+       [(check-duplicates (tabular-asa-names df))
+        => (lambda (name)
+             (explain df "the table has two columns named ~s"
+                      "a table whose columns have distinct names" name))]
        [else #t]))
    #:name '(and/c table? (not/c table-empty?))))
 
@@ -114,75 +117,62 @@
 
 ;; The data vectors of the columns of df named `names` (strings), in that
 ;; order.
-(define (column-data df names who)
+(define (column-data df names)
   (define by-name
-    (for/fold ([by-name (hash)]) ([entry (in-list (asa:table-data df))])
-      (define name (table-name->string (car entry)))
-      (when (hash-ref by-name name #f)
-        (raise-arguments-error who "the table has two columns with the same name" "name" name))
-      (hash-set by-name name (cdr entry))))
+    (for/hash ([entry (in-list (asa:table-data df))])
+      (values (table-name->string (car entry)) (cdr entry))))
   (for/list ([name (in-list names)]) (hash-ref by-name name)))
 
-(define (missing-error who name i)
-  (raise-arguments-error who "the table has a missing value"
-                         "column" name "row" i "element" #f))
-
-(define (element->flonum x name i who)
-  (define v
-    (cond
-      [(flonum? x) x]
-      [(real? x) (real->double-flonum x)]
-      [(not x) (missing-error who name i)]
-      [else (raise-arguments-error who "the table has an element that is not a real number"
-                                   "column" name "row" i "element" x)]))
-  (unless (fl< (flabs v) +inf.0)
-    (raise-arguments-error who "the table has an element that is not finite"
-                           "column" name "row" i "element" x))
-  v)
+;; The cell x, in row i of column `name`, as a finite flonum.
+(define (cell->flonum x who name i)
+  (cond
+    [(and (flonum? x) (fl< (flabs x) +inf.0)) x]
+    [x (->finite-flonum x who "the table" i name)]
+    [else (missing-error who "the table" #:row i #:column name)]))
 
 (define (tabular-asa->design-matrix df columns)
   (define who 'tabular-asa->design-matrix)
   (define names (map column-name->string columns))
   (define index (asa:table-index df))
-  (flvectors->design-matrix
-   (for/list ([data (in-list (column-data df names who))]
-              [name (in-list names)])
-     (for/flvector #:length (vector-length index) ([p (in-vector index)] [i (in-naturals)])
-       (element->flonum (vector-ref data p) name i who)))
-   names
-   who))
+  (define nrows (vector-length index))
+  (define v (make-f64vector (* nrows (length names))))
+  (for ([data (in-list (column-data df names))]
+        [name (in-list names)]
+        [j (in-naturals)])
+    (define start (* j nrows))
+    (for ([p (in-vector index)] [i (in-naturals)])
+      (f64vector-set! v (+ start i) (cell->flonum (vector-ref data p) who name i))))
+  (flat->design-matrix v nrows (length names) names who "the table" #:adopt? #t))
 
 (define (tabular-asa->response df column)
   (define who 'tabular-asa->response)
   (define name (column-name->string column))
-  (define data (car (column-data df (list name) who)))
+  (define data (car (column-data df (list name))))
   (for/list ([p (in-vector (asa:table-index df))]
              [i (in-naturals)])
     (define x (vector-ref data p))
-    (element->flonum x name i who)
+    (cell->flonum x who name i)
     x))
 
 (define (tabular-asa->table df [columns (asa:table-header df)])
   (define who 'tabular-asa->table)
   (define names (map table-name->string columns))
   (define index (asa:table-index df))
-  (for/list ([data (in-list (column-data df names who))]
+  (for/list ([data (in-list (column-data df names))]
              [name (in-list names)])
     (cons name
           (for/vector #:length (vector-length index) ([p (in-vector index)] [i (in-naturals)])
-            (or (vector-ref data p) (missing-error who name i))))))
+            (or (vector-ref data p) (missing-error who "the table" #:row i #:column name))))))
 
 ;; --- writing tabular-asa tables ----------------------------------------------------
 
 (define (name->symbol name)
   (if (symbol? name) name (string->symbol name)))
 
-(define (default-column-names dm)
-  (or (design-matrix-column-names dm)
-      (for/list ([j (in-range (design-matrix-ncols dm))])
-        (format "V~a" (add1 j)))))
-
-(define (design-matrix->tabular-asa dm #:column-names [names (default-column-names dm)])
+(define (design-matrix->tabular-asa dm
+                                    #:column-names
+                                    [names (or (design-matrix-column-names dm)
+                                               (default-column-names (design-matrix-ncols dm)))])
   (define v (design-matrix-data dm))
   (define no (design-matrix-nrows dm))
   (asa:table (build-vector no values)
@@ -207,6 +197,7 @@
                   (cons (string->symbol name)
                         (for/vector #:length (vector-length column) ([x (in-vector column)]
                                                                      [i (in-naturals)])
-                          (or x (raise-arguments-error
-                                 who "the table has an element that is #f, which tabular-asa reads as a missing value"
-                                 "column" name "row" i))))))]))
+                          (or x
+                              (element-error who "the table"
+                                             "#f, which tabular-asa reads as a missing value" x
+                                             #:row i #:column name))))))]))

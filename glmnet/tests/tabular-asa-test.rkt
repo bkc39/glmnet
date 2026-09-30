@@ -1,17 +1,10 @@
 #lang racket/base
 
-;; The tabular-asa adapter (#63). Its conversions follow the table's row
-;; index; a missing value (#f), a non-numeric cell where numbers are read and
-;; a non-finite number are errors naming the column and the row. Fitting
-;; through a tabular-asa table is `equal?` to fitting the same data as lists,
-;; for every family, with the matrix procedures and with formulas. The
-;; fixtures are the committed parity datasets, read with tabular-asa's own CSV
-;; reader, and R's mtcars and iris. `(require glmnet)` does not load
-;; tabular-asa.
+;; glmnet/data/tabular-asa. The fixtures are the committed parity datasets,
+;; read with tabular-asa's own CSV reader, and R's mtcars and iris.
 
 (module+ test
   (require rackunit
-           (only-in racket/list take)
            racket/runtime-path
            (only-in racket/contract exn:fail:contract:blame?)
            glmnet
@@ -136,12 +129,13 @@
   (test-case "a missing value is an error naming the column and the row"
     (check-error (lambda () (tabular-asa->design-matrix na '(a)))
                  #rx"^tabular-asa->design-matrix: the table has a missing value"
-                 #rx"column: \"a\"" #rx"row: 1")
+                 #rx"column: \"a\"\n  row: 1$")
     (check-error (lambda () (tabular-asa->response na 'a))
-                 #rx"^tabular-asa->response: the table has a missing value" #rx"row: 1")
+                 #rx"^tabular-asa->response: the table has a missing value"
+                 #rx"column: \"a\"\n  row: 1$")
     (check-error (lambda () (tabular-asa->table na))
                  #rx"^tabular-asa->table: the table has a missing value"
-                 #rx"column: \"a\"" #rx"row: 1")
+                 #rx"column: \"a\"\n  row: 1$")
     (check-equal? (tabular-asa->table na '(c)) (list (cons "c" #("x" "y" "z")))))
 
   (test-case "the row is the position in the table's order, not in its data"
@@ -156,7 +150,8 @@
 
   (test-case "a non-numeric cell or a non-finite number is an error naming the column and the row"
     (check-error (lambda () (tabular-asa->design-matrix na '(c)))
-                 #rx"not a real number" #rx"column: \"c\"" #rx"row: 0" #rx"element: \"x\"")
+                 #rx"the table has an element that is not a real number"
+                 #rx"column: \"c\"\n  row: 0\n  element: \"x\"$")
     (check-error (lambda () (tabular-asa->design-matrix na '(b)))
                  #rx"not finite" #rx"column: \"b\"" #rx"row: 2")
     (check-error (lambda () (tabular-asa->response na 'b))
@@ -172,7 +167,15 @@
   (test-case "a #f in a glmnet table is an error, since tabular-asa reads it as missing"
     (check-error (lambda () (table->tabular-asa (list (cons "ok" '(#t #f)))))
                  #rx"^table->tabular-asa: the table has an element that is #f"
-                 #rx"column: \"ok\"" #rx"row: 1"))
+                 #rx"column: \"ok\"\n  row: 1\n  element: #f$"))
+
+  (test-case "-0.0 and extreme values convert bit for bit"
+    (define xs (list -0.0 5e-324 -1.7976931348623157e308 1/3 7))
+    (define t (asa:table-read/columns (list xs) '(x)))
+    (define dm (tabular-asa->design-matrix t '(x)))
+    (check-equal? dm (rows->design-matrix (map list xs) #:column-names '("x")))
+    (check-eqv? (design-matrix-ref dm 0 0) -0.0)
+    (check-equal? (tabular-asa->design-matrix (design-matrix->tabular-asa dm) '(x)) dm))
 
   (test-case "columns of different lengths are an error"
     (check-error (lambda () (table->tabular-asa (list (cons "a" '(1 2)) (cons "b" '(3)))))
@@ -201,12 +204,18 @@
                  #rx"no column named \"speed\"")
     (check-blame (lambda () (table->tabular-asa '((1 2)))) #rx"table\\?"))
 
-  (test-case "two columns of the same name are an error, naming the procedure called"
+  (test-case "a tabular-asa table with two columns of the same name breaks the contract"
     (define twice (asa:table #(0) (list (cons 'a #(1)) (cons "a" #(2)))))
-    (check-error (lambda () (tabular-asa->design-matrix twice '(a)))
-                 #rx"^tabular-asa->design-matrix: the table has two columns with the same name")
-    (check-error (lambda () (tabular-asa->table twice))
-                 #rx"^tabular-asa->table: the table has two columns with the same name")
+    (check-blame (lambda () (tabular-asa->design-matrix twice '(a)))
+                 #rx"the table has two columns named \"a\"")
+    (check-blame (lambda () (tabular-asa->response twice 'a))
+                 #rx"the table has two columns named \"a\"")
+    (check-blame (lambda () (tabular-asa->table twice))
+                 #rx"the table has two columns named \"a\"")
+    (check-equal? (tabular-asa->table (asa:table #(0) (list (cons 'a #(1)) (cons "b" #(2)))))
+                  (list (cons "a" #(1)) (cons "b" #(2)))))
+
+  (test-case "a glmnet table with two columns of the same name is an error naming the procedure"
     (check-error (lambda () (table->tabular-asa (list (cons "a" '(1 2)) (cons 'a '(3 4)))))
                  #rx"^table->tabular-asa: the table has two columns with the same name")
     (check-error (lambda () (table->tabular-asa (hash "a" '(1) 'a '(2)) '(a)))
@@ -321,7 +330,8 @@
     (define model (formula-fit (~ am wt hp) t #:family 'binomial #:lambda 0.05))
     (check-equal? model (formula-fit (~ am wt hp) mtcars #:family 'binomial #:lambda 0.05))
     (check-equal? (predict model (tabular-asa->table (asa:table-head cars 3)) #:type 'response)
-                  (predict model (for/list ([c (in-list mtcars)]) (cons (car c) (for/list ([x (in-vector (cdr c) 0 3)]) x)))
+                  (predict model (for/list ([c (in-list mtcars)])
+                                   (cons (car c) (for/list ([x (in-vector (cdr c) 0 3)]) x)))
                            #:type 'response)))
 
   (test-case "every family's formula fit is the same through tabular-asa as through the list"

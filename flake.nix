@@ -105,38 +105,57 @@
           };
 
           # glmnet's dependencies that pkgs.racket does not ship: tabular-asa,
-          # for glmnet/data/tabular-asa, and what it pulls in from the catalog
-          # (csv-reading, mcfly, overeasy). A fixed-output derivation, so it may
-          # reach the catalog; `--no-setup` installs the sources only, so the
-          # output is the same on every platform, and the package cache, the
-          # one part that is not reproducible, is dropped. When the catalog's
-          # versions of these packages change, so does the hash: build
-          # .#racket and take the hash that Nix reports. The output is a tree
-          # for one version of Racket, so that version is in the name, and a
-          # new Racket builds it afresh instead of reusing an old tree.
-          catalogDeps = pkgs.stdenvNoCC.mkDerivation {
-            pname = "glmnet-catalog-deps";
-            version = "tabular-asa-0.4.5-racket-${pkgs.racket.version}";
-            dontUnpack = true;
-            nativeBuildInputs = [ pkgs.racket pkgs.cacert ];
-            buildCommand = ''
-              export PLTUSERHOME="$out"
-              export SSL_CERT_FILE="${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
-              mkdir -p "$out"
-              raco pkg install --no-setup --batch --auto --scope user --no-docs tabular-asa
-              rm -rf "$out/.cache"
-            '';
-            outputHashMode = "recursive";
-            outputHashAlgo = "sha256";
-            outputHash = "sha256-F6/2zwp4ls35lIxvFQY774V9qJXnIrX9rw3NqAOV1io=";
-          };
+          # for glmnet/data/tabular-asa, and what it depends on (csv-reading,
+          # mcfly, overeasy). Each is pinned to the source that the package
+          # catalog names, fetched by Nix rather than by raco from the live
+          # catalog: tabular-asa to its git commit, and the other three, which
+          # are zip files, to the catalog's checksum of each, the file's SHA-1.
+          # `raco pkg catalog-show <name>` prints both; moving a pin changes
+          # them here (and, for the git source, its hash).
+          catalogSources = [
+            {
+              name = "mcfly";
+              src = pkgs.fetchurl {
+                url = "https://www.neilvandyke.org/racket/mcfly--2-2.zip";
+                sha1 = "e670b083eefe6ac27c23cc9423bac0f31720d58c";
+              };
+            }
+            {
+              name = "overeasy";
+              src = pkgs.fetchurl {
+                url = "https://www.neilvandyke.org/racket/overeasy--4-3.zip";
+                sha1 = "f7cff9a14b313c4a51e1dcd47bb3aa4fe7d50526";
+              };
+            }
+            {
+              name = "csv-reading";
+              src = pkgs.fetchurl {
+                url = "https://www.neilvandyke.org/racket/csv-reading.zip";
+                sha1 = "069af9ad8bec03781a7cc96eb70dfce64bd71daa";
+              };
+            }
+            {
+              name = "tabular-asa";
+              src = pkgs.fetchFromGitHub {
+                owner = "massung";
+                repo = "tabular-asa";
+                rev = "6144a6c5d18c4c4beefec7a1688a625421fd4ae1";
+                hash = "sha256-XY95hqvWHD+WI5yQzSejpdjYjSFlVK2jXYkfkQAFW0M=";
+              };
+            }
+          ];
 
-          # Seeds the user scope with catalogDeps, so that installing glmnet
-          # with `--deps fail` finds them; `raco setup --pkgs tabular-asa`
-          # compiles them.
-          seedCatalogDeps = ''
-            cp -r ${catalogDeps}/. $PLTUSERHOME/
-            chmod -R u+w $PLTUSERHOME
+          # Installs catalogSources into the user scope, each after what it
+          # depends on, so that installing glmnet with `--deps fail` finds
+          # them; `raco setup --pkgs tabular-asa` compiles them. It runs before
+          # installPolars, and neither replaces what the other installed. The
+          # copies from the store are read-only, and setup writes compiled/
+          # beside the sources.
+          installCatalogDeps = pkgs.lib.concatMapStrings (dep: ''
+            raco pkg install --batch --no-setup --copy --no-docs --scope user \
+              --deps fail --name ${dep.name} ${dep.src}
+          '') catalogSources + ''
+            chmod -R u+w "$PLTUSERHOME"
           '';
 
           # The Racket package, with the native library injected. The manual's
@@ -165,7 +184,7 @@
               mkdir -p ./glmnet/native-libs
               cp ${native}/lib/libglmnetcompat.* ./glmnet/native-libs/ 2>/dev/null || true
 
-              ${seedCatalogDeps}
+              ${installCatalogDeps}
               ${installPolars system}
 
               raco pkg install --batch --deps fail --no-setup --copy --scope user \
@@ -246,7 +265,7 @@
               export GLMNET_NATIVE_LIB_PATH=${native}
               mkdir -p $PLTUSERHOME ./glmnet/native-libs
               cp ${native}/lib/libglmnetcompat.* ./glmnet/native-libs/ 2>/dev/null || true
-              ${seedCatalogDeps}
+              ${installCatalogDeps}
               ${installPolars system}
               raco pkg install --batch --deps fail --no-setup --copy --scope user \
                 --name glmnet ./glmnet
