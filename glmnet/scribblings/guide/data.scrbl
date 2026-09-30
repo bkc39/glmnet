@@ -6,9 +6,10 @@
 @title[#:tag "data" #:style 'toc]{Data}
 
 Every fit reads a @tech{design matrix} and a @tech{response}, and the formula
-front end reads a @tech{table}. This chapter is about where they come from: the
-example datasets that ship with the package, CSV files, and the conversions
-from other libraries' data that are on their way.
+front end reads a @tech{table}. This chapter is about where they come from:
+the example datasets that ship with the package, tables, and CSV files. Each
+data format is a module under @filepath{glmnet/data/}, which
+@racket[(require glmnet)] does not load.
 
 @local-table-of-contents[]
 
@@ -24,7 +25,7 @@ use, and R's @tt{mtcars} and @tt{iris}, which the formula examples use.
 ]
 
 @examples[#:eval ev #:hidden
-(require racket/list)
+(require racket/list racket/vector)
 ]
 
 @margin-note{See @secref["ref-datasets"] in the @secref["reference"] for
@@ -68,17 +69,18 @@ So a loader's values go straight to its fitter, and
 (take status 3)
 ]
 
-Two responses differ from R's. R's @tt{MultinomialExample} labels its classes
+Two datasets differ from R's. R's @tt{MultinomialExample} labels its classes
 1, 2 and 3, and here they are 0, 1 and 2, the labels
 @racket[multinomial-fit] takes. R's @tt{SparseExample} holds its predictors
 in a sparse matrix, and here they are dense, until sparse input is supported
 (@hyperlink["https://github.com/bkc39/glmnet/issues/11"]{#11}).
 
-@racket[mtcars] and @racket[iris] are tables, as R's are data frames:
+@racket[mtcars] and @racket[iris] are tables, as R's are data frames, whose
+columns are vectors:
 
 @examples[#:eval ev #:label #f
 (table-column-names mtcars)
-(take (cdr (assoc "Species" iris)) 3)
+(vector-take (cdr (assoc "Species" iris)) 3)
 ]
 
 The datasets are CSV files in the package, under
@@ -119,8 +121,8 @@ is a factor, as R's character and logical columns are (see
 @racketmodname[glmnet/data/csv] reads a CSV file into a table and writes a
 table to one. It depends on nothing beyond Racket's @tt{base} package:
 
-@margin-note{See @secref["ref-csv"] in the @secref["reference"] for the four
-procedures.}
+@margin-note{See @secref["ref-data-csv"] in the @secref["reference"] for the
+four procedures.}
 
 @examples[#:eval ev #:label #f
 (define text "site,age,response\nBoston,34,3.1\n\"Portland, ME\",51,5.2\n")
@@ -132,20 +134,30 @@ t
 The first line is the header, which names the columns. A cell in quotes can
 hold commas, newlines, and quotes written twice (@tt{""}), as
 @hyperlink["https://www.rfc-editor.org/rfc/rfc4180"]{RFC 4180} has it. Each
-cell is read as R's @tt{read.csv} reads a column:
+cell is read as R's @tt{read.csv} reads a column that holds only that cell:
 
 @itemlist[
- @item{a decimal number, or one of R's @tt{Inf}, @tt{-Inf} and @tt{NaN},
-       becomes a flonum;}
- @item{R's @tt{TRUE} and @tt{FALSE} become @racket[#t] and @racket[#f];}
- @item{anything else stays a string, so a column of strings works as a
-       factor.}
+ @item{a number becomes a flonum: a decimal number, a hexadecimal one such as
+       @tt{0x1A}, or @tt{Inf}, @tt{Infinity} or @tt{NaN} in any case, with
+       white space around it or not;}
+ @item{@tt{TRUE} and @tt{T} become @racket[#t], and @tt{FALSE} and @tt{F}
+       become @racket[#f];}
+ @item{anything else stays a string, white space and all, so a column of
+       strings works as a factor.}
+]
+
+@examples[#:eval ev #:label #f
+(csv->table (open-input-string "x\n0x1A\n-inf\n 7 \nT\ntrue\n\" TRUE\"\n"))
 ]
 
 Unlike R's @tt{read.csv}, which gives a whole column one type, each cell is
 read on its own. A column that mixes numbers and strings stays mixed, and the
 formula front end then raises an error naming the column, rather than reading
 the numbers as categories.
+
+The input must be UTF-8. A file in another encoding, such as the Windows-1252
+that Excel writes on Windows, is an error that names the line and the byte
+where it stops being UTF-8, rather than strings with characters replaced.
 
 A missing cell, an empty one or R's @tt{NA}, is an error that names the
 column, the row and the line of the file; nothing is dropped or filled in:
@@ -170,20 +182,7 @@ as the number, as it does in R. @racket[csv-file->table] and
 ]
 
 @racket[csv->table] reads the whole input into memory, and each column is a
-list. For large files, a data frame library is faster: rkt-polars, for one,
-reads CSV files in native code (see below).
-
-@section[#:tag "data-adapters"]{Other data sources}
-
-Data also comes from other Racket libraries: matrices from @tt{math/matrix}
-and data frames from rkt-polars and others. The
-input formats arc,
-@hyperlink["https://github.com/bkc39/glmnet/issues/41"]{#41}, adds a
-conversion for each, a module under @filepath{glmnet/data/} next to
-@racketmodname[glmnet/data/csv] that builds a design matrix or a table from
-the library's own values, so that the solvers only ever see a design matrix.
-@tt{math/matrix}
-(@hyperlink["https://github.com/bkc39/glmnet/issues/37"]{#37}) and rkt-polars
-(@hyperlink["https://github.com/bkc39/glmnet/issues/40"]{#40}) come next.
+vector. For large files, a data frame library that reads CSV files in native
+code, such as rkt-polars, is faster.
 
 @(close-eval ev)

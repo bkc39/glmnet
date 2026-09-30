@@ -41,9 +41,15 @@
   (define-values (Xp yp) (load-warpbreaks))
   (define-values (Xr Yr) (load-linnerud))
 
+  ;; A column of an association-list table as a list: glmnet/datasets' tables
+  ;; hold vectors, the committed datasets' lists.
+  (define (table-column table name)
+    (define column (cdr (assoc name table)))
+    (if (vector? column) (vector->list column) column))
+
   ;; The columns of a table, in the order given, as a list of rows.
   (define (rows-of table names)
-    (apply map list (for/list ([name (in-list names)]) (cdr (assoc name table)))))
+    (apply map list (for/list ([name (in-list names)]) (table-column table name))))
 
   (define (column-names table) (map car table))
 
@@ -278,7 +284,7 @@
     (check-equal? (mtcars-names (~ mpg (* wt 0))) '("wt"))
     (check-equal? (mtcars-names (~ mpg (* 1 wt hp))) '())
     (check-equal? (formula-model-fit (formula-fit (mpg . ~ . 0 * wt + hp + qsec) mtcars #:lambda 0.1))
-                  (elnet-fit (rows-of mtcars '("hp" "qsec")) (cdr (assoc "mpg" mtcars)) #:lambda 0.1
+                  (elnet-fit (rows-of mtcars '("hp" "qsec")) (table-column mtcars "mpg") #:lambda 0.1
                              #:intercept? #f)))
 
   (test-case "infix operators take R's precedence, left to right, and mix with prefix groups"
@@ -307,7 +313,7 @@
 
   (test-case "an interaction column is the product of its variables' columns"
     (define x (columns-of (formula-design-matrix (~ mpg wt * hp + (: wt hp qsec)) mtcars)))
-    (define (column name) (map exact->inexact (cdr (assoc name mtcars))))
+    (define (column name) (map exact->inexact (table-column mtcars name)))
     (check-equal? (hash-ref x "wt") (column "wt"))
     (check-equal? (hash-ref x "wt:hp") (map * (column "wt") (column "hp")))
     (check-equal? (hash-ref x "wt:hp:qsec") (map * (column "wt") (column "hp") (column "qsec")))
@@ -317,7 +323,7 @@
   (test-case "the design matrix is what a formula fit fits"
     (define f (~ mpg (^ (+ wt hp qsec) 2)))
     (define x (formula-design-matrix f mtcars))
-    (define y (cdr (assoc "mpg" mtcars)))
+    (define y (table-column mtcars "mpg"))
     (check-same (formula-path f mtcars #:lambda '(1.0 0.1)) (elnet-path x y #:lambda '(1.0 0.1)))
     (check-equal? (formula-model-predictor-names (formula-fit f mtcars #:lambda 0.1))
                   (design-matrix-column-names x)))
@@ -325,7 +331,7 @@
   ;; --- the intercept -------------------------------------------------------------------
 
   (define mtcars-rows (rows-of mtcars '("wt" "hp")))
-  (define mpg (cdr (assoc "mpg" mtcars)))
+  (define mpg (table-column mtcars "mpg"))
 
   (test-case "0 and - 1 fit without an intercept; 1 keeps it; the last one wins"
     (define without (elnet-fit mtcars-rows mpg #:lambda 0.1 #:intercept? #f))
@@ -656,7 +662,7 @@
   ;; --- transforms --------------------------------------------------------------------
 
   ;; A column of mtcars, as flonums, as R holds it.
-  (define (mtcars-column name) (map exact->inexact (cdr (assoc name mtcars))))
+  (define (mtcars-column name) (map exact->inexact (table-column mtcars name)))
 
   (test-case "a transform is a function of columns, named by its source, and joins the algebra"
     ;; R: mpg ~ log(hp) * wt gives log(hp) wt log(hp):wt
@@ -1019,7 +1025,8 @@
   ;; The rows of a table at the indices `rows`.
   (define (table-rows table rows)
     (for/list ([column (in-list table)])
-      (cons (car column) (for/list ([i (in-list rows)]) (list-ref (cdr column) i)))))
+      (define entries (table-column table (car column)))
+      (cons (car column) (for/list ([i (in-list rows)]) (list-ref entries i)))))
 
   (test-case "a column of strings, symbols or booleans is a factor, coded by treatment contrasts"
     ;; R: y ~ group + x, with group a character column
@@ -1238,7 +1245,7 @@
 
   (test-case "a binomial or multinomial response of strings or booleans has its levels as classes"
     (define measures '("Sepal.Length" "Sepal.Width" "Petal.Length" "Petal.Width"))
-    (define species (cdr (assoc "Species" iris-species)))
+    (define species (table-column iris-species "Species"))
     (define m (formula-fit (~ Species all) iris-species #:family 'multinomial #:lambda 0.05))
     (check-same m (multinomial-fit (rows-of iris-species measures)
                                    (for/list ([s (in-list species)])
@@ -1250,7 +1257,7 @@
     (check-equal? (predict m three #:type 'class) '("setosa" "versicolor" "virginica"))
     ;; R: glmnet(x[, 2:4], iris$Sepal.Length > 5.8, "binomial", lambda = 0.05):
     ;; FALSE is the baseline, and the class is the level's name.
-    (define long (cons (cons "long" (for/list ([v (in-list (cdr (assoc "Sepal.Length" iris-species)))])
+    (define long (cons (cons "long" (for/list ([v (in-list (table-column iris-species "Sepal.Length"))])
                                       (> v 5.8)))
                        iris-species))
     (define b (formula-fit (~ long Sepal.Width Petal.Length Petal.Width) long

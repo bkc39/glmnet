@@ -51,9 +51,28 @@ each coefficient against @math{−log λ}:
 (plot-coefficient-path fit)
 ]
 
+Each curve leaves zero where its predictor enters the model. The largest
+@math{λ} at which each coefficient is nonzero gives the order of entry:
+
+@examples[#:eval ev #:label #f
+(define (entry-lambda j)
+  (for/first ([beta (in-vector (glmnet-path-coefficients fit))]
+              [lam (in-vector (glmnet-path-lambda fit))]
+              #:unless (zero? (vector-ref beta j)))
+    lam))
+(define entries
+  (sort (for/list ([name (in-list (design-matrix-column-names x))]
+                   [j (in-naturals)])
+          (cons name (entry-lambda j)))
+        > #:key cdr))
+(for/list ([entry (in-list entries)])
+  (cons (car entry) (/ (round (* 1000 (cdr entry))) 1000)))
+]
+
 @tt{V1} and @tt{V14} enter first, at @math{λ ≈ 1.49}, then @tt{V5} and
 @tt{V20} at @math{0.93}, @tt{V6} at @math{0.85} and @tt{V3} at
-@math{0.71}; the other twelve follow at smaller @math{λ}. The vignette's text
+@math{0.71}; the other fourteen follow at smaller @math{λ}, in the same order
+as in R's fit. The vignette's text
 describes the older x axis, the L1 norm of the coefficients, which was R's
 default before glmnet 4.1-9 and is @racket[#:xvar 'norm] here (see
 @secref["plot-path-xvar"]).
@@ -121,8 +140,10 @@ with them @tt{cv.glmnet(x, y, foldid = foldid)} gives the numbers below:
 cvfit
 ]
 
-The printed summary is R's @tt{print(cvfit)}, except that the index of each
-@math{λ} counts from 0. R's @tt{plot(cvfit)} draws the cross-validated mean
+The printed summary has the rows and columns of R's @tt{print(cvfit)}, with
+two differences: the index of each @math{λ} counts from 0, and each number is
+rounded to four significant digits on its own, where R formats each column as
+a whole and can show a digit more. R's @tt{plot(cvfit)} draws the cross-validated mean
 squared error with one standard error above and below it, and a dotted line
 at each of @tech{lambda-min} and @tech{lambda-1se}:
 

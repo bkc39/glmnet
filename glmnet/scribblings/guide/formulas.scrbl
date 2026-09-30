@@ -584,7 +584,7 @@ formula front end. The examples in this section use R's @tt{mtcars}, whose
 @examples[#:eval ev #:label #f
 (require glmnet/datasets)
 (table-column-names iris)
-(list-ref (cdr (assoc "Species" iris)) 100)
+(vector-ref (cdr (assoc "Species" iris)) 100)
 ]
 
 @subsection[#:tag "formulas-factor-columns"]{Which columns are factors}

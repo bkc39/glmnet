@@ -41,7 +41,7 @@
                (read-dataset name)))
   (values (table->design-matrix x) y))
 
-(define (column table name) (cdr (assoc name table)))
+(define (column table name) (vector->list (cdr (assoc name table))))
 (define (exact-integers xs) (map inexact->exact xs))
 
 (define quick-start

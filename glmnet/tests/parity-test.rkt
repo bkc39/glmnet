@@ -21,7 +21,9 @@
 ;; Dataset goldens (kind "dataset", #61) hold R's own copy of each CSV that
 ;; glmnet/datasets ships, which must read back bit for bit, and vignette
 ;; goldens (kind "vignette") the vignette's calls on R glmnet's example
-;; datasets, which are loaded through glmnet/datasets.
+;; datasets, which are loaded through glmnet/datasets. The csv-cells golden
+;; holds how R's read.csv types a column of one cell, for many spellings of
+;; numbers, logicals and missing values, which csv->table must match.
 ;;
 ;; Goldens are generated on demand, never committed: the Nix `checks.parity` gate
 ;; regenerates them with the pinned R glmnet and points GLMNET_PARITY_GOLDENS at
@@ -35,7 +37,7 @@
            json
            racket/list
            racket/match
-           (only-in racket/math pi sqr)
+           (only-in racket/math nan? pi sqr)
            racket/runtime-path
            racket/string
            glmnet
@@ -352,6 +354,43 @@
     (define v (exact->inexact (* mantissa (expt 2 (string->number exponent)))))
     (if (string=? sign "-") (- v) v))
 
+  ;; R's %a of a double, or its Inf, -Inf or NaN.
+  (define (r-hex->flonum s)
+    (match s
+      ["Inf" +inf.0]
+      ["-Inf" -inf.0]
+      ["NaN" +nan.0]
+      [_ (hex->flonum s)]))
+
+  ;; Each cell of the csv-cells golden, alone in its column, as csv->table
+  ;; reads it against R's read.csv. Where the manual says they differ, the
+  ;; difference is checked instead: a quoted blank cell is a string where R
+  ;; reads NA, and a complex number is a string.
+  (define (run-csv-cells-golden g)
+    (for ([c (in-list (hash-ref g 'cells))])
+      (define cell (hash-ref c 'cell))
+      (define token (hash-ref c 'token))
+      (define (ours)
+        (vector-ref (cdr (assoc "a" (csv->table (open-input-string (string-append "a,b\n" cell ",z\n")))))
+                    0))
+      (define blank? (regexp-match? #px"^\\s*$" token))
+      (test-case (format "csv-cells ~s is R's ~a ~a" cell (hash-ref c 'class) (hash-ref c 'value))
+        (cond
+          [(and (hash-ref c 'na) (hash-ref c 'quoted) blank?) (check-equal? (ours) token)]
+          [(hash-ref c 'na)
+           (check-exn (lambda (e) (regexp-match? #rx"has a missing value" (exn-message e))) ours)]
+          [else
+           (match (hash-ref c 'class)
+             ["logical" (check-eq? (ours) (hash-ref c 'value))]
+             ["integer" (check-true (and (flonum? (ours)) (= (ours) (r-hex->flonum (hash-ref c 'value)))))]
+             ["numeric"
+              (define r (r-hex->flonum (hash-ref c 'value)))
+              (if (eqv? r +nan.0)
+                  (check-true (and (flonum? (ours)) (nan? (ours))))
+                  (check-eqv? (ours) r))]
+             ["complex" (check-equal? (ours) token)]
+             ["character" (check-equal? (ours) (hash-ref c 'value))])]))))
+
   ;; A CSV that glmnet/datasets ships (#61), read as a table, against R's own
   ;; copy of its data: every number the same double, every string the same.
   (define (run-dataset-golden g)
@@ -363,7 +402,7 @@
                     "column names")
       (for ([column (in-list table)]
             [expected (in-list (hash-ref g 'columns))])
-        (define cells (cdr column))
+        (define cells (vector->list (cdr column)))
         (define exact
           (or (hash-ref expected 'strings #f)
               (map hex->flonum (hash-ref expected 'hex))))
@@ -440,8 +479,8 @@
       (define entries (hash-ref column 'values))
       (cons name (if (member name symbols) (map string->symbol entries) entries))))
 
-  ;; The table of a formula golden: R's mtcars or iris as the example modules
-  ;; hold them, a committed dataset, or the table the golden carries.
+  ;; The table of a formula golden: R's mtcars or iris as glmnet/datasets
+  ;; holds them, a committed dataset, or the table the golden carries.
   (define (formula-golden-table g symbols)
     (define table
       (cond
@@ -452,7 +491,7 @@
                 [name (load-table name)])]))
     (for/list ([column (in-list table)])
       (if (member (car column) symbols)
-          (cons (car column) (map string->symbol (cdr column)))
+          (cons (car column) (for/list ([v (cdr column)]) (string->symbol v)))
           column)))
 
   ;; The formula algebra (#53): for each Racket spelling of the golden's
@@ -687,6 +726,7 @@
          [("cv")      (run-cv-golden g)]
          [("formula") (run-formula-golden g)]
          [("dataset") (run-dataset-golden g)]
+         [("csv-cells") (run-csv-cells-golden g)]
          [("vignette") (run-vignette-golden g)]
          [else        (run-golden g)]))]
     [explicit-goldens?

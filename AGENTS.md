@@ -22,8 +22,8 @@ glmnet/                        Racket collection
   data.rkt                     design-matrix layer (glmnet/data): the one input layout,
                                and tables (named columns) that convert into it
   data/csv.rkt                 glmnet/data/csv: CSV files to and from tables (RFC 4180,
-                               cells typed as R's read.csv types them); each other
-                               data format gets a module in data/ too (#41)
+                               each cell typed as R's type.convert types a column of
+                               that one cell); each data format is a module in data/ (#41)
   datasets.rkt                 glmnet/datasets: R glmnet's example datasets (loaders
                                returning the family fitter's arguments) and R's
                                mtcars and iris, from datasets/*.csv
@@ -61,14 +61,26 @@ them: plot-lib is Typed Racket and pulls in the drawing stack, and
 `racket`. Their documentation is a guide chapter (`guide/plots.scrbl`, tag
 `plots`) and a reference section (`ref-plot`, `@defmodule[glmnet/plot]`).
 
-Data sources follow the same rule (#61): a conversion from a format into a
-design matrix or a table is a module under `glmnet/data/`, such as
-`glmnet/data/csv`, and the example datasets are `glmnet/datasets`; `main.rkt`
-re-exports neither. Their guide chapter is `guide/data.scrbl` (tag `data`),
-and their reference sections are `ref-csv` and `ref-datasets`. The datasets
-are CSV files that `scripts/export-datasets.R` writes from the pinned R; the
-`dataset-*` parity goldens check every number of every file against R's, bit
-for bit, and the `vignette-*` goldens the vignette's calls on each dataset.
+Data sources follow the same rule (#41, #61): a conversion from a format
+into a design matrix or a table is a module `glmnet/data/<format>.rkt`, such
+as `glmnet/data/csv`, and the example datasets are `glmnet/datasets`;
+`main.rkt` re-exports neither. The documentation tags follow the module
+names:
+
+- the guide's Data chapter, `guide/data.scrbl` (tag `data`), has a section
+  `data-<format>` for each format and `data-datasets` for the datasets;
+- the reference has a top-level section `ref-data-<format>` for each, with
+  its `@defmodule`, after `ref-data` (the design-matrix layer) and before
+  `ref-datasets`;
+- the Concepts section `concepts-data` holds only what every fitter accepts:
+  the design matrix, the response forms and named data.
+
+`tests/docs-coverage-test.rkt` lists `glmnet/data/` itself, so a new format's
+exports are checked without editing the test. The datasets are CSV files that
+`scripts/export-datasets.R` writes from the pinned R; the `dataset-*` parity
+goldens check every number of every file against R's, bit for bit, the
+`vignette-*` goldens the vignette's calls on each dataset, and the
+`csv-cells` golden how R's `read.csv` types each spelling of a cell.
 
 The formula language (#53) is R's, checked against R's `terms()` and
 `model.matrix()` by the parity goldens. A new kind of formula term, such as
@@ -206,8 +218,10 @@ naming the bindings, if anything `(require glmnet)` exports has no `defproc`,
 `defstruct*`, `defthing` or `defform` entry in the manual: `scribblings/glmnet.scrbl`
 and the files it reaches through `include-section`, outside code blocks and
 examples, and so does anything `(require glmnet/plot)`, `(require
-glmnet/data/csv)` or `(require glmnet/datasets)` exports. A new `.scrbl`
-file counts once something includes it.
+glmnet/datasets)` or a module under `glmnet/data/` exports. A definition with
+`#:link-target? #f` does not count, nor does a `defstruct*` with
+`#:omit-constructor` for the constructor. A new `.scrbl` file counts once
+something includes it.
 
 ## Local dev loop
 

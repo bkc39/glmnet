@@ -839,6 +839,46 @@ for (name in names(frames)) {
   cat("wrote", path, "  (", nrow(d), "x", ncol(d), ")\n")
 }
 
+## --- CSV cells (#61) ----------------------------------------------------------
+## glmnet/data/csv types each cell as R's read.csv types a column that holds
+## only that cell. Each token below, as a bare cell and in quotes, and how R
+## reads it: its class, and its value, a number as C's %a.
+
+csv_cell_tokens <- c(
+  "T", "F", "TRUE", "FALSE", "true", "false", "True", "False", "t", " TRUE", "TRUE ", "\tT",
+  "NA", " NA", "NA ", "na", "N/A", "NaN", "nan", "Nan", "NAN", "-nan", "+NaN", "-NAN", " NAN",
+  "NaNx", "-NA", " NaN ",
+  "Inf", "inf", "INF", "-Inf", "+inf", "Infinity", "infinity", "-INFINITY", "Infin", "infinityx",
+  " Inf ", "Inf1",
+  "0x10", "0X1A", "-0x10", "+0x10", "0x", "0x ", "0x1p3", "0x1P-2", "0x.8", "0X.8P1", "0x1.8p1",
+  "0x1.8.8", "0xg", "0x10g", " 0x10 ", "0x1p", "0x1p+", "00x1", "0x1.", "0x.", "0x-1", "-0x0",
+  "0xFFFFFFFFFFFFFFFFFF", "0x1p99999", "0x1p-1080",
+  "1", "-1", "+1", "1.", ".5", ".", "-.", "+", "-", "1e5", "1E5", "1e", "1e+", "1e-", "1e+5",
+  "1.e5", ".e5", "1 ", " 1", " 1 ", "\t1\t", "\f1", "1\v", "1 2", "1_000", "1/2", "1d5", "#e1.5",
+  "1e999", "-1e999", "1e-400", "1e99999999", "0e99999", "00012", "-0", "-0.0", "+.5e-3",
+  "1.5.2", "--1", "+-1", "1e5.5", "0.1", "2.5", "-300", "123456789012345678901234567890",
+  "4.9e-324", "1 ", " 1", "1 ",
+  "x", "a b", "é", "TRUE1", "1TRUE", "1L", "0b1", "1i", "", "  ")
+
+csv_cells <- list()
+for (token in csv_cell_tokens) {
+  for (quoted in c(FALSE, TRUE)) {
+    cell <- if (quoted) paste0("\"", token, "\"") else token
+    v <- read.csv(text = paste0("a,b\n", cell, ",z\n"), stringsAsFactors = FALSE)$a[1]
+    na <- is.na(v) && !is.nan(v)
+    value <- if (na) ""
+             else if (is.numeric(v)) sprintf("%a", as.double(v))
+             else if (is.logical(v)) v
+             else as.character(v)
+    csv_cells[[length(csv_cells) + 1]] <-
+      list(token = token, cell = cell, quoted = quoted, class = class(v), na = na, value = value)
+  }
+}
+golden <- list(id = "csv-cells", kind = "csv-cells", cells = csv_cells, meta = meta)
+path <- file.path(goldens_dir, "csv-cells.json")
+writeLines(toJSON(golden, auto_unbox = TRUE, pretty = TRUE), path)
+cat("wrote", path, "  (", length(csv_cells), "cells )\n")
+
 ## The vignette's calls on each glmnet dataset (glmnet.Rmd and Coxnet.Rmd):
 ## glmnet(x, y, family) with every default, printed; coef and predict at the
 ## vignette's s on its rows of x; and cv.glmnet with every default but the

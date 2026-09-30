@@ -357,8 +357,9 @@
 
 ;; The values of the columns of table t with the given names, in that order,
 ;; each a vector, as they are in the table: the formula front end (#53) reads
-;; factors, whose values are strings, symbols or booleans, this way.
-(define (select-table-values t names* who)
+;; factors, whose values are strings, symbols or booleans, this way. Columns
+;; with no rows are an error unless rows-required? is #f.
+(define (select-table-values t names* who #:rows-required? [rows-required? #t])
   (define names (map column-name->string names*))
   (define position (column-positions t names who))
   (cond
@@ -371,7 +372,7 @@
          (f64vector-ref v (+ from i))))]
     [else
      (define columns (named-columns t names))
-     (check-column-lengths columns names who)
+     (check-column-lengths columns names who rows-required?)
      (for/list ([column (in-list columns)])
        (if (vector? column) column (list->vector column)))]))
 
@@ -386,9 +387,9 @@
           (values (column-name->string (car entry)) (cdr entry)))))
   (for/list ([name (in-list names)]) (hash-ref by-name name)))
 
-(define (check-column-lengths columns names who)
+(define (check-column-lengths columns names who [rows-required? #t])
   (define no (column-length (car columns)))
-  (when (zero? no)
+  (when (and rows-required? (zero? no))
     (raise-arguments-error who "the table has a column with no rows" "column" (car names)))
   (for ([column (in-list columns)]
         [name (in-list names)])

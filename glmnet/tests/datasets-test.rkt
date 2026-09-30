@@ -23,7 +23,7 @@
     (check-equal? (design-matrix-column-names x) (v-names p))
     (check-equal? x (table->design-matrix table (v-names p))))
 
-  (define (column name column-name) (cdr (assoc column-name (dataset-table name))))
+  (define (column name column-name) (vector->list (cdr (assoc column-name (dataset-table name)))))
 
   (test-case "QuickStartExample: 100 x 20 and a numeric response"
     (define-values (x y) (quick-start-example))
@@ -90,16 +90,18 @@
                 (fits? (lambda (x y) (mgaussian-fit x y #:lambda 0.1)) multi-gaussian-example))
     (check-pred elnet-result? (fits? (lambda (x y) (lasso x y #:lambda 0.1)) sparse-example)))
 
-  (test-case "mtcars: R's eleven columns of 32 cars"
+  (test-case "mtcars: R's eleven columns of 32 cars, each a vector"
     (check-equal? (table-column-names mtcars)
                   '("mpg" "cyl" "disp" "hp" "drat" "wt" "qsec" "vs" "am" "gear" "carb"))
-    (check-equal? (length (cdr (assoc "mpg" mtcars))) 32)
-    (check-equal? (take (cdr (assoc "wt" mtcars)) 3) '(2.62 2.875 2.32))
+    (check-true (andmap (lambda (column) (vector? (cdr column))) mtcars))
+    (check-equal? (vector-length (cdr (assoc "mpg" mtcars))) 32)
+    (check-equal? (take (column "mtcars" "wt") 3) '(2.62 2.875 2.32))
     (check-equal? mtcars (dataset-table "mtcars")))
 
-  (test-case "iris: four measurements and the species as strings"
+  (test-case "iris: four measurements and the species as strings, each a vector"
     (check-equal? (table-column-names iris)
                   '("Sepal.Length" "Sepal.Width" "Petal.Length" "Petal.Width" "Species"))
-    (check-equal? (remove-duplicates (cdr (assoc "Species" iris)))
+    (check-true (andmap (lambda (column) (vector? (cdr column))) iris))
+    (check-equal? (remove-duplicates (column "iris" "Species"))
                   '("setosa" "versicolor" "virginica"))
-    (check-equal? (length (cdr (assoc "Species" iris))) 150)))
+    (check-equal? (vector-length (cdr (assoc "Species" iris))) 150)))

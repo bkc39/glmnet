@@ -8,7 +8,7 @@
 @declare-exporting[glmnet]
 
 Every binding below is provided by @racketmodname[glmnet], except those of
-@secref["ref-csv"], @secref["ref-datasets"] and @secref["ref-plot"], which
+@secref["ref-data-csv"], @secref["ref-datasets"] and @secref["ref-plot"], which
 @racketmodname[glmnet/data/csv], @racketmodname[glmnet/datasets] and
 @racketmodname[glmnet/plot] provide. Each model
 family has a fit procedure, a path fitter, a cross-validation procedure, a
@@ -285,7 +285,7 @@ tables in use.
   (eval:error (table->design-matrix patients))
   (eval:error (table->design-matrix patients '("age" "weight")))]}
 
-@subsection[#:tag "ref-csv"]{CSV files}
+@section[#:tag "ref-data-csv"]{CSV files}
 
 @defmodule[glmnet/data/csv]
 
@@ -293,52 +293,75 @@ tables in use.
 following @hyperlink["https://www.rfc-editor.org/rfc/rfc4180"]{RFC 4180}.
 @racketmodname[glmnet] does not re-export it. See @secref["data-csv"].
 
-When reading, the first record is the header, whose cells name the columns:
-each name must be non-empty and appear once. Records end with a line feed, a
-carriage return or both, and the last one need not; a byte-order mark at the
-start is skipped. A cell in double quotes can hold commas, line breaks and
-double quotes, which are written twice. Every record must have one cell per
-column. The value of a cell does not depend on its quotes, or on the other
-cells of its column:
+When reading, the input must be UTF-8. The first record is the header, whose
+cells name the columns: each name must be non-empty and appear once. Records
+end with a line feed, a carriage return or both, and the last one need not; a
+byte-order mark at the start is skipped. A cell in double quotes can hold
+commas, line breaks and double quotes, which are written twice. Every record
+must have one cell per column.
+
+Each cell is typed on its own, as R's @tt{read.csv} types a column that holds
+only that cell:
 
 @itemlist[
- @item{A cell is missing when it is empty and not quoted, or holds only
-       spaces and tabs, or is R's @tt{NA}, quoted or not. A missing cell is an
+ @item{A cell is missing when it is @tt{NA}, quoted or not, or when it is not
+       quoted and is empty or holds only white space. A missing cell is an
        error.}
- @item{A decimal number, such as @tt{3}, @tt{-2.5}, @tt{.5} or
-       @tt{1e-3}, is a flonum, and so are R's @tt{Inf}, @tt{-Inf} and
-       @tt{NaN}. Spaces and tabs around a number are ignored.}
- @item{R's @tt{TRUE} and @tt{FALSE} are @racket[#t] and @racket[#f].}
- @item{Any other cell is a string, as written between the quotes, which
-       makes @tt{""} the empty string.}
+ @item{A number is a flonum. A number is a decimal number, such as @tt{3},
+       @tt{-2.5}, @tt{.5}, @tt{5.} or @tt{1e-3}; a hexadecimal one, such as
+       @tt{0x1A}, @tt{0x.8} or @tt{0x1.8p1}; or @tt{Inf}, @tt{Infinity} or
+       @tt{NaN}, in any case; each with an optional sign. White space around a
+       number is ignored. A decimal number is rounded correctly, which R's
+       reader does not always do.}
+ @item{@tt{TRUE} and @tt{T} are @racket[#t], and @tt{FALSE} and @tt{F} are
+       @racket[#f]. Other spellings, such as @tt{true} or @tt{False}, are
+       strings, as they are in R.}
+ @item{Any other cell is a string, as it is written between the quotes, white
+       space included: @tt{" TRUE"} and @tt{"NA "} are strings, as they are in
+       R, and @tt{""} is the empty string.}
 ]
 
+Quotes change the value of a cell only when it is empty or holds only white
+space: then it is a string when it is quoted, and missing when it is not,
+where R reads both as missing. A number, a logical or @tt{NA} is the same
+with or without quotes, as in R. Unlike R, which gives a whole column one
+type, a column can mix kinds: a column of the letters @tt{A}, @tt{C}, @tt{G}
+and @tt{T}, which R reads as strings, holds three strings and @racket[#t],
+and a formula that reads it raises an error naming the column. R's complex
+numbers, such as @tt{1i}, are strings.
+
 The table is an association list from each name, a string, to its column, a
-list, in the header's order. An error names the procedure called, the
+vector, in the header's order. An error names the procedure called, the
 column, the row, counting from 0, and the line of the input on which the row
-starts, counting from 1, and the file when there is one.
+starts, counting from 1, and the file when there is one. Input that is not
+UTF-8 is an error that names the line and the offset of its first byte that
+is not, counting from 0.
 
 When writing, the header is the table's column names, in its order, and then
-there is one line per row, each ended by a line feed. A real is written as the
-shortest decimal that reads back as the same flonum, without a trailing
-@tt{.0}, and an infinity or a NaN as R writes it; a boolean is @tt{TRUE} or
-@tt{FALSE}; and a string, or a symbol's name, is written as it is. A cell or
-a name is quoted when it holds a comma, a double quote or a line break, starts
-or ends with a space or a tab, or is empty, and a string is also quoted when
-it would read as another value, such as @racket["42"], as R's @tt{write.csv}
-quotes every string. It still reads back as that value, as it does in R. A
-string that would read back as a missing cell, @racket["NA"], cannot be
-written, nor can a value of another kind or a column without a name; an error
-names the column and the row.
+there is one line per row, each ended by a line feed; a table whose columns
+are empty is its header alone. A real is written as the shortest decimal that
+reads back as the same flonum, without a trailing @tt{.0}; an infinity as
+@tt{Inf} or @tt{-Inf}, as R writes it; and a NaN as @tt{NaN}, which R reads
+back as NaN, where R's @tt{write.csv} writes @tt{NA}. A boolean is @tt{TRUE}
+or @tt{FALSE}, and a string, or a symbol's name, is written as it is. A cell
+or a name is quoted when it holds a comma, a double quote or a line break,
+starts or ends with white space, or is empty, and a string is also quoted
+when it would read as another value, such as @racket["42"] or @racket["T"],
+as R's @tt{write.csv} quotes every string. It still reads back as that value,
+as it does in R. A string that would read back as a missing value,
+@racket["NA"], cannot be written, nor can a value of another kind or a column
+without a name; an error names the column and the row.
 
 @defproc[(csv->table [in input-port? (current-input-port)]) table?]{
   Reads a CSV file from @racket[in] to its end, and returns it as a table.
 
   @examples[#:eval ev
   (require glmnet/data/csv)
-  (csv->table (open-input-string "id,dose,treated\nA,2.5,TRUE\n\"B, 2\",5,FALSE\n"))
+  (csv->table (open-input-string "id,dose,treated\nA,2.5,TRUE\n\"B, 2\",5,F\n"))
   (csv->table (open-input-string "note\n\"said \"\"hi\"\"\"\n\"two\nlines\"\n"))
-  (eval:error (csv->table (open-input-string "x,y\n1,2\n3,NA\n")))]}
+  (csv->table (open-input-string "x\n0x1A\n-inf\n 7 \n\" TRUE\"\ntrue\n"))
+  (eval:error (csv->table (open-input-string "x,y\n1,2\n3,NA\n")))
+  (eval:error (csv->table (open-input-bytes #"name\nM\374ller\n")))]}
 
 @defproc[(csv-file->table [path path-string?]) table?]{
   Reads the CSV file at @racket[path] as @racket[csv->table] reads a port.
@@ -358,17 +381,19 @@ names the column and the row.
   (table->csv (list (cons "x" (list 0.1 (+ 0.1 0.2) 1e-300))) out)
   (get-output-string out)
   (csv->table (open-input-string (get-output-string out)))
+  (table->csv (csv->table (open-input-string "id,dose\n")))
   (eval:error (table->csv (list (cons "code" '("NA" "b")))))]}
 
 @defproc[(table->csv-file [table table?]
                           [path path-string?]
                           [#:exists exists
-                                    (or/c 'error 'append 'update 'replace 'truncate 'truncate/replace)
+                                    (or/c 'error 'replace 'truncate 'truncate/replace)
                                     'error])
          void?]{
   Writes @racket[table] to the file at @racket[path] as @racket[table->csv]
-  writes it to a port. @racket[exists] says what to do when the file exists, as
-  for @racket[open-output-file].
+  writes it to a port. @racket[exists] says what to do when the file exists,
+  as for @racket[open-output-file]; none of the choices keeps the file's old
+  contents.
 
   @examples[#:eval ev
   (require racket/file)
@@ -471,7 +496,8 @@ tables, read when the module is instantiated.
 
 @defthing[mtcars table?]{
   R's @tt{datasets::mtcars}, from the 1974 Motor Trend road tests of 32 cars,
-  as an association list from each of R's eleven column names to its column:
+  as an association list from each of R's eleven column names to its column,
+  a vector:
   @racket["mpg"], @racket["cyl"], @racket["disp"], @racket["hp"],
   @racket["drat"], @racket["wt"], @racket["qsec"], @racket["vs"],
   @racket["am"], @racket["gear"] and @racket["carb"], in R's order, with the
@@ -485,7 +511,7 @@ tables, read when the module is instantiated.
 @defthing[iris table?]{
   R's @tt{datasets::iris}, Anderson's measurements of 150 irises, 50 of each
   of three species, as an association list from each of R's five column names
-  to its column: @racket["Sepal.Length"], @racket["Sepal.Width"],
+  to its column, a vector: @racket["Sepal.Length"], @racket["Sepal.Width"],
   @racket["Petal.Length"] and @racket["Petal.Width"] in centimetres, and
   @racket["Species"], whose values are the strings @racket["setosa"],
   @racket["versicolor"] and @racket["virginica"]. R holds the species as a
@@ -1209,10 +1235,11 @@ carry the signal:
   @racket[path]; @racket[predict] and @racket[coef] default to
   @racket[lambda-1se], as R's @tt{predict.cv.glmnet} does, and also accept
   @racket['lambda-min], @racket['lambda-1se] or any λ; and
-  @racket[deviance-ratio] is the path's at @racket[lambda-1se]. It prints as
-  R's @tt{print.cv.glmnet} does: the measure, then for each of
-  @racket[lambda-min] and @racket[lambda-1se] its value, index, @racket[cvm],
-  @racket[cvsd] and @racket[nzero].
+  @racket[deviance-ratio] is the path's at @racket[lambda-1se]. It prints
+  like R's @tt{print.cv.glmnet}, with the index counted from 0: the measure,
+  then for each of @racket[lambda-min] and @racket[lambda-1se] its value,
+  index, @racket[cvm], @racket[cvsd] and @racket[nzero] (see
+  @secref["ref-model-printing"]).
 
   @examples[#:eval ev
   (define cv (elnet-cv X60 y60))
@@ -2313,11 +2340,13 @@ digits of the column's largest value, so a @math{λ} far below the first can
 show as @racket[0], and each column is written with one number of decimals
 throughout, or in scientific notation when that is narrower.
 
-A @racket[glmnet-cv] prints as R's @tt{print.cv.glmnet}: the name of its
+A @racket[glmnet-cv] prints like R's @tt{print.cv.glmnet}: the name of its
 measure, then a row for each of @racket[glmnet-cv-lambda-min] and
 @racket[glmnet-cv-lambda-1se] with that @math{λ}, its index, the
 cross-validated error, its standard error and the number of nonzero
-coefficients, the reals to four significant digits. A @racket[formula-model]
+coefficients. It differs from R's in two ways: the index counts from 0, where
+R's counts from 1, and each real is rounded to four significant digits on
+its own, where R formats each column as a whole and can show a digit more. A @racket[formula-model]
 prints as the result it holds, with its formula after the family.
 
 Printing does not change @racket[equal?], which compares results field by

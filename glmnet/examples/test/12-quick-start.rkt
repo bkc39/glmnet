@@ -4,6 +4,7 @@
 ;; expected numbers are R 4.5.3 with glmnet 4.1.10:
 ;;   data(QuickStartExample); x <- QuickStartExample$x; y <- QuickStartExample$y
 ;;   fit <- glmnet(x, y); print(fit)
+;;   b <- as.matrix(fit$beta); order(apply(b, 1, function(r) min(which(r != 0))))
 ;;   coef(fit, s = 0.1); predict(fit, newx = x[1:5, ], s = c(0.1, 0.05))
 ;;   foldid <- rep(1:10, length.out = 100); cvfit <- cv.glmnet(x, y, foldid = foldid)
 ;;   cvfit$lambda.min; coef(cvfit, s = "lambda.min")
@@ -61,6 +62,21 @@
                   "1   0  0.00 1.63100"
                   "2   2  5.53 1.48600"
                   "3   2 14.59 1.35400"))
+
+  ;; R: the order in which the predictors enter, by the first λ at which each
+  ;; coefficient is nonzero, ties in column order.
+  (define entry-order
+    (let ([columns (for/list ([j (in-range 20)])
+                     (cons (format "V~a" (add1 j))
+                           (for/first ([beta (in-vector (glmnet-path-coefficients fit))]
+                                       [lam (in-vector lambdas)]
+                                       #:unless (zero? (vector-ref beta j)))
+                             lam)))])
+      (map car (sort columns > #:key cdr))))
+  (check-equal? entry-order
+                '("V1" "V14" "V5" "V20" "V6" "V3" "V8" "V11" "V7" "V10" "V15" "V13" "V2"
+                  "V12" "V18" "V4" "V16" "V17" "V9" "V19"))
+  (check-equal? (length (drop entry-order 6)) 14)
 
   (check-pred pict? path-plot)
   (check-pred pict? cv-plot)
