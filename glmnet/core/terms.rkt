@@ -12,12 +12,19 @@
 ;; A term is a set of variables, held as an ascending list of indices into the
 ;; variables vector, where R holds a bit set, so that a formula of many main
 ;; effects stays linear in their number; the response columns are the first
-;; variables. A variable is a struct; this module has one kind,
-;; `column-variable`, and every procedure that reads a variable dispatches on
-;; its kind with `match`, so another kind adds a struct and a clause to each of
-;; `leaf-variable`, `variable-label`, `variable-inputs` and `variable-columns`.
+;; variables. A variable is a struct: a `column-variable`, or a
+;; `transform-variable`, a function of columns computed row by row. Every
+;; procedure that reads a variable dispatches on its kind with `match`, so
+;; another kind adds a struct and a clause to each of `leaf-variable`,
+;; `variable-label`, `variable-inputs` and `variable-columns`.
 ;; `variable-columns` receives R's coding of the variable in its term
 ;; (`codings`), which only a variable that expands into several columns needs.
+;;
+;; A transform is resolved against the table's columns when the terms are
+;; expanded: each name it reads is the column of that name if the table has
+;; one, and otherwise the Racket binding that `~` captured (R's
+;; data-then-environment rule). The resolution is kept with the terms, so new
+;; data must have the columns the fit read.
 
 (module words racket/base
   (provide operators unsupported-operators reserved glued-operator?)
@@ -48,6 +55,11 @@
          term?
          rhs?
          rhs-intercept
+         transform-term
+         transform-term?
+         transform-term-name
+         source-transform
+         transform-argument
          (struct-out column-variable)
          variable-label
          variable-inputs
@@ -64,6 +76,43 @@
 (define (column-name? v)
   (or (string? v) (and (symbol? v) (not (memq v reserved)) (not (glued-operator? v)))))
 
+;; A transform: the design-matrix column `name`, whose value in each row is
+;; `proc` applied to the row's value of each of `columns`, which the table
+;; must have. Two transforms are equal when they are written the same: the
+;; same name and names.
+(struct transform-term (name columns proc)
+  #:guard (lambda (name columns proc _)
+            (values (string->immutable-string name) (map column-name->string columns) proc))
+  #:property prop:custom-write
+  (lambda (t port mode)
+    (write-string "#<transform-term " port)
+    (write-string (transform-term-name t) port)
+    (write-string ">" port))
+  #:property prop:equal+hash
+  (let ([key (lambda (t) (cons (transform-term-name t) (transform-term-columns t)))])
+    (list (lambda (a b recur) (recur (key a) (key b)))
+          (lambda (t recur) (recur (key t)))
+          (lambda (t recur) (recur (key t))))))
+
+;; A transform that `~` makes. Its `columns` are the names in its argument
+;; positions, each the column of that name when the table has one and
+;; otherwise the Racket binding where the formula was written: `fallbacks`
+;; has for each name a thunk returning that binding, or #f when it has none.
+;; `proc`'s body reads a name through `transform-argument`, so that a name
+;; that is neither is an error only if the body reads it.
+(struct source-transform transform-term (fallbacks))
+
+;; The value that a transform's name that is neither a column nor bound gets,
+;; and the exception that reading it raises.
+(define unbound (string->uninterned-symbol "unbound"))
+(struct exn:fail:unbound-name exn:fail (name))
+
+(define (transform-argument v name)
+  (if (eq? v unbound)
+      (raise (exn:fail:unbound-name (format "~a: not a column and not bound" name)
+                                    (current-continuation-marks) name))
+      v))
+
 (define (operator? v) (and (memq v operators) #t))
 (define (sign? v) (and (memq v '(+ -)) #t))
 (define (power? v) (and (exact-integer? v) (>= v 2)))
@@ -78,6 +127,7 @@
     ['all #t]
     [(or 0 1) #t]
     [(? column-name?) #t]
+    [(? transform-term?) #t]
     [(? infix-group?) (infix? v)]
     [(list '+ (? term?) ..1) #t]
     [(list '- (? term?) ..1) #t]
@@ -161,26 +211,84 @@
 ;; A column of the table, read as numbers. `name` is a string.
 (struct column-variable (name) #:transparent)
 
-;; The variable a leaf of the right-hand side names.
-(define (leaf-variable leaf)
-  (column-variable (column-name->string leaf)))
+;; A transform of the table's columns: its `transform-term`, and for each of
+;; the term's names, the column it reads, or #f for the Racket binding.
+(struct transform-variable (term inputs) #:transparent)
+
+;; The variable a leaf of the right-hand side names, on a table whose column
+;; names are the keys of `present`.
+(define (leaf-variable leaf present)
+  (match leaf
+    [(source-transform _ names _ _)
+     (transform-variable leaf (map (lambda (name) (and (hash-ref present name #f) name)) names))]
+    [(transform-term _ names _) (transform-variable leaf names)]
+    [_ (column-variable (column-name->string leaf))]))
 
 ;; The variable's name in the names of the design matrix's columns and terms.
 (define (variable-label v)
   (match v
-    [(column-variable name) name]))
+    [(column-variable name) name]
+    [(transform-variable t _) (transform-term-name t)]))
 
 ;; The names of the table's columns the variable reads.
 (define (variable-inputs v)
   (match v
-    [(column-variable name) (list name)]))
+    [(column-variable name) (list name)]
+    [(transform-variable _ inputs) (remove-duplicates (filter values inputs))]))
 
 ;; The variable's columns in a term, as (name . flvector) pairs: `inputs` maps
-;; the name of each of its inputs to that column of the table, and `coding` is
-;; R's coding of the variable in the term, 1 (contrasts) or 2 (dummies).
-(define (variable-columns v inputs coding)
+;; the name of each of its inputs to that column of the table, `coding` is
+;; R's coding of the variable in the term, 1 (contrasts) or 2 (dummies), and
+;; `no` is the number of rows.
+(define (variable-columns who v inputs coding no)
   (match v
-    [(column-variable name) (list (cons name (hash-ref inputs name)))]))
+    [(column-variable name) (list (cons name (hash-ref inputs name)))]
+    [(transform-variable t names) (list (cons (transform-term-name t)
+                                              (transform-column who t names inputs no)))]))
+
+;; The value of each row of transform t, whose names read the columns
+;; `names`, or their Racket bindings where a name is #f. The bindings are
+;; read each time, as R reads them each time it evaluates the formula; a
+;; binding that is not defined, at the top level, counts as none. A value
+;; must be a finite real, and an error names the transform and the row.
+(define (transform-column who t names inputs no)
+  (match-define (transform-term label _ proc) t)
+  (define fallbacks
+    (match t
+      [(source-transform _ _ _ fallbacks) fallbacks]
+      [_ (map (lambda (_) #f) names)]))
+  (define arguments
+    (for/list ([name (in-list names)] [fallback (in-list fallbacks)])
+      (cond
+        [name (hash-ref inputs name)]
+        [fallback (with-handlers ([exn:fail:contract:variable? (lambda (e) unbound)])
+                    (fallback))]
+        [else unbound])))
+  (define (row-arguments i)
+    (for/list ([name (in-list names)] [a (in-list arguments)])
+      (if name (flvector-ref a i) a)))
+  (for/flvector #:length no ([i (in-range no)])
+    (define v
+      (with-handlers ([exn:fail:unbound-name?
+                       (lambda (e)
+                         (raise-arguments-error
+                          who "a name in a transform is neither a column of the table nor a defined variable"
+                          "name" (symbol->string (exn:fail:unbound-name-name e))
+                          "transform" label))]
+                      [exn:fail?
+                       (lambda (e)
+                         (raise-arguments-error who "a transform raised an exception"
+                                                "transform" label "row" i
+                                                "exception" (unquoted-printing-string (exn-message e))))])
+        (apply proc (row-arguments i))))
+    (unless (real? v)
+      (raise-arguments-error who "a transform's value is not a real number"
+                             "transform" label "row" i "value" v))
+    (define x (real->double-flonum v))
+    (unless (fl< (flabs x) +inf.0)
+      (raise-arguments-error who "a transform's value is not finite"
+                             "transform" label "row" i "value" v))
+    x))
 
 ;; --- expansion -------------------------------------------------------------------
 
@@ -198,11 +306,12 @@
 (struct model-terms (variables response-count terms codings intercept?) #:transparent)
 
 ;; The terms of right-hand side `rhs`, with response columns `responses`
-;; (strings) and `all` standing for the table's `columns` (strings) that are
-;; not responses. As R's termsform does: + joins and - removes terms, * crosses
-;; them, : interacts them and ^ crosses a sum with itself; each operation drops
-;; the duplicates it makes, keeping the first. 1 and 0 set the intercept, the
-;; other way round inside the right operand of -, and the last one wins.
+;; (strings), `all` standing for the table's `columns` (strings) that are not
+;; responses, and transforms resolved against `columns`. As R's termsform
+;; does: + joins and - removes terms, * crosses them, : interacts them and ^
+;; crosses a sum with itself; each operation drops the duplicates it makes,
+;; keeping the first. 1 and 0 set the intercept, the other way round inside
+;; the right operand of -, and the last one wins.
 (define (expand-terms rhs responses columns)
   (define-values (variables terms intercept) (encode rhs responses columns))
   (define ordered (sort terms < #:key length #:cache-keys? #t))
@@ -227,6 +336,7 @@
   (define (variable-term v) (list (install! v)))
   (for ([r (in-list responses)]) (install! (column-variable r)))
   (define response-set (for/hash ([r (in-list responses)]) (values r #t)))
+  (define present (for/hash ([c (in-list columns)]) (values c #t)))
   (define intercept 'unspecified)
   (define parity #t)
   (define (set-intercept! on?) (set! intercept (eq? on? parity)))
@@ -255,7 +365,7 @@
       [(list '^ a n)
        (define l (encode-tree a))
        (for/fold ([crossed l]) ([i (in-range 1 n)]) (interact l crossed))]
-      [leaf (list (variable-term (leaf-variable leaf)))]))
+      [leaf (list (variable-term (leaf-variable leaf present)))]))
   (define terms (encode-tree (parse-rhs rhs)))
   (values (list->vector (reverse installed)) terms intercept))
 
@@ -359,19 +469,26 @@
      (raise-arguments-error who "the table has no columns with these names"
                             "columns" names "columns of the table" available)])
   (define data (select-table-columns table needed who))
+  (define no (design-matrix-nrows data))
   (define inputs
-    (let ([v (design-matrix-data data)]
-          [no (design-matrix-nrows data)])
+    (let ([v (design-matrix-data data)])
       (for/hash ([name (in-list needed)] [j (in-naturals)])
         (values name (for/flvector #:length no ([i (in-range no)])
                        (f64vector-ref v (+ i (* j no))))))))
+  ;; A variable in several terms, such as a transform and its interactions,
+  ;; is computed once for each of its codings.
+  (define computed (make-hash))
+  (define (columns-of i coding)
+    (hash-ref! computed (cons i coding)
+               (lambda ()
+                 (variable-columns who (vector-ref (model-terms-variables mt) i) inputs coding no))))
   (define columns
     (append*
      (for/list ([term (in-list (model-terms-terms mt))]
                 [coding (in-list (model-terms-codings mt))])
        (define per-variable
-         (for/list ([v (in-list (term-variables mt term))] [c (in-list coding)])
-           (variable-columns v inputs c)))
+         (for/list ([i (in-list term)] [c (in-list coding)])
+           (columns-of i c)))
        (for/fold ([acc (car per-variable)]) ([next (in-list (cdr per-variable))])
          (for*/list ([n (in-list next)] [a (in-list acc)])
            (cons (string-append (car a) ":" (car n))

@@ -86,8 +86,9 @@ columns, such as an identifier or a label.
 @section[#:tag "formulas-language"]{Formulas}
 
 A @tech{formula} is written with @racket[~], as R writes @tt{y ~ x1 + x2}:
-the response, then the predictor terms. @racket[~] quotes its body, so the
-column names are written as identifiers, or as strings when they are not
+the response, then the predictor terms. @racket[~] quotes its body, except for
+its transforms, so the column names are written as identifiers, or as strings
+when they are not
 identifiers or are words of the formula language (@racket[all],
 @racket[surv] and the operators @racket[+], @racket[-], @racket[*],
 @racket[:] and @racket[^]):
@@ -96,6 +97,9 @@ identifiers or are words of the formula language (@racket[all],
 (~ bp age dose)
 (formula-predictor-names (~ bp age dose) patients)
 ]
+
+Since @racket[~] quotes the names itself, a quoted name, such as
+@racket['age], is a syntax error that says to write @racket[age].
 
 The simplest terms are:
 
@@ -127,8 +131,9 @@ error:
 ]
 
 The formula language also has R's operators for interactions, crossing,
-powers and the intercept, written prefix as here or infix as R writes them.
-@secref["formulas-algebra"] describes them.
+powers and the intercept, written prefix as here or infix as R writes them,
+which @secref["formulas-algebra"] describes, and transforms such as
+@racket[(log age)], which @secref["formulas-transforms"] describes.
 
 The response is one column for most families. For the Cox family it is
 @racket[(surv time status)], as R's @tt{Surv(time, status)}, and for the
@@ -270,8 +275,9 @@ square. R's @tt{y ~ x + x^2} is the same model as @tt{y ~ x}, and so is
 ]
 
 This surprises people who come to R's formulas from algebra. R writes a
-square @tt{I(x^2)}. The formula language does not have transforms yet, so for
-now a square is a column of its own in the table.
+square @tt{I(x^2)}, a transform, and so does a formula here:
+@racket[(I (expt age 2))], or @racket[(sqr age)] (see
+@secref["formulas-squares"]).
 
 @subsection[#:tag "formulas-removal"]{Removing terms}
 
@@ -390,8 +396,173 @@ A table that lacks one of them is an error that names it, as
        (list @tt{cbind(y1, y2) ~ a}          @racket[(~ (y1 y2) a)]                 ""))]
 
 Each infix form can also be written with the reader's infix dots, as
-@racketfont{(y . ~ . a * b)}. @secref["formulas-r"] lists what the formula
-language does not have.
+@racketfont{(y . ~ . a * b)}. @secref["formulas-transforms"] has the
+transforms, such as R's @tt{log(a)}, and @secref["formulas-r"] lists what the
+formula language does not have.
+
+@section[#:tag "formulas-transforms"]{Transforms}
+
+A @emph{transform} is a term computed from columns, as R's @tt{log(x)} is. A
+group that starts with a function, such as @racket[(log age)] or
+@racket[(sqrt dose)], is one: an ordinary Racket expression, evaluated for
+each row with each column name standing for the row's value. The design matrix
+holds its values as a column named by its source:
+
+@examples[#:eval ev #:label #f
+(define T (formula-design-matrix (~ bp age (log age) (sqrt dose)) patients))
+(design-matrix-column-names T)
+(design-matrix->rows (design-matrix-select-rows T '(0 1)))
+]
+
+A transform is a variable of the formula algebra, as a column is, so it
+crosses and interacts with other terms, and the interaction's column is the
+product of the transform's and the other variable's:
+
+@examples[#:eval ev #:label #f
+(formula-predictor-names (~ bp (* (log age) dose)) patients)
+]
+
+@subsection[#:tag "formulas-squares"]{Squares, and R's @tt{I()}}
+
+@racket[(I expr)] is R's @tt{I()}: the transform whose values are those of
+@racket[expr], any Racket arithmetic. Inside a transform the operators are
+Racket's, as they are inside R's @tt{I()} and any other function call, so
+@racket[(I (* age dose))] is the product of two columns and
+@racket[(log (+ dose 1))] adds 1.
+
+This is how a formula squares a column. @racket[(^ age 2)] is crossing, and
+the same as @racket[age] (see @secref["formulas-powers"]); R's
+@tt{y ~ x + x^2} is @tt{y ~ x}. The square is @racket[(I (expt age 2))], as R
+writes @tt{I(x^2)}, or @racket[(sqr age)], with @racket[sqr] from
+@racketmodname[racket/math]:
+
+@examples[#:eval ev #:label #f
+(require racket/math)
+(formula-predictor-names (bp . ~ . age + age ^ 2) patients)
+(formula-predictor-names (bp . ~ . age + (sqr age)) patients)
+(coef (formula-fit (bp . ~ . age + (sqr age) + dose) patients #:lambda 0.1))
+]
+
+At @math{λ = 0.1} the lasso leaves the square out, since blood pressure in
+the simulated data is linear in age. @racket[^] is not a Racket function, and
+a transform that uses it is a syntax error that says so:
+
+@examples[#:eval ev #:label #f
+(eval:error (~ bp age (I (^ age 2))))
+]
+
+@subsection[#:tag "formulas-transform-names"]{Names in a transform}
+
+A transform reads names as R does, from the data first and then from the
+program. An identifier in argument position, that is, anywhere but first in a
+group, is the table's column of that name when the table has one, and
+otherwise the Racket binding of that name where the formula is written. So a
+constant of the program can scale a column:
+
+@examples[#:eval ev #:label #f
+(define reference-age 50)
+(define scaled (formula-design-matrix (~ bp (I (/ age reference-age))) patients))
+(design-matrix->rows (design-matrix-select-rows scaled '(0 1)))
+]
+
+In this chapter @racket[age] is also a Racket variable, the list of ages that
+@racket[patients] was built from, but inside the formula it names the
+column. The identifier first in a group, the function, is always the Racket
+binding, even when the table has a column of that name, as R looks up a
+function by name and skips a column: with a column @racket[max],
+@racket[(max max x)] is the larger of that column and @racket[x], R's
+@tt{pmax(max, x)}. Names that the transform binds itself, with @racket[let],
+@racket[lambda] or @racket[for/sum], are its own, and so are not read from the
+table, and neither are the names in quoted data, nor the names that Racket's
+forms match as literals, such as @racket[cond]'s @racket[=>] and @racket[else]
+and @racket[quasiquote]'s @racket[unquote]. A column named like one of these
+literals, such as @racket[else] or @racket[_], cannot be read inside a
+transform, where @racket[(log else)] is Racket's syntax error
+@racketerror{else: not allowed as an expression}; write it as an ordinary
+term, or rename it in the table. @racket[predict] needs only the columns that
+a transform reads. A name that is neither a column nor bound
+is an error when the formula is fitted, which names it:
+
+@examples[#:eval ev #:label #f
+(eval:error (formula-fit (~ bp (I (* age scale)) dose) patients #:lambda 0.1))
+]
+
+At the top level, as in the REPL and in this chapter, a transform's function
+must be defined before the formula, since a later definition cannot be seen
+there; in a module it can be defined anywhere in the module. A name in
+argument position can be defined later in both, since the transform reads it
+when it runs. A bug in Racket's contracts at the top level makes a formula
+procedure whose first call in a session had a syntax error in its formula
+fail from then on with @tt{lifted/1.1: undefined}; restart the REPL when
+that happens, or define the formula on its own first, as
+@racket[(define f (~ ....))], where a syntax error does no harm, and pass
+@racket[f] to the procedure.
+
+A transform is elementwise: it sees one row at a time. R's @tt{scale(x)} and
+@tt{x - mean(x)} read the whole column; compute such a column in the table
+instead.
+
+@subsection[#:tag "formulas-transform-values"]{Values and new data}
+
+Each value of a transform must be a real number and finite, and an error
+names the transform and the row where it is not. @racket[predict] evaluates
+the transforms again on the new table's rows, so it needs the columns they
+read, and it reads their Racket bindings again, as R's @tt{predict} does:
+
+@examples[#:eval ev #:label #f
+(define curved
+  (formula-fit (bp . ~ . age + (sqr age) + (log dose)) patients #:lambda 0.1))
+(predict curved new-patients)
+(eval:error (predict curved (list (cons "age" '(40)) (cons "dose" '(0.0)))))
+]
+
+@subsection[#:tag "formulas-transform-data"]{Transforms as data}
+
+A formula prints each transform as its source, and two formulas that write a
+transform the same way are @racket[equal?]. @racket[make-formula] takes a
+transform as a @racket[transform-term]: a name, the columns it reads and a
+procedure of their values, which has no source to name it by:
+
+@examples[#:eval ev #:label #f
+(define log-age (transform-term "(log age)" '("age") log))
+(make-formula 'bp log-age 'dose)
+(equal? (make-formula 'bp log-age 'dose) (~ bp (log age) dose))
+]
+
+@subsection[#:tag "formulas-transforms-r"]{From R's transforms}
+
+Transforms are named by their Racket source, so R's @tt{log(hp)} is the
+column @racket["(log hp)"] here:
+
+@tabular[#:style 'boxed
+         #:sep @hspace[2]
+         #:row-properties '(bottom-border ())
+ (list (list @bold{R}             @bold{Racket}                  @bold{Column})
+       (list @tt{log(x)}          @racket[(log x)]               @racket["(log x)"])
+       (list @tt{log(x, 2)}       @racket[(log x 2)]             @racket["(log x 2)"])
+       (list @tt{sqrt(x)}         @racket[(sqrt x)]              @racket["(sqrt x)"])
+       (list @tt{exp(x)}          @racket[(exp x)]               @racket["(exp x)"])
+       (list @tt{abs(x)}          @racket[(abs x)]               @racket["(abs x)"])
+       (list @tt{I(x^2)}          @racket[(I (expt x 2))]        @racket["(I (expt x 2))"])
+       (list ""                   @racket[(sqr x)]               @racket["(sqr x)"])
+       (list @tt{I(x * z)}        @racket[(I (* x z))]           @racket["(I (* x z))"])
+       (list @tt{I(x / z)}        @racket[(I (/ x z))]           @racket["(I (/ x z))"])
+       (list @tt{log(x + 1)}      @racket[(log (+ x 1))]         @racket["(log (+ x 1))"])
+       (list @tt{pmin(x, 10)}     @racket[(min x 10)]            @racket["(min x 10)"])
+       (list @tt{log(x):z}        @racket[(: (log x) z)]         @racket["(log x):z"]))]
+
+R's vectorized @tt{pmin} is Racket's @racket[min] here, since a transform
+sees one row at a time.
+
+A name is the source as the reader writes it, so quoted data keeps its
+abbreviation, @racket['x] and not @racketfont{(quote x)}. A transform reads a
+column's values as flonums, so the data it compares them with are flonums
+too, @racket['(40.0 50.0)] and not @racket['(40 50)], which @racket[memv]
+would never find:
+
+@examples[#:eval ev #:label #f
+(formula-predictor-names (~ bp (I (if (memv age '(40.0 50.0)) 1 0))) patients)
+]
 
 @section[#:tag "formulas-binomial"]{A binomial fit}
 
@@ -471,17 +642,37 @@ tests require a formula fit to be @racket[equal?] to the matrix fit of its
 design matrix for every family. From R also comes how the results are named:
 R's @tt{coef} labels the intercept @tt{(Intercept)} and each predictor by its
 column name, @tt{wt:hp} for an interaction, and names the elements of a
-multinomial or multi-response result by class or response.
+multinomial or multi-response result by class or response. The one change is
+a transform's name, its Racket source: R's @tt{log(hp)}, @tt{I(hp^2)} and
+@tt{log(hp):wt} are @racket["(log hp)"], @racket["(I (expt hp 2))"] or
+@racket["(sqr hp)"], and @racket["(log hp):wt"] here, and the parity tests map
+R's names to these before they compare them.
 
 The formula language is smaller than R's:
 
 @itemlist[
- @item{Every variable is a numeric column. There are no factors to expand
-       into indicator columns, and no transforms such as @tt{log(x)} or
-       @tt{I(x^2)}; add such columns to the table instead.}
+ @item{Every variable is a numeric column or a transform of numeric columns.
+       There are no factors to expand into indicator columns.}
+ @item{A transform is evaluated one row at a time, where R evaluates it on
+       whole columns. R's transforms that read the whole column, such as
+       @tt{scale(x)}, @tt{x - mean(x)} and @tt{poly(x, 2)}, the orthogonal
+       polynomials, have no counterpart; add such columns to the table
+       instead. R's @tt{poly(x, 2, raw = TRUE)} is @racket[x] and
+       @racket[(sqr x)].}
+ @item{A transform's names are resolved on the table it is fitted to, and
+       @racket[predict] reads the same columns of a new table. R resolves
+       them again on the new data, where a name that the new data lacks
+       falls back on a variable of the same name.}
+ @item{The response is a column, not a transform: R's @tt{log(y) ~ x} has no
+       counterpart, and @racket[(~ (log y) x)] is a syntax error that says
+       so; add the column to the table. A response of several columns whose
+       first name is a function where the formula is written reads as such
+       a transform, so write those columns as strings.}
  @item{R's @tt{.} is written @racket[all]. R's @tt{%in%} and @tt{/}
-       (nesting) are syntax errors that say the language does not have them,
-       and @tt{offset()} has no counterpart.}
+       (nesting) are syntax errors that say the language does not have them;
+       for @tt{/}, the error says to write a ratio as
+       @racket[(I (/ x z))], R's @tt{I(x / z)}. @tt{offset()} has no
+       counterpart.}
  @item{An operator needs spaces around it, since the reader reads
        @tt{wt:hp} as one name and @tt{-0} as @racket[0], and a power is an
        exact integer of at least 2, where R truncates @tt{x^2.5} to @tt{x^2}.}
@@ -498,7 +689,10 @@ The formula language is smaller than R's:
        response. R's response there is the one variable @tt{Surv(time, status)}
        or @tt{cbind(y1, y2)}, so R would keep @tt{time} as a predictor.}
  @item{A missing or non-finite value is an error that names its column and
-       row, where R's default @tt{na.action} would drop the row.}
+       row, where R's default @tt{na.action} would drop the row. So is a
+       transform's value that is not a finite real, which names the
+       transform: R drops a row where @tt{log(x)} is @tt{NaN} and keeps one
+       where it is @tt{-Inf}.}
 ]
 
 @(close-eval ev)

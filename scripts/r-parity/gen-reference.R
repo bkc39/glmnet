@@ -446,7 +446,9 @@ for (f in cv_fixtures) {
 ## intercept column, as column names and columns, and the warnings it gave; and
 ## glmnet on that matrix with intercept = attr(terms, "intercept"), at a user
 ## lambda sequence, through the generic outputs at `s`. `rkt` holds the Racket
-## spellings of the formula, which must all give R's matrix.
+## spellings of the formula, which must all give R's matrix. `names` maps R's
+## name of each transform to the Racket one, its source: log(hp) is
+## "(log hp)", and an interaction's name maps each of its variables.
 
 formula_data <- list(mtcars = datasets::mtcars,
                      longley = read.csv(file.path(data_dir, "longley.csv")))
@@ -493,7 +495,49 @@ formula_fixtures <- list(
   list(id = "formula-longley-no-intercept", dataset = "longley", r = "Employed ~ GNP * Population - 1",
        rkt = c("(~ Employed (- (* GNP Population) 1))", "(Employed . ~ . - 1 + GNP * Population)")),
   list(id = "formula-longley-mixed", dataset = "longley", r = "Employed ~ Year + GNP:Unemployed:Armed.Forces + Unemployed",
-       rkt = c("(Employed . ~ . Year + (: GNP Unemployed Armed.Forces) + Unemployed)"))
+       rkt = c("(Employed . ~ . Year + (: GNP Unemployed Armed.Forces) + Unemployed)")),
+  ## Transforms (#53, leg 2).
+  list(id = "formula-mtcars-log", dataset = "mtcars", r = "mpg ~ log(hp) + wt",
+       rkt = c("(mpg . ~ . (log hp) + wt)", "(~ mpg (log hp) wt)"),
+       names = list(`log(hp)` = "(log hp)")),
+  list(id = "formula-mtcars-sqrt", dataset = "mtcars", r = "mpg ~ sqrt(disp) + wt",
+       rkt = c("(mpg . ~ . (sqrt disp) + wt)", "(~ mpg (sqrt disp) wt)"),
+       names = list(`sqrt(disp)` = "(sqrt disp)")),
+  list(id = "formula-mtcars-exp", dataset = "mtcars", r = "mpg ~ exp(wt) + hp",
+       rkt = c("(mpg . ~ . (exp wt) + hp)"),
+       names = list(`exp(wt)` = "(exp wt)")),
+  list(id = "formula-mtcars-square-sqr", dataset = "mtcars", r = "mpg ~ hp + I(hp^2)",
+       rkt = c("(mpg . ~ . hp + (sqr hp))", "(~ mpg hp (sqr hp))"),
+       names = list(`I(hp^2)` = "(sqr hp)")),
+  list(id = "formula-mtcars-square-expt", dataset = "mtcars", r = "mpg ~ hp + I(hp^2)",
+       rkt = c("(mpg . ~ . hp + (I (expt hp 2)))"),
+       names = list(`I(hp^2)` = "(I (expt hp 2))")),
+  list(id = "formula-mtcars-product", dataset = "mtcars", r = "mpg ~ wt + I(wt * hp)",
+       rkt = c("(mpg . ~ . wt + (I (* wt hp)))"),
+       names = list(`I(wt * hp)` = "(I (* wt hp))")),
+  list(id = "formula-mtcars-ratio", dataset = "mtcars", r = "mpg ~ I(hp/wt) + qsec",
+       rkt = c("(mpg . ~ . (I (/ hp wt)) + qsec)", "(~ mpg (I (/ hp wt)) qsec)"),
+       names = list(`I(hp/wt)` = "(I (/ hp wt))")),
+  list(id = "formula-mtcars-log-cross", dataset = "mtcars", r = "mpg ~ log(hp) * wt",
+       rkt = c("(mpg . ~ . (log hp) * wt)", "(~ mpg (* (log hp) wt))"),
+       names = list(`log(hp)` = "(log hp)")),
+  list(id = "formula-mtcars-log-interact", dataset = "mtcars", r = "mpg ~ log(hp):wt + qsec",
+       rkt = c("(mpg . ~ . (log hp) : wt + qsec)"),
+       names = list(`log(hp)` = "(log hp)")),
+  list(id = "formula-mtcars-power-trap", dataset = "mtcars", r = "mpg ~ hp + hp^2 + wt",
+       rkt = c("(mpg . ~ . hp + hp ^ 2 + wt)", "(~ mpg hp (^ hp 2) wt)", "(~ mpg hp wt)")),
+  ## pi is not a column, so it is R's pi and racket/math's.
+  list(id = "formula-mtcars-environment", dataset = "mtcars", r = "mpg ~ wt + I(disp/pi)",
+       rkt = c("(mpg . ~ . wt + (I (/ disp pi)))"),
+       names = list(`I(disp/pi)` = "(I (/ disp pi))")),
+  list(id = "formula-mtcars-log-response", dataset = "mtcars", r = "mpg ~ log(mpg) + wt",
+       rkt = c("(mpg . ~ . (log mpg) + wt)"),
+       names = list(`log(mpg)` = "(log mpg)")),
+  ## A transform's name writes quoted data as the reader abbreviates it.
+  list(id = "formula-mtcars-quoted-data", dataset = "mtcars",
+       r = "mpg ~ wt + as.numeric(cyl %in% c(4, 6))",
+       rkt = c("(mpg . ~ . wt + (I (if (memv cyl '(4.0 6.0)) 1 0)))"),
+       names = list(`as.numeric(cyl %in% c(4, 6))` = "(I (if (memv cyl '(4.0 6.0)) 1 0))"))
 )
 
 for (fx in formula_fixtures) {
@@ -518,7 +562,9 @@ for (fx in formula_fixtures) {
   })
   s <- c(lambda[2], 0.6 * lambda[2] + 0.4 * lambda[3])
   golden <- list(id = fx$id, kind = "formula", dataset = fx$dataset, family = "gaussian",
-                 r_formula = fx$r, rkt = I(fx$rkt), alpha = 1, thresh = 1e-7,
+                 r_formula = fx$r, rkt = I(fx$rkt),
+                 names = if (is.null(fx$names)) setNames(list(), character(0)) else fx$names,
+                 alpha = 1, thresh = 1e-7,
                  lambda_user = lambda,
                  term_labels = I(attr(tt, "term.labels")), intercept = intercept,
                  factors = factors,
