@@ -389,9 +389,11 @@
   (define row-major? (eq? order 'row-major))
   (define (not-finite k x)
     (define-values (i j)
-      (if row-major?
-          (quotient/remainder k ncols)
-          (let-values ([(j i) (quotient/remainder k nrows)]) (values i j))))
+      (cond
+        [row-major? (quotient/remainder k ncols)]
+        [else
+         (define-values (j i) (quotient/remainder k nrows))
+         (values i j)]))
     (element-error who what "not finite" x
                    #:row i #:column (if checked-names (list-ref checked-names j) j)))
   (define n (* nrows ncols))
