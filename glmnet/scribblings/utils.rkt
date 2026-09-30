@@ -18,22 +18,27 @@
          scribble/core
          scribble/decode
          racket/sandbox
-         racket/runtime-path
          (for-syntax racket/base))
 
 (require (for-label glmnet
+                    glmnet/data/nested
                     glmnet/plot
+                    glmnet/data/csv
+                    glmnet/data/math
                     glmnet/data/polars
                     (only-in polars
                              dataframe? series? dataframe series read-csv ref column-names
                              dtype polars-null dataframe->f64vector)
-                    glmnet/examples/data/mtcars
-                    glmnet/examples/data/iris
+                    glmnet/datasets
                     racket/base
                     racket/contract
                     racket/file
+                    racket/flonum
                     racket/match
                     ffi/vector
+                    math/array
+                    math/matrix
+                    math/distributions
                     (only-in pict pict?)
                     (only-in plot
                              plot-pict plot-width plot-height plot-title plot-font-size vrule)
@@ -42,26 +47,28 @@
 (provide (all-from-out scribble/manual)
          (all-from-out scribble/example)
          (for-label (all-from-out glmnet
+                                  glmnet/data/nested
                                   glmnet/plot
+                                  glmnet/data/csv
+                                  glmnet/data/math
                                   glmnet/data/polars
                                   polars
-                                  glmnet/examples/data/mtcars
-                                  glmnet/examples/data/iris
+                                  glmnet/datasets
                                   racket/base
                                   racket/contract
                                   racket/file
+                                  racket/flonum
                                   racket/match
                                   ffi/vector
+                                  math/array
+                                  math/matrix
+                                  math/distributions
                                   pict
                                   plot
                                   plot/utils))
          make-glmnet-eval
          see-reference
-         exnraise
-         iris-csv-path)
-
-;; R's iris as write.csv writes it, for the examples that read a CSV file.
-(define-runtime-path iris-csv-path "../examples/data/iris.csv")
+         exnraise)
 
 (define (make-glmnet-eval)
   (parameterize ([sandbox-output 'string]

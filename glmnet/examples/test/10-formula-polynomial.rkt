@@ -9,7 +9,7 @@
 ;; and the same for mpg ~ log(hp) + wt at s = 0.1.
 
 (require glmnet
-         glmnet/examples/data/mtcars
+         glmnet/datasets
          "../10-formula-polynomial.rkt")
 
 (module+ main

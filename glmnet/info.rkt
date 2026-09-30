@@ -14,15 +14,19 @@
 ;; .zo files import scribble's lp2 runtime (scribble/lp/lang/lang2.rkt). The
 ;; catalog's `raco setup --check-pkg-deps` flags it under deps, not build-deps.
 ;; draw-lib, pict-lib and plot-lib are for glmnet/plot (plot.rkt), which main.rkt
-;; does not re-export, so `(require glmnet)` does not load them. polars is for
-;; glmnet/data/polars, which main.rkt does not re-export either.
-(define deps '("base" "draw-lib" "pict-lib" "plot-lib" "polars" "scribble-lib"))
+;; does not re-export, so `(require glmnet)` does not load them. math-lib and
+;; typed-racket-lib are for glmnet/data/math, the math/matrix adapter, and polars
+;; (rkt-polars) for glmnet/data/polars; main.rkt loads neither.
+(define deps
+  '("base" "draw-lib" "math-lib" "pict-lib" "plot-lib" "polars" "scribble-lib"
+    "typed-racket-lib"))
 ;; at-exp-lib provides scribble/reader, which tests/docs-coverage-test.rkt uses
-;; to read the manual's sources. pict-doc and plot-doc are for the manual's
-;; links into their documentation; plot-gui-lib provides `plot`, the module
-;; plot's documentation is written against, which the manual imports for-label.
+;; to read the manual's sources. math-doc, pict-doc and plot-doc are for the
+;; manual's links into their documentation; plot-gui-lib provides `plot`, the
+;; module plot's documentation is written against, which the manual imports
+;; for-label.
 (define build-deps
-  '("at-exp-lib" "pict-doc" "plot-doc" "plot-gui-lib" "racket-doc" "rackunit-lib"
+  '("at-exp-lib" "math-doc" "pict-doc" "plot-doc" "plot-gui-lib" "racket-doc" "rackunit-lib"
     "sandbox-lib"))
 (define scribblings '(("scribblings/glmnet.scrbl" (multi-page))))
 (define pkg-desc

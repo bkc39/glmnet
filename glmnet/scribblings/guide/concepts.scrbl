@@ -2,7 +2,7 @@
 @(require "../utils.rkt")
 
 @(define ev (make-glmnet-eval))
-@(ev `(define iris-csv ,(path->string iris-csv-path)))
+@(ev `(define iris-csv ,(path->string (collection-file-path "iris.csv" "glmnet" "datasets"))))
 
 @title[#:tag "concepts" #:style 'toc]{Concepts}
 
@@ -19,7 +19,8 @@ column per predictor. Every fit and prediction procedure accepts it in either
 of two forms:
 
 @itemlist[
- @item{a non-empty list of rows, each a list of reals of the same length; or}
+ @item{a non-empty list or vector of rows, each a list or vector of reals of
+       the same length; or}
  @item{a @racket[design-matrix?] value, which holds the matrix in the layout
        the Fortran reads.}
 ]
@@ -94,19 +95,20 @@ zero coefficient. It fits a Poisson response with an infinite count and
 returns an empty model. Its @tt{predict} carries non-finite new data through to
 the predictions. Here each of these is an error.
 
-The @deftech{response} has one entry per row of the design matrix. Its shape
-depends on the family:
+The @deftech{response} has one entry per row of the design matrix. It is a
+list, a vector, an @racket[flvector] or an @racket[f64vector], and its entries
+depend on the family:
 
 @tabular[#:style 'boxed
          #:sep @hspace[2]
          #:row-properties '(bottom-border ())
  (list (list @bold{Family}                    @bold{Response})
-       (list "Gaussian"                       "a list of reals")
-       (list "Binomial"                       @elem{a list of @racket[0]/@racket[1] class labels})
-       (list "Multinomial"                    @elem{a list of class labels @math{0, …, K−1}, every class present})
-       (list "Cox"                            @elem{a list of positive times @emph{and} a list of @racket[0]/@racket[1] event indicators})
-       (list "Poisson"                        "a list of non-negative counts")
-       (list "Multi-response Gaussian"        @elem{a matrix with one row per observation and one column per response, in either form of a @tech{design matrix}}))]
+       (list "Gaussian"                       "reals")
+       (list "Binomial"                       @elem{@racket[0]/@racket[1] class labels})
+       (list "Multinomial"                    @elem{class labels @math{0, …, K−1}, every class present})
+       (list "Cox"                            @elem{positive times @emph{and}, separately, @racket[0]/@racket[1] event indicators})
+       (list "Poisson"                        "non-negative counts")
+       (list "Multi-response Gaussian"        @elem{a matrix with one row per observation and one column per response, in any form of a @tech{design matrix}}))]
 
 A response is checked in the same way as a design matrix, by
 @racket[response->f64vector]: every entry must be finite, and there must be one
@@ -116,6 +118,49 @@ per row of the design matrix:
 (eval:error (ols X '(1.0 4.0 +inf.0 6.0 5.0)))
 (eval:error (ols X '(1.0 2.0)))
 ]
+
+The rows of a design matrix, and the entries of a response, can be vectors as
+well as lists. A design matrix comes in four nestings, whose outer sequence
+always holds the rows, and a response in four one-dimensional forms:
+
+@tabular[#:style 'boxed
+         #:sep @hspace[2]
+         #:row-properties '(bottom-border ())
+ (list (list @bold{Shape}                     @bold{Example})
+       (list "list of lists"                  @racket['((1.0 2.0) (2.0 1.0))])
+       (list "list of vectors"                @racket[(list #(1.0 2.0) #(2.0 1.0))])
+       (list "vector of lists"                @racket[(vector '(1.0 2.0) '(2.0 1.0))])
+       (list "vector of vectors"              @racket[#(#(1.0 2.0) #(2.0 1.0))])
+       (list "list, for a response"           @racket['(1.0 4.0)])
+       (list "vector"                         @racket[#(1.0 4.0)])
+       (list @racket[flvector]                @racket[(flvector 1.0 4.0)])
+       (list @racket[f64vector]               @racket[(f64vector 1.0 4.0)]))]
+
+Every shape fits exactly as the same lists do, and the prediction procedures
+read new data in any nesting:
+
+@examples[#:eval ev #:label #f
+(require racket/flonum)
+(define list-of-vectors (map list->vector X))
+(define vector-of-lists (list->vector X))
+(define Xv (list->vector (map list->vector X)))
+Xv
+(for/list ([rows (list X list-of-vectors vector-of-lists Xv)])
+  (equal? (ols rows y) (ols X y)))
+(for/list ([response (list (list->vector y)
+                           (flvector 1.0 4.0 3.0 6.0 5.0)
+                           (f64vector 1.0 4.0 3.0 6.0 5.0))])
+  (equal? (ols X response) (ols X y)))
+(elnet-predict (ols Xv (list->vector y)) (vector #(6.0 5.0) '(0.0 1.0)))
+]
+
+@racketmodname[glmnet/data/nested] converts the nestings to a
+@racket[design-matrix?] value and back (see @secref["data-nested"]).
+
+The Fortran reads a response as an @racket[f64vector], and every form of a
+response is copied into a fresh one. An @racket[flvector] holds the same
+doubles, but it could not be passed as it is in any case: the FFI does not
+accept an @racket[flvector] where it expects an @racket[f64vector].
 
 @subsection[#:tag "concepts-named"]{Named data}
 
@@ -133,7 +178,8 @@ or a design matrix with column names. A @deftech{formula}, written with
 
 The model keys its coefficients by name, and predicts from a table by
 matching its columns by name. @secref["formulas"] covers tables, formulas and
-the models fitted from them.
+the models fitted from them, and @secref["data"] where data comes from: R
+glmnet's example datasets and CSV files.
 
 @subsection[#:tag "concepts-polars"]{Polars dataframes}
 
@@ -144,8 +190,7 @@ the models fitted from them.
 @racket[read-csv] and converting it is the fast way to fit real data: the
 predictors leave Polars in one bulk copy, already in the column-major layout,
 and become a design matrix without another. Here @racketid[iris-csv] is the path
-of @filepath{glmnet/examples/data/iris.csv}, R's @tt{iris} as its
-@tt{write.csv} writes it:
+of @filepath{glmnet/datasets/iris.csv}, R's @tt{iris}:
 
 @examples[#:eval ev #:label #f
 (require glmnet/data/polars
@@ -532,10 +577,11 @@ signal, with @math{y = 1 + 3x₁ − 2x₂ + x₃} plus noise:
 cv
 ]
 
-The result is a @racket[glmnet-cv]. It prints as R prints one: the measure,
-then a row for each of the two choices, with its @math{λ}, its index among the
-candidates (counting from 0), the cross-validated error, its standard error and
-the number of nonzero coefficients.
+The result is a @racket[glmnet-cv]. It prints like R's @tt{print.cv.glmnet},
+with the index counted from 0: the measure, then a row for each of the two
+choices, with its @math{λ}, its index among the candidates, the
+cross-validated error, its standard error and the number of nonzero
+coefficients (see @secref["ref-model-printing"]).
 
 @subsection[#:tag "concepts-cv-choice"]{Reading lambda-min and lambda-1se}
 

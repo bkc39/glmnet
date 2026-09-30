@@ -8,8 +8,12 @@
   (require rackunit
            racket/contract
            racket/list
+           racket/flonum
            ffi/vector
-           glmnet/data)
+           glmnet/data
+           (only-in (submod glmnet/data support)
+                    flat->design-matrix design-matrix-data element-error missing-error
+                    ->finite-flonum default-column-names))
 
   (define X '((1.0 4.0)
               (2.0 5.0)
@@ -101,13 +105,15 @@
 
   ;; --- column names ------------------------------------------------------------
 
-  (test-case "column names are carried, and default to #f"
+  (test-case "column names are carried as strings, and default to #f"
     (check-false (design-matrix-column-names (rows->design-matrix X)))
     (check-equal? (design-matrix-column-names (rows->design-matrix X #:column-names '("a" b)))
-                  '("a" b))
+                  '("a" "b"))
     (check-equal? (design-matrix-column-names
                    (columns->design-matrix '((1.0) (2.0)) #:column-names '(x1 x2)))
-                  '(x1 x2))
+                  '("x1" "x2"))
+    (check-equal? (rows->design-matrix X #:column-names '(a b))
+                  (rows->design-matrix X #:column-names '("a" "b")))
     (check-equal? (design-matrix-column-names
                    (f64vector->design-matrix (f64vector 1.0 2.0) 1 2 #:column-names '("u" "v")))
                   '("u" "v")))
@@ -214,4 +220,71 @@
         (check-equal? (f64vector->design-matrix v no ni) dm)
         (define i (random no))
         (define j (random ni))
-        (check-equal? (design-matrix-ref dm i j) (list-ref (list-ref flo i) j))))))
+        (check-equal? (design-matrix-ref dm i j) (list-ref (list-ref flo i) j)))))
+
+  ;; --- the data formats' support set (#41) -----------------------------------
+
+  (test-case "flat->design-matrix reads column-major or row-major data, copied or adopted"
+    (define cm (f64vector 1.0 2.0 3.0 4.0 5.0 6.0))
+    (define dm (flat->design-matrix cm 2 3 #f 'test "the data"))
+    (check-equal? (design-matrix->rows dm) '((1.0 3.0 5.0) (2.0 4.0 6.0)))
+    (check-equal? (flat->design-matrix (flvector 1.0 3.0 5.0 2.0 4.0 6.0) 2 3 #f 'test "the data"
+                                       #:order 'row-major)
+                  dm)
+    (check-equal? (flat->design-matrix (flvector 1.0 2.0 3.0 4.0 5.0 6.0) 2 3 #f 'test "the data")
+                  dm)
+    (define adopted (flat->design-matrix cm 2 3 '(a "b" c) 'test "the data" #:adopt? #t))
+    (check-eq? (design-matrix-data adopted) cm)
+    (check-equal? (design-matrix-column-names adopted) '("a" "b" "c"))
+    (f64vector-set! cm 0 99.0)
+    (check-eqv? (design-matrix-ref dm 0 0) 1.0))
+
+  (test-case "flat->design-matrix checks the length and what it may adopt by contract"
+    (check-blame (lambda () (flat->design-matrix (f64vector 1.0 2.0 3.0) 2 2 #f 'test "the data"))
+                 #rx"does not have nrows \\* ncols entries")
+    (check-blame (lambda () (flat->design-matrix (flvector 1.0) 1 1 #f 'test "the data" #:adopt? #t))
+                 #rx"only a column-major f64vector can be adopted")
+    (check-blame (lambda () (flat->design-matrix (f64vector 1.0 2.0) 1 2 #f 'test "the data"
+                                                 #:order 'row-major #:adopt? #t))
+                 #rx"only a column-major f64vector can be adopted")
+    (check-error (lambda () (flat->design-matrix (f64vector 1.0 2.0) 1 2 '(a) 'test "the data"))
+                 #rx"^test: the number of column names"))
+
+  (test-case "flat->design-matrix names a non-finite entry by its row and its column"
+    (check-error (lambda () (flat->design-matrix (f64vector 1.0 2.0 +nan.0 4.0) 2 2 '(a b)
+                                                 'polars->design-matrix "the dataframe"))
+                 #rx"^polars->design-matrix: the dataframe has an element that is not finite\n  column: \"b\"\n  row: 0\n  element: \\+nan.0$")
+    (check-error (lambda () (flat->design-matrix (flvector 1.0 2.0 +inf.0 4.0) 2 2 #f
+                                                 'matrix->design-matrix "the matrix" #:order 'row-major))
+                 #rx"not finite\n  column: 0\n  row: 1\n")
+    (check-error (lambda () (f64vector->design-matrix (f64vector 1.0 2.0 3.0 -inf.0) 2 2
+                                                      #:column-names '(u v)))
+                 #rx"^f64vector->design-matrix: the vector has an element that is not finite\n  column: \"v\"\n  row: 1"))
+
+  (test-case "the shared errors, conversion and default names"
+    (check-error (lambda () (element-error 'f "the table" "not a real number" 'x #:row 2 #:column "g"))
+                 #rx"^f: the table has an element that is not a real number\n  column: \"g\"\n  row: 2\n  element: 'x$")
+    (check-error (lambda () (element-error 'f "y" "not finite" +inf.0 #:position 3))
+                 #rx"^f: y has an element that is not finite\n  position: 3\n  element: \\+inf.0$")
+    (check-error (lambda () (missing-error 'f "the dataframe" #:row 1 #:column "a"))
+                 #rx"^f: the dataframe has a missing value\n  column: \"a\"\n  row: 1$")
+    (check-error (lambda () (missing-error 'f "the input" #:row 0 #:column "a" #:details '("line" 2)))
+                 #rx"has a missing value\n  column: \"a\"\n  row: 0\n  line: 2$")
+    (check-error (lambda () (missing-error 'f "the response" #:position 4 #:element #f))
+                 #rx"^f: the response has a missing value\n  position: 4\n  element: #f$")
+    (check-eqv? (->finite-flonum 1/2 'f "the matrix" 0 0) 0.5)
+    (check-error (lambda () (->finite-flonum (expt 10 400) 'f "the matrix" 1 "c"))
+                 #rx"not finite\n  column: \"c\"\n  row: 1")
+    (check-error (lambda () (->finite-flonum "1" 'f "the matrix" 1 0))
+                 #rx"not a real number\n  column: 0\n  row: 1")
+    (check-equal? (default-column-names 3) '("V1" "V2" "V3")))
+
+  (test-case "response/c contracts on equivalent elements are contract-equivalent?"
+    (check-true (contract-equivalent? (response/c real?) (response/c real?)))
+    (check-true (contract-equivalent? (response/c (or/c 0 1)) (response/c (or/c 0 1))))
+    (check-true (contract-equivalent? (response/c (>/c 0)) (response/c (>/c 0))))
+    (check-false (contract-equivalent? (response/c (>/c 0)) (response/c (>=/c 0))))
+    (check-true (contract-stronger? (response/c (>/c 0)) (response/c (>=/c 0))))
+    (check-false (contract-stronger? (response/c real?) (response/c (>/c 0))))
+    (check-true (flat-contract? (response/c real?)))
+    (check-equal? (contract-name (response/c (or/c 0 1))) '(response/c (or/c 0 1)))))

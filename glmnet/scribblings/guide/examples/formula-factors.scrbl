@@ -16,15 +16,14 @@ response of strings has its strings as classes.
 
 @section[#:tag "ex-formula-factors-data"]{The data}
 
-@racketmodname[glmnet/examples/data/mtcars] provides R's @tt{mtcars}: 32 cars
-from the 1974 Motor Trend road tests, among them their miles per gallon
+@racketmodname[glmnet/datasets] provides R's @tt{mtcars}: 32 cars from the
+1974 Motor Trend road tests, among them their miles per gallon
 (@racket["mpg"]), weight in thousands of pounds (@racket["wt"]) and number of
-cylinders (@racket["cyl"]), 4, 6 or 8. @racketmodname[glmnet/examples/data/iris]
-provides R's @tt{iris}: four measurements of 150 flowers and their species,
-as strings:
+cylinders (@racket["cyl"]), 4, 6 or 8. It also provides R's @tt{iris}: four
+measurements of 150 flowers and their species, as strings:
 
 @examples[#:eval ev #:label #f
-(require glmnet/examples/data/mtcars glmnet/examples/data/iris)
+(require glmnet/datasets)
 (table-column-names mtcars)
 (table-column-names iris)
 ]

@@ -17,7 +17,7 @@
                   table-column-names)
          (only-in (submod "../data.rkt" support)
                   design-matrix-data design-matrix-nrows design-matrix-ncols
-                  column-name->string select-table-values adopt-f64vector))
+                  column-name->string select-table-values flat->design-matrix))
 
 (define column-name/c (or/c string? symbol?))
 
@@ -131,7 +131,7 @@
   (for ([name (in-list names)])
     (check-no-null who "the dataframe" (ref df name)))
   (define-values (v nrows _ncols) (dataframe->f64vector df #:columns names #:null 'error))
-  (adopt-f64vector v nrows names who "the dataframe"))
+  (flat->design-matrix v nrows (length names) names who "the dataframe" #:adopt? #t))
 
 (define (polars->response s)
   (define who 'polars->response)

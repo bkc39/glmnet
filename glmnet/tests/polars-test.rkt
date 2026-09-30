@@ -18,8 +18,7 @@
                     polars-null)
            glmnet
            glmnet/data/polars
-           glmnet/examples/data/mtcars
-           (only-in glmnet/examples/data/iris [iris iris-species])
+           (only-in glmnet/datasets mtcars [iris iris-species])
            (file "../private/demo-utils.rkt"))
 
   ;; A table's columns, in its order, as a dataframe.
