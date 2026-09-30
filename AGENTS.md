@@ -21,6 +21,9 @@ glmnet/                        Racket collection
   foreign.rkt                  contracted wrappers + load-time precision guard
   data.rkt                     design-matrix layer (glmnet/data): the one input layout,
                                and tables (named columns) that convert into it
+  data/tabular-asa.rkt         glmnet/data/tabular-asa: tabular-asa tables to and from
+                               design matrices, responses and tables; not re-exported
+                               by main.rkt, so (require glmnet) does not load tabular-asa
   core/*.rkt                   one module per family; marshal.rkt, path.rkt shared
   core/model.rkt               gen:glmnet-model: predict / coef / deviance-ratio on any result
   core/cv.rkt                  cross-validation (R's cv.glmnet) behind every family's *-cv
@@ -190,8 +193,9 @@ its `glmnet/examples/NN-*.rkt` changes. `tests/docs-coverage-test.rkt` fails,
 naming the bindings, if anything `(require glmnet)` exports has no `defproc`,
 `defstruct*`, `defthing` or `defform` entry in the manual: `scribblings/glmnet.scrbl`
 and the files it reaches through `include-section`, outside code blocks and
-examples, and so does anything `(require glmnet/plot)` exports. A new `.scrbl`
-file counts once something includes it.
+examples, and so does anything `(require glmnet/plot)` or
+`(require glmnet/data/tabular-asa)` exports. A new `.scrbl` file counts once
+something includes it.
 
 ## Local dev loop
 

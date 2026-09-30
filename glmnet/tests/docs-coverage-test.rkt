@@ -1,9 +1,9 @@
 #lang racket/base
 
-;; Every binding exported by `(require glmnet)` or `(require glmnet/plot)` has
-;; a reference entry: a defproc, defproc*, defstruct, defstruct*, defthing,
-;; defform, defform*, defidform or defparam in the manual (deftogether is
-;; searched through). The manual is glmnet/scribblings/glmnet.scrbl and every
+;; Every binding exported by `(require glmnet)`, `(require glmnet/plot)` or
+;; `(require glmnet/data/tabular-asa)` has a reference entry: a defproc,
+;; defproc*, defstruct, defstruct*, defthing, defform, defform*, defidform or
+;; defparam in the manual (deftogether is searched through). The manual is glmnet/scribblings/glmnet.scrbl and every
 ;; file it reaches through include-section; a .scrbl file that nothing includes
 ;; does not count, and neither does a definition form inside code (racketblock,
 ;; examples, ...). A defstruct covers the struct's constructor, predicate, field
@@ -20,7 +20,8 @@
            racket/set
            scribble/reader
            (only-in glmnet)
-           (only-in glmnet/plot))
+           (only-in glmnet/plot)
+           (only-in glmnet/data/tabular-asa))
 
   (define-runtime-path scribblings-dir "../scribblings")
 
@@ -193,9 +194,10 @@
     (check-false (set-empty? (exported 'glmnet)))
     (check-true (set-member? (exported 'glmnet) 'elnet-fit))
     (check-true (set-member? (exported 'glmnet) 'rows->design-matrix))
-    (check-true (set-member? (exported 'glmnet/plot) 'plot-coefficient-path)))
+    (check-true (set-member? (exported 'glmnet/plot) 'plot-coefficient-path))
+    (check-true (set-member? (exported 'glmnet/data/tabular-asa) 'tabular-asa->design-matrix)))
 
-  (for ([mod (in-list '(glmnet glmnet/plot))])
+  (for ([mod (in-list '(glmnet glmnet/plot glmnet/data/tabular-asa))])
     (test-case (format "every export of ~a has a reference entry" mod)
       (define missing
         (sort (set->list (set-subtract (exported mod) documented)) symbol<?))

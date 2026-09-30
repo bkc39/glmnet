@@ -22,6 +22,8 @@
 
 (require (for-label glmnet
                     glmnet/plot
+                    glmnet/data/tabular-asa
+                    (prefix-in asa: tabular-asa)
                     glmnet/examples/data/mtcars
                     glmnet/examples/data/iris
                     racket/base
@@ -38,6 +40,8 @@
          (all-from-out scribble/example)
          (for-label (all-from-out glmnet
                                   glmnet/plot
+                                  glmnet/data/tabular-asa
+                                  tabular-asa
                                   glmnet/examples/data/mtcars
                                   glmnet/examples/data/iris
                                   racket/base

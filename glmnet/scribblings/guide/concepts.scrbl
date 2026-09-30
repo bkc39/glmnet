@@ -134,6 +134,59 @@ The model keys its coefficients by name, and predicts from a table by
 matching its columns by name. @secref["formulas"] covers tables, formulas and
 the models fitted from them.
 
+@subsection[#:tag "concepts-tabular-asa"]{tabular-asa tables}
+
+A table of
+@hyperlink["https://docs.racket-lang.org/tabular-asa/"]{tabular-asa}, an
+immutable dataframe library, converts to and from glmnet's data through
+@racketmodname[glmnet/data/tabular-asa], which @racketmodname[glmnet] does not
+load. tabular-asa has a @racketidfont{table?} of its own, so the examples give
+its bindings the prefix @racketidfont{asa:}. Here is a small table, read from
+CSV text:
+
+@examples[#:eval ev #:label #f
+(require glmnet/data/tabular-asa (prefix-in asa: tabular-asa))
+(define df
+  (asa:table-read/csv
+   (open-input-string "y,x1,x2,g\n1,1,2,a\n4,2,1,b\n3,3,4,a\n6,4,3,b\n5,5,6,a\n")))
+(asa:display-table df)
+]
+
+A design matrix takes the columns that it is given, in that order, with their
+names, and a response takes one column:
+
+@examples[#:eval ev #:label #f
+(define Xdf (tabular-asa->design-matrix df '(x1 x2)))
+(design-matrix-column-names Xdf)
+(elnet-result-coefficients (ols Xdf (tabular-asa->response df 'y)))
+]
+
+For a formula, @racket[tabular-asa->table] makes a @tech{table} of the
+columns, in which a column of strings is a factor. Going back,
+@racket[design-matrix->tabular-asa] and @racket[table->tabular-asa] make
+tabular-asa tables, and tabular-asa's own procedures take it from there, here
+to add the predictions to new data:
+
+@examples[#:eval ev #:label #f
+(define df-model (formula-fit (~ y x1 g) (tabular-asa->table df) #:lambda 0))
+(coef df-model)
+(asa:display-table (design-matrix->tabular-asa Xdf))
+(define df-new (asa:table-read/columns '((2.5 3.5) ("a" "b")) '(x1 g)))
+(asa:display-table
+ (asa:table-with-column df-new (predict df-model (tabular-asa->table df-new)) #:as 'y))
+]
+
+tabular-asa writes a missing value as @racket[#f], and its CSV reader reads an
+empty cell or @racket["na"] as one. A missing value, like a cell that is not a
+number where numbers are read, is an error that names the column and the row;
+nothing is dropped unless @racket[asa:table-drop-na] drops it:
+
+@examples[#:eval ev #:label #f
+(define gaps (asa:table-read/csv (open-input-string "y,x\n1,2\n2,na\n3,5\n")))
+(eval:error (tabular-asa->design-matrix gaps '(x)))
+(design-matrix->rows (tabular-asa->design-matrix (asa:table-drop-na gaps) '(x)))
+]
+
 @section[#:tag "concepts-penalty"]{The penalty: @math{α} and @math{λ}}
 
 For the Gaussian family, glmnet solves

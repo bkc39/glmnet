@@ -8,9 +8,11 @@
 @declare-exporting[glmnet]
 
 Every binding below is provided by @racketmodname[glmnet], except those of
-@secref["ref-plot"], which @racketmodname[glmnet/plot] provides. Each model
-family has a fit procedure, a path fitter, a cross-validation procedure, a
-transparent result struct and prediction helpers. The formula front end
+@secref["ref-data-tabular-asa"] and @secref["ref-plot"], which
+@racketmodname[glmnet/data/tabular-asa] and @racketmodname[glmnet/plot]
+provide. Each model family has a fit procedure, a path fitter, a
+cross-validation procedure, a transparent result struct and prediction
+helpers. The formula front end
 (@secref["ref-formula"]) fits any family from a @tech{table}. Every result
 type, @racket[glmnet-path], @racket[glmnet-cv] and @racket[formula-model] also
 implement the generic interface of @secref["ref-model"]: @racket[predict],
@@ -324,6 +326,134 @@ modules provide. @racketmodname[glmnet] does not re-export them.
   (require glmnet/examples/data/iris)
   (table-column-names iris)
   (formula-predictor-names (Sepal.Length . ~ . Petal.Width + Species) iris)]}
+
+@section[#:tag "ref-data-tabular-asa"]{tabular-asa tables}
+
+@defmodule[glmnet/data/tabular-asa]
+
+@racketmodname[glmnet/data/tabular-asa] converts between the tables of
+@hyperlink["https://docs.racket-lang.org/tabular-asa/"]{tabular-asa}, an
+immutable dataframe library, and a @tech{design matrix}, a @tech{response} or
+a @tech{table}. @racketmodname[glmnet] does not re-export it, so that
+@racket[(require glmnet)] does not load tabular-asa. tabular-asa exports a
+@racketidfont{table?} of its own, which clashes with @racket[table?], so this
+manual gives tabular-asa's bindings the prefix @racketidfont{asa:}, as
+@racket[(require (prefix-in asa: tabular-asa))] does. See
+@secref["concepts-tabular-asa"].
+
+A tabular-asa table holds each column as a vector, and its index selects and
+orders the rows. Every conversion reads the rows in the index's order, so a
+filtered, sorted or reversed table converts as it prints, and the row an error
+names is the table's row, counting from 0. The table must have at least one
+row and one column, which is what @racket[(not/c asa:table-empty?)] requires.
+Column names are compared as strings, so @racket['x] and @racket["x"] name the
+same column.
+
+tabular-asa writes a missing value as @racket[#f], and its CSV reader reads an
+empty cell, @racket["na"] and a few other spellings as one. A missing value in
+a column that is converted raises @racket[exn:fail:contract], with a message
+that names the column and the row, and so does a cell that is not a real,
+finite number where numbers are read. Nothing is dropped or imputed:
+@racket[asa:table-drop-na] drops the rows with missing values, when that is
+what an analysis wants.
+
+The examples in this section use this table:
+
+@examples[#:eval ev #:label #f
+(require glmnet/data/tabular-asa (prefix-in asa: tabular-asa))
+(define df
+  (asa:table-read/columns '((1 2 3 4 5 6)
+                            (0.5 1.5 1.0 2.0 2.5 1.5)
+                            ("a" "b" "a" "b" "a" "b")
+                            (1.2 2.9 3.1 4.8 5.2 6.9))
+                          '(x1 x2 g y)))
+(asa:display-table df)
+]
+
+@defproc[(tabular-asa->design-matrix [df (and/c asa:table? (not/c asa:table-empty?))]
+                                     [columns (and/c (listof (or/c string? symbol?)) pair?)])
+         design-matrix?]{
+  A design matrix of the columns of @racket[df] that @racket[columns] names,
+  in that order, with those names, as strings, as its column names. Each name
+  must be a column of @racket[df] and appear once, and every value in those
+  columns must be a real, finite number.
+
+  @examples[#:eval ev
+  (define Xdf (tabular-asa->design-matrix df '(x1 x2)))
+  (design-matrix-column-names Xdf)
+  (design-matrix->rows Xdf)
+  (eval:error (tabular-asa->design-matrix df '(x1 g)))]}
+
+@defproc[(tabular-asa->response [df (and/c asa:table? (not/c asa:table-empty?))]
+                                [column (or/c string? symbol?)])
+         (and/c (listof real?) pair?)]{
+  The values of @racket[df]'s column @racket[column], in the table's order, as
+  a @tech{response}: a list, which the fit procedures accept. Every value must
+  be a real, finite number. The values are returned as they are, so class
+  labels that are exact integers stay exact, as @racket[multinomial-fit]
+  requires. For a Cox model, convert the times and the statuses separately;
+  for a multi-response model, whose response is a matrix, use
+  @racket[tabular-asa->design-matrix].
+
+  @examples[#:eval ev
+  (define ydf (tabular-asa->response df 'y))
+  ydf
+  (elnet-result-coefficients (lasso Xdf ydf #:lambda 0.1))
+  (eval:error (tabular-asa->response df 'weight))]}
+
+@defproc[(tabular-asa->table [df (and/c asa:table? (not/c asa:table-empty?))]
+                             [columns (and/c (listof (or/c string? symbol?)) pair?)
+                                      (asa:table-header df)])
+         table?]{
+  A @tech{table} of @racket[df]'s columns that @racket[columns] names, every
+  column by default, for the formula front end (@secref["ref-formula"]): an
+  association list from each column's name, as a string, to a fresh vector of
+  its values, in the table's order. A missing value is an error; other values
+  are left to the formula, which reads a column of numbers as numbers and a
+  column of strings or symbols as a factor.
+
+  @examples[#:eval ev
+  (tabular-asa->table df '(g y))
+  (define fitted (formula-fit (~ y x1 g) (tabular-asa->table df) #:lambda 0.1))
+  (coef fitted)
+  (predict fitted (tabular-asa->table (asa:table-head df 2)))]}
+
+@defproc[(design-matrix->tabular-asa [dm design-matrix?]
+                                     [#:column-names column-names
+                                                     (listof (or/c string? symbol?))
+                                                     (or (design-matrix-column-names dm)
+                                                         '("V1" "V2" ....))])
+         asa:table?]{
+  A tabular-asa table of the columns of @racket[dm], in order, with each value
+  a flonum. @racket[column-names] names the columns: one distinct string or
+  symbol per column, which becomes a symbol, as tabular-asa's column names
+  are. It defaults to the names of @racket[dm], and for a design matrix without
+  names to @racket["V1"], @racket["V2"], and so on, as R's
+  @tt{as.data.frame} names the columns of a matrix.
+
+  @examples[#:eval ev
+  (asa:display-table (design-matrix->tabular-asa Xdf))
+  (define unnamed (rows->design-matrix '((1 2) (3 4))))
+  (asa:table-header (design-matrix->tabular-asa unnamed))
+  (asa:table-header (design-matrix->tabular-asa unnamed #:column-names '(dose age)))]}
+
+@defproc[(table->tabular-asa [table table?]
+                             [columns (and/c (listof (or/c string? symbol?)) pair?)
+                                      (table-column-names table)])
+         asa:table?]{
+  A tabular-asa table of the columns of @racket[table] that @racket[columns]
+  names, every column by default, in that order, with their names as symbols
+  and their values as they are. The columns must have the same length. Since
+  tabular-asa reads @racket[#f] as a missing value, a @racket[#f] in a column
+  is an error, which names the column and the row; convert a column of
+  booleans to strings, or to @racket[0] and @racket[1], first.
+
+  @examples[#:eval ev
+  (define trial
+    (list (cons "dose" '(1.0 2.5 4.0)) (cons "arm" '("control" "drug" "drug"))))
+  (asa:display-table (table->tabular-asa trial))
+  (asa:table-header (table->tabular-asa trial '("arm")))
+  (eval:error (table->tabular-asa (list (cons "responded" '(#t #f #t)))))]}
 
 @section[#:tag "ref-gaussian"]{Gaussian models}
 

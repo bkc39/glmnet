@@ -62,6 +62,39 @@
             '';
           };
 
+          # glmnet's dependencies that pkgs.racket does not ship: tabular-asa,
+          # for glmnet/data/tabular-asa, and what it pulls in from the catalog
+          # (csv-reading, mcfly, overeasy). A fixed-output derivation, so it may
+          # reach the catalog; `--no-setup` installs the sources only, so the
+          # output is the same on every platform, and the package cache, the
+          # one part that is not reproducible, is dropped. When the catalog's
+          # versions of these packages change, so does the hash: build
+          # .#racket and take the hash that Nix reports.
+          catalogDeps = pkgs.stdenvNoCC.mkDerivation {
+            pname = "glmnet-catalog-deps";
+            version = "tabular-asa-0.4.5";
+            dontUnpack = true;
+            nativeBuildInputs = [ pkgs.racket pkgs.cacert ];
+            buildCommand = ''
+              export PLTUSERHOME="$out"
+              export SSL_CERT_FILE="${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
+              mkdir -p "$out"
+              raco pkg install --no-setup --batch --auto --scope user --no-docs tabular-asa
+              rm -rf "$out/.cache"
+            '';
+            outputHashMode = "recursive";
+            outputHashAlgo = "sha256";
+            outputHash = "sha256-F6/2zwp4ls35lIxvFQY774V9qJXnIrX9rw3NqAOV1io=";
+          };
+
+          # Seeds the user scope with catalogDeps, so that installing glmnet
+          # with `--deps fail` finds them; `raco setup --pkgs tabular-asa`
+          # compiles them.
+          seedCatalogDeps = ''
+            cp -r ${catalogDeps}/. $PLTUSERHOME/
+            chmod -R u+w $PLTUSERHOME
+          '';
+
           # The Racket package, with the native library injected. The manual's
           # examples draw the plots of glmnet/plot; the fonts are fixed so that
           # their text renders the same in every sandbox.
@@ -88,11 +121,14 @@
               mkdir -p ./glmnet/native-libs
               cp ${native}/lib/libglmnetcompat.* ./glmnet/native-libs/ 2>/dev/null || true
 
+              ${seedCatalogDeps}
               raco pkg install --batch --deps fail --no-setup --copy --scope user \
                 --name glmnet ./glmnet
 
               # Checks the declared dependencies, as the catalog's build server
-              # does: plot-lib, pict-lib and draw-lib for glmnet/plot among them.
+              # does: plot-lib, pict-lib and draw-lib for glmnet/plot among them,
+              # and tabular-asa for glmnet/data/tabular-asa.
+              raco setup --no-docs --pkgs tabular-asa
               raco setup --no-docs --check-pkg-deps --pkgs glmnet
 
               runHook postBuild
@@ -164,9 +200,10 @@
               export GLMNET_NATIVE_LIB_PATH=${native}
               mkdir -p $PLTUSERHOME ./glmnet/native-libs
               cp ${native}/lib/libglmnetcompat.* ./glmnet/native-libs/ 2>/dev/null || true
+              ${seedCatalogDeps}
               raco pkg install --batch --deps fail --no-setup --copy --scope user \
                 --name glmnet ./glmnet
-              raco setup --no-docs --pkgs glmnet
+              raco setup --no-docs --pkgs glmnet tabular-asa
               runHook postBuild
             '';
 
