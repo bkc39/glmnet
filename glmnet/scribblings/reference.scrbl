@@ -1347,10 +1347,17 @@ value as a flonum, and a column of strings, symbols or booleans gives the
 value itself, as R's calls read a character or logical column, so
 @racket[(equal? Species "setosa")] is R's @tt{I(Species == "setosa")} and
 @racket[(not b)] is R's @tt{I(!b)}. A column that a transform reads must hold
-one kind of value, and its numbers must be finite; an error names the
-transform and the column. A name that is neither a
-column nor bound is an error, naming it, when the transform is evaluated, not
-when the formula is compiled. Each value must be a real number and finite, or
+one kind of value, numbers, strings, symbols or booleans, and its numbers
+must be finite; an error names the transform and the column. Strings and
+symbols are two kinds here, though a factor's levels match them by label,
+since a transform can tell them apart: @racket[(equal? g "a")] is false for
+the symbol @racket['a]. @racket[predict] needs each such column to hold the
+kind of value it held when the model was fitted, and an error names the
+transform, the column and both kinds; a boolean column given as
+@racket[1] and @racket[0] would otherwise change @racket[(if b x 0)]
+silently, as @racket[0] is true in Racket. A name that is neither a column
+nor bound is an error, naming it, when the transform is evaluated, not when
+the formula is compiled. Each value must be a real number and finite, or
 else each a string, a symbol or a boolean, which makes the transform a factor
 (see below), and an error names the transform and the row. A transform must
 read at least one column. It is a variable of the algebra, so
@@ -1579,7 +1586,9 @@ Trend road tests, and R's @tt{iris}, 150 irises of three species, which
   row's value of each of the @racket[columns], in order: a flonum for a column
   of numbers, and the value itself for a column of strings, symbols or
   booleans. Each of the @racket[columns] must be a column of the table that
-  holds one kind of value, and whose numbers are finite. @racket[~] makes the
+  holds one kind of value, strings and symbols counting as two, and whose
+  numbers are finite; new data for @racket[predict] must give it the same
+  kind. @racket[~] makes the
   same value from a transform written in a formula, with its source as the
   name and the names it reads as the columns, except that a name of that
   transform that is not a column of the table is the Racket binding of that

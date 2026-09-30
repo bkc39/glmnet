@@ -1167,10 +1167,13 @@
     (define m (formula-fit (~ y x (not flag)) kinds #:lambda 0.01))
     (check-equal? (predict m (list (cons "x" '(1.0 2.0)) (cons "flag" '(#f #t))))
                   (predict (formula-model-fit m) '((1.0 1) (2.0 0))))
+    ;; Strings and symbols are two kinds for a transform, which tells them apart.
+    (check-exn #rx"^formula-design-matrix: a transform reads a column that mixes strings with symbols\n  transform: \"\\(equal\\? mixed \\\\\"a\\\\\"\\)\"\n  column: \"mixed\"\n  row: 1\n  element: 'a"
+               (lambda () (formula-design-matrix (~ y (equal? mixed "a")) kinds)))
     ;; A column of one kind of value, and numbers finite, or an error names the
     ;; transform and the column.
     (define (with-g g) (list (cons "y" '(1 2 3)) (cons "g" g)))
-    (check-exn #rx"^formula-fit: a transform reads a column that mixes numbers with strings or symbols\n  transform: \"\\(abs g\\)\"\n  column: \"g\"\n  row: 2\n  element: \"b\""
+    (check-exn #rx"^formula-fit: a transform reads a column that mixes numbers with strings\n  transform: \"\\(abs g\\)\"\n  column: \"g\"\n  row: 2\n  element: \"b\""
                (lambda () (formula-fit (~ y (abs g)) (with-g '(1 2 "b")) #:lambda 0.1)))
     (check-exn #rx"^formula-design-matrix: a transform reads a column with an element that is not a real number, a string, a symbol or a boolean\n  transform: \"\\(abs g\\)\"\n  column: \"g\"\n  row: 1\n  element: #\\\\a"
                (lambda () (formula-design-matrix (~ y (abs g)) (with-g '(1 #\a 2)))))
@@ -1178,6 +1181,26 @@
                (lambda () (formula-design-matrix (~ y (abs g)) (with-g '(1 +inf.0 2)))))
     (check-exn #rx"^formula-design-matrix: a transform raised an exception\n  transform: \"\\(log group\\)\"\n  row: 0\n  exception: \n   log: contract violation\n     expected: number\\?\n     given: \"b\""
                (lambda () (formula-design-matrix (~ y (log group)) kinds))))
+
+  (test-case "predict needs each column a transform reads to hold the kind of value it was fitted with"
+    ;; R's ifelse(b, wt, 0) is the same for TRUE/FALSE and 1/0, but 0 is true
+    ;; in Racket, so (if flag x 0) would silently change on 1/0.
+    (define m (formula-fit (~ y x (if flag x 0)) kinds #:lambda 0.01))
+    (check-exn #rx"^predict: a transform reads a column whose values are of another kind than when the model was fitted\n  transform: \"\\(if flag x 0\\)\"\n  column: \"flag\"\n  fitted with: booleans\n  given: numbers"
+               (lambda () (predict m (list (cons "x" '(1.0 2.0)) (cons "flag" '(1 0))))))
+    (check-equal? (predict m (list (cons "x" '(1.0 2.0)) (cons "flag" '(#t #f))))
+                  (predict (formula-model-fit m) '((1.0 1.0) (2.0 0.0))))
+    ;; (equal? group "a") is #f for the symbol a.
+    (define g (formula-fit (~ y x (equal? group "a")) kinds #:lambda 0.01))
+    (check-exn #rx"^predict: a transform reads a column whose values are of another kind than when the model was fitted\n  transform: \"\\(equal\\? group \\\\\"a\\\\\"\\)\"\n  column: \"group\"\n  fitted with: strings\n  given: symbols"
+               (lambda () (predict g (list (cons "x" '(1.0)) (cons "group" '(a))))))
+    (check-exn #rx"fitted with: numbers\n  given: booleans"
+               (lambda () (predict (formula-fit (~ y (sqr x) code) kinds #:lambda 0.01)
+                                   (list (cons "x" '(#t)) (cons "code" '(1))))))
+    ;; A factor column's levels match by label, so symbols stand for strings.
+    (define f (formula-fit (~ y x group) kinds #:lambda 0.01))
+    (check-equal? (predict f (list (cons "x" '(1.0 2.0)) (cons "group" '(a c))))
+                  (predict f (list (cons "x" '(1.0 2.0)) (cons "group" '("a" "c"))))))
 
   (test-case "the model keeps its factors' levels, and predict codes new data with them"
     (define m (formula-fit (mpg . ~ . wt + (factor cyl) + (> hp 150)) mtcars #:lambda 0.1))

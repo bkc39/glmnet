@@ -274,11 +274,13 @@
 ;; The value of variable v in each row, a vector of `no` values: `column`
 ;; gives the values of the table's column of a name, and `flonums` those
 ;; values as flonums, which a transform reads from a column of numbers.
-(define (variable-values who v column flonums no)
+;; `seen` is called with each transform, a column it reads and the kind of
+;; the column's values (transform-input).
+(define (variable-values who v column flonums no seen)
   (match v
     [(column-variable name) (column name)]
-    [(transform-variable t names) (transform-values who t names column flonums no)]
-    [(factor-variable source) (variable-values who source column flonums no)]))
+    [(transform-variable t names) (transform-values who t names column flonums no seen)]
+    [(factor-variable source) (variable-values who source column flonums no seen)]))
 
 ;; The values `vs` of a numeric variable v as an flvector. A column's must be
 ;; finite reals, as the table's numbers must be, and so must a transform's,
@@ -303,7 +305,7 @@
 ;; The bindings are read each time, as R reads them each time it evaluates
 ;; the formula; a binding that is not defined, at the top level, counts as
 ;; none. An error in the transform names it and the row.
-(define (transform-values who t names column flonums no)
+(define (transform-values who t names column flonums no seen)
   (match-define (transform-term label _ proc) t)
   (define fallbacks
     (match t
@@ -312,7 +314,7 @@
   (define arguments
     (for/list ([name (in-list names)] [fallback (in-list fallbacks)])
       (cond
-        [name (transform-input who label name column flonums)]
+        [name (transform-input who label name column flonums seen)]
         [fallback (with-handlers ([exn:fail:contract:variable? (lambda (e) unbound)])
                     (fallback))]
         [else unbound])))
@@ -339,15 +341,16 @@
 ;; The values of the table's column `name` as transform `label` reads them,
 ;; as R's calls read a numeric, character or logical column: an flvector
 ;; when they are numbers, and a vector of the values themselves when they are
-;; strings or symbols, or booleans. They must be of one kind, and numbers
-;; finite; an error names the transform, the column and the row.
-(define (transform-input who label name column flonums)
+;; strings, symbols or booleans. They must be of one kind, and numbers
+;; finite; an error names the transform, the column and the row. `seen` is
+;; called with the label, the name and the kind.
+(define (transform-input who label name column flonums seen)
   (define vs (column name))
-  (define kind (value-kind (vector-ref vs 0)))
+  (define kind (input-kind (vector-ref vs 0)))
   (define (fail message i x)
     (raise-arguments-error who message "transform" label "column" name "row" i "element" x))
   (for ([x (in-vector vs)] [i (in-naturals)])
-    (define k (value-kind x))
+    (define k (input-kind x))
     (cond
       [(eq? k 'other)
        (fail "a transform reads a column with an element that is not a real number, a string, a symbol or a boolean"
@@ -358,7 +361,20 @@
              i x)]
       [(and (eq? k 'number) (not (fl< (flabs (real->double-flonum x)) +inf.0)))
        (fail "a transform reads a column with an element that is not finite" i x)]))
+  (seen label name kind)
   (if (eq? kind 'number) (flonums name) vs))
+
+;; What a transform reads a value as: a number, a string, a symbol, a boolean
+;; or another value. Strings and symbols are two kinds here, where a factor's
+;; levels match them by label, since a transform can tell them apart:
+;; (equal? g "a") is #f for the symbol a.
+(define (input-kind v)
+  (cond
+    [(real? v) 'number]
+    [(string? v) 'string]
+    [(symbol? v) 'symbol]
+    [(boolean? v) 'boolean]
+    [else 'other]))
 
 ;; --- factors ---------------------------------------------------------------------
 
@@ -390,7 +406,8 @@
     [else 'other]))
 
 (define kind-names
-  (hasheq 'number "numbers" 'text "strings or symbols" 'boolean "booleans" 'other "other values"))
+  (hasheq 'number "numbers" 'text "strings or symbols" 'string "strings" 'symbol "symbols"
+          'boolean "booleans" 'other "other values"))
 
 ;; The kind of the values `vs` of variable v, a column or a transform: its
 ;; first value's, which every value must have. Among numbers, a value of
@@ -491,7 +508,11 @@
 ;;  intercept?     : whether the model has an intercept
 ;;  levels         : #f until `resolve-levels`, and then for each variable
 ;;                   the labels of its levels when it is a factor, or #f
-(struct model-terms (variables response-count terms codings intercept? levels) #:transparent)
+;;  input-kinds    : #f until `resolve-levels`, and then a hash from the name
+;;                   of each column that a transform reads to the kind of its
+;;                   values (input-kind), which new data must give it too
+(struct model-terms (variables response-count terms codings intercept? levels input-kinds)
+  #:transparent)
 
 ;; The terms of right-hand side `rhs`, with response columns `responses`
 ;; (strings), `all` standing for the table's `columns` (strings) that are not
@@ -504,7 +525,7 @@
   (define-values (variables terms intercept) (encode rhs responses columns))
   (define ordered (sort terms < #:key length #:cache-keys? #t))
   (model-terms variables (length responses) ordered (term-codings ordered)
-               (not (eq? intercept #f)) #f))
+               (not (eq? intercept #f)) #f #f))
 
 ;; The intercept that `rhs` asks for: #t for a 1, #f for a 0 or - 1, the last
 ;; one written winning, or 'unspecified.
@@ -601,13 +622,13 @@
 ;; response variables. R's model.matrix drops the response when it is a term
 ;; of its own and keeps it in interactions.
 (define (drop-response-terms mt)
-  (match-define (model-terms variables k terms codings intercept? levels) mt)
+  (match-define (model-terms variables k terms codings intercept? levels kinds) mt)
   (define (response-term? term)
     (and (null? (cdr term)) (< (car term) k)))
   (define kept
     (for/list ([term (in-list terms)] [coding (in-list codings)] #:unless (response-term? term))
       (cons term coding)))
-  (values (model-terms variables k (map car kept) (map cdr kept) intercept? levels)
+  (values (model-terms variables k (map car kept) (map cdr kept) intercept? levels kinds)
           (for/list ([term (in-list terms)] #:when (response-term? term))
             (vector-ref variables (car term)))))
 
@@ -666,10 +687,13 @@
 
 ;; The terms `mt` with the levels of each variable that its terms use, which
 ;; `table` decides: #f for a numeric variable, or the labels of a factor's
-;; levels in R's order, of which it must have two or more.
+;; levels in R's order, of which it must have two or more; and with the kind
+;; of each column that a transform reads.
 (define (resolve-levels who mt table)
   (define variables (model-terms-variables mt))
   (define used (used-variables mt))
+  (define kinds (make-hash))
+  (define (record! label name kind) (hash-set! kinds name kind))
   (define levels
     (if (zero? (hash-count used))
         (make-vector (vector-length variables) #f)
@@ -677,8 +701,20 @@
           (for/vector #:length (vector-length variables) ([v (in-vector variables)]
                                                           [i (in-naturals)])
             (and (hash-ref used i #f)
-                 (variable-levels who v (variable-values who v column flonums no)))))))
-  (struct-copy model-terms mt [levels levels]))
+                 (variable-levels who v (variable-values who v column flonums no record!)))))))
+  (struct-copy model-terms mt [levels levels] [input-kinds (for/hash ([(name kind) (in-hash kinds)]) (values name kind))]))
+
+;; A `seen` for variable-values that checks each column a transform reads
+;; against the kind of values it had when `mt`'s levels were resolved: new
+;; data of another kind would give the transform other values silently, as
+;; 0, which is true in Racket, for a boolean column written as 1 and 0.
+(define ((check-input-kind who mt) label name kind)
+  (define fitted (hash-ref (or (model-terms-input-kinds mt) #hash()) name #f))
+  (when (and fitted (not (eq? fitted kind)))
+    (raise-arguments-error who "a transform reads a column whose values are of another kind than when the model was fitted"
+                           "transform" label "column" name
+                           "fitted with" (unquoted-printing-string (hash-ref kind-names fitted))
+                           "given" (unquoted-printing-string (hash-ref kind-names kind)))))
 
 ;; The levels of variable i, or #f.
 (define (levels-of mt i)
@@ -700,7 +736,7 @@
 ;; model.matrix codes it, so that its columns span the intercept. A response
 ;; variable is not that factor.
 (define (design-codings mt)
-  (match-define (model-terms _ k terms codings intercept? _) mt)
+  (match-define (model-terms _ k terms codings intercept? _ _) mt)
   (define first-factor
     (and (not intercept?)
          (for/or ([term (in-list terms)] [j (in-naturals)])
@@ -780,9 +816,10 @@
   (define-values (column flonums no) (table-reader who mt table))
   (define variables (model-terms-variables mt))
   (define variable-cache (make-hasheqv))
+  (define seen (check-input-kind who mt))
   (define (values-of i)
     (hash-ref! variable-cache i
-               (lambda () (variable-values who (vector-ref variables i) column flonums no))))
+               (lambda () (variable-values who (vector-ref variables i) column flonums no seen))))
   ;; A variable in several terms, such as a factor and its interactions, is
   ;; computed once for each of its codings.
   (define computed (make-hash))

@@ -741,8 +741,9 @@ of symbols; compare it with @racket[eq?] and a quoted symbol instead. A
 boolean column's values are @racket[#t] and @racket[#f], so R's @tt{I(!b)} is
 @racket[(not b)], a factor, and R's @tt{I(b * x)} is
 @racket[(if b x 0)], a number. A column that a transform reads must hold one
-kind of value, and an error names the transform and the column where it
-does not.
+kind of value, numbers, strings, symbols or booleans, with strings and
+symbols counting as two kinds, since a transform tells them apart, and an
+error names the transform and the column where it does not.
 
 @subsection[#:tag "formulas-factor-new-data"]{New data and levels}
 
@@ -757,6 +758,22 @@ that names it, as R's "factor has new levels" is:
 (define new-cars (list (cons "wt" '(2.5 3.5)) (cons "cyl" '(8 4))))
 (predict cars new-cars)
 (eval:error (predict cars (list (cons "wt" '(3.0)) (cons "cyl" '(5)))))
+]
+
+A column that a transform reads must hold the kind of value it held when the
+model was fitted, since the transform sees the values themselves. R's
+@tt{predict} converts some: R's @tt{ifelse(b, x, 0)} reads 1 and 0 as
+@tt{TRUE} and @tt{FALSE}, where in Racket 0 is true, so @racket[(if b x 0)]
+would change silently. So would @racket[(equal? Species "setosa")] on a column
+of symbols, which it never finds equal. @racket[predict] raises an error that
+names the transform, the column and both kinds:
+
+@examples[#:eval ev #:label #f
+(define setosa
+  (formula-fit (Sepal.Length . ~ . (equal? Species "setosa") + Petal.Width) iris
+               #:lambda 0.05))
+(eval:error (predict setosa (list (cons "Petal.Width" '(0.2))
+                                  (cons "Species" '(setosa)))))
 ]
 
 @subsection[#:tag "formulas-factor-response"]{Categorical responses}
