@@ -82,16 +82,15 @@
 ;; Poisson adds the 8888 (negative response counts) fatal code on top of the
 ;; shared cases in `check-jerr`.
 (define (check-poisson-jerr jerr who [lmu #f])
-  (cond
-    [(= jerr 8888)
-     (error who "response counts must be non-negative (jerr=8888)")]
-    [else (check-jerr jerr who lmu)]))
+  (when (= jerr 8888)
+    (error who "response counts must be non-negative (jerr=8888)"))
+  (check-jerr jerr who lmu))
 
-;; With no positive count the null model's log mean is -inf and glmnet cannot
-;; converge (R warns and returns an empty model).
 ;; A count, or a rate: a non-negative real.
 (define count/c (>=/c 0))
 
+;; With no positive count the null model's log mean is -inf and glmnet cannot
+;; converge (R warns and returns an empty model).
 (define (check-some-count yv who)
   (unless (for/or ([k (in-range (f64vector-length yv))]) (fl> (f64vector-ref yv k) 0.0))
     (error who "the response has no positive count; Poisson needs at least one y > 0")))

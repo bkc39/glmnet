@@ -285,16 +285,18 @@
 ;; The column names as immutable strings, or #f, after checking that there is
 ;; one per column and that they are distinct as strings.
 (define (check-column-names names ncols who)
-  (and names
-       (let ([strings (map column-name->string names)])
-         (unless (= (length strings) ncols)
-           (raise-arguments-error who "the number of column names does not match the columns"
-                                  "column names" (length strings) "columns" ncols))
-         (define dup (check-duplicates names #:key column-name->string))
-         (when dup
-           (raise-arguments-error who "the column names are not distinct"
-                                  "duplicate" dup "column names" names))
-         strings)))
+  (cond
+    [names
+     (define strings (map column-name->string names))
+     (unless (= (length strings) ncols)
+       (raise-arguments-error who "the number of column names does not match the columns"
+                              "column names" (length strings) "columns" ncols))
+     (define dup (check-duplicates names #:key column-name->string))
+     (when dup
+       (raise-arguments-error who "the column names are not distinct"
+                              "duplicate" dup "column names" names))
+     strings]
+    [else #f]))
 
 (define (default-column-names n)
   (for/list ([j (in-range n)])
@@ -382,17 +384,21 @@
   (define row-major? (eq? order 'row-major))
   (define (not-finite k x)
     (define-values (i j)
-      (if row-major?
-          (quotient/remainder k ncols)
-          (let-values ([(j i) (quotient/remainder k nrows)]) (values i j))))
+      (cond
+        [row-major? (quotient/remainder k ncols)]
+        [else
+         (define-values (j i) (quotient/remainder k nrows))
+         (values i j)]))
     (element-error who what "not finite" x
                    #:row i #:column (if checked-names (list-ref checked-names j) j)))
   (define n (* nrows ncols))
   ;; The column-major position of entry k of v.
   (define (target k)
-    (if row-major?
-        (let-values ([(i j) (quotient/remainder k ncols)]) (+ i (* j nrows)))
-        k))
+    (cond
+      [row-major?
+       (define-values (i j) (quotient/remainder k ncols))
+       (+ i (* j nrows))]
+      [else k]))
   (define data
     (cond
       [adopt?

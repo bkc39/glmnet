@@ -97,18 +97,17 @@
 ;; separation) and 90000 (coefficient-bound non-convergence) fatal codes on top
 ;; of the shared cases in `check-jerr`.
 (define (check-logistic-jerr jerr who [lmu #f])
-  (cond
-    [(and (>= jerr 8000) (< jerr 9000))
-     (error who
-            (format (string-append
-                     "a class probability collapsed (perfect separation or a "
-                     "degenerate class); try a larger lambda (jerr=~a)")
-                    jerr))]
-    [(and (>= jerr 9000) (< jerr 10000))
-     (error who (format "a class has a degenerate null probability (jerr=~a)" jerr))]
-    [(= jerr 90000)
-     (error who "coefficient-bound adjustment failed to converge (jerr=90000)")]
-    [else (check-jerr jerr who lmu)]))
+  (when (and (>= jerr 8000) (< jerr 9000))
+    (error who
+           (format (string-append
+                    "a class probability collapsed (perfect separation or a "
+                    "degenerate class); try a larger lambda (jerr=~a)")
+                   jerr)))
+  (when (and (>= jerr 9000) (< jerr 10000))
+    (error who (format "a class has a degenerate null probability (jerr=~a)" jerr)))
+  (when (= jerr 90000)
+    (error who "coefficient-bound adjustment failed to converge (jerr=90000)"))
+  (check-jerr jerr who lmu))
 
 ;; --- public API ------------------------------------------------------------
 
