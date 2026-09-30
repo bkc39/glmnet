@@ -762,9 +762,9 @@ that names it, as R's "factor has new levels" is:
 
 A column that a transform reads must hold the kind of value it held when the
 model was fitted, since the transform sees the values themselves. R's
-@tt{predict} converts some: R's @tt{ifelse(b, x, 0)} reads 1 and 0 as
-@tt{TRUE} and @tt{FALSE}, where in Racket 0 is true, so @racket[(if b x 0)]
-would change silently. So would @racket[(equal? Species "setosa")] on a column
+functions convert their arguments, so R's @tt{ifelse(b, x, 0)} reads 1 and 0
+as @tt{TRUE} and @tt{FALSE}, but in Racket 0 is true, and
+@racket[(if b x 0)] would change silently. So would @racket[(equal? Species "setosa")] on a column
 of symbols, which it never finds equal. @racket[predict] raises an error that
 names the transform, the column and both kinds:
 
