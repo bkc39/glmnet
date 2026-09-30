@@ -18,7 +18,7 @@
          racket/match
          "terms.rkt"
          "model.rkt"
-         (only-in (submod "model.rkt" support) prop:predictor-matrix)
+         (only-in (submod "model.rkt" support) prop:predictor-matrix prop:class-labels)
          "path.rkt"
          (submod "path.rkt" support)
          "cv.rkt"
@@ -33,7 +33,8 @@
          (only-in "../data.rkt" table? design-matrix? design-matrix-column-names
                   design-matrix->columns)
          (only-in (submod "../data.rkt" support)
-                  design-matrix-nrows column-name->string table-names select-table-columns))
+                  design-matrix-nrows column-name->string table-names select-table-columns
+                  select-table-values))
 
 (define family/c (or/c 'gaussian 'binomial 'multinomial 'poisson 'cox 'mgaussian))
 
@@ -64,6 +65,7 @@
   [formula-model-formula (-> formula-model? formula?)]
   [formula-model-predictor-names (-> formula-model? (listof string?))]
   [formula-model-fit (-> formula-model? glmnet-model?)]
+  [formula-model-levels (-> formula-model? (listof (cons/c string? (listof string?))))]
   [formula-fit
    (->i ([f (family) (formula-for/c (family-argument family))]
          [table table?]
@@ -274,6 +276,17 @@
        (format "~a is not bound, and inside a transform the operators are Racket's, which come first: write ~s"
                (syntax-e #'a) (syntax->datum #'(op a b)))]))
 
+  (define (factor-id? stx)
+    (and (identifier? stx) (eq? (syntax-e stx) 'factor)))
+
+  ;; What an error says of a group g, whose head f is not bound, as a term and
+  ;; as the argument of factor.
+  (define (not-a-term g f)
+    (format "~s is not a term: ~a is not bound, so it is not a transform, and a group of terms starts with an operator, as (+ x z) does, or has operators between its terms, as (x + z) does"
+            (syntax->datum g) (syntax-e f)))
+  (define (not-an-expression g f)
+    (format "~s is not a Racket expression: ~a is not bound" (syntax->datum g) (syntax-e f)))
+
   ;; Raises a syntax error when `group`, an application in the transform `t`
   ;; whose function is `head`, is R's infix arithmetic, such as (hp * wt):
   ;; `head` is not bound and an operator comes second. `power?` is whether ^
@@ -383,6 +396,37 @@
     (pattern (~and g ((~and q (~fail #:unless (quote-id? #'q))) d))
              #:fail-when #'g (quoted-message #'g #'d)))
 
+  ;; A transform written as a call, (proc-id arg ...) or (I expr), checked so
+  ;; that its errors say what to write; `unbound` makes the message for a
+  ;; proc-id that is not bound from the group and the id.
+  (define-syntax-class (call unbound)
+    #:attributes (expr)
+    (pattern (~and g (f:id _ ...) (~fail #:when (quote-id? #'f)))
+             #:do [(define I? (eq? (syntax-e #'f) 'I))]
+             #:fail-when (and I? (not (= (length (syntax->list #'g)) 2)) #'g)
+             "I takes one Racket expression, as in (I (expt x 2))"
+             #:do [(check-infix #'f #'g #'g (not (bound-here? (datum->syntax #'g '^))))]
+             #:fail-when (and (eq? (syntax-e #'f) '^) (not (bound-here? #'f)) #'f)
+             power-message
+             #:fail-when (and (not I?) (not (bound-here? #'f)) #'g)
+             (unbound #'g #'f)
+             #:with t:transform #'g
+             #:with expr #'t.expr))
+
+  ;; What R's factor(x) takes: a column, or a Racket expression, a transform,
+  ;; whose values are the factor's.
+  (define-syntax-class factor-argument
+    #:description "a column, or a Racket expression such as (> hp 150)"
+    #:attributes (expr)
+    (pattern (~and c (~fail #:unless (and (identifier? #'c) (not (operator-id? #'c)))) _:column)
+             #:with expr #''c)
+    (pattern (~and s (~fail #:unless (string? (syntax-e #'s))))
+             #:with expr #'s)
+    (pattern q:quoted
+             #:with expr #'q)
+    (pattern (~and g (_ _ ...) (~var c (call not-an-expression)))
+             #:with expr #'c.expr))
+
   (define-syntax-class column
     #:description "a column name"
     (pattern name:id
@@ -428,7 +472,7 @@
              #:with (expr ...) #'()))
 
   (define-syntax-class term
-    #:description "a term: a column, all, 1, 0, a transform such as (log x), or a group such as (* x z) or (x + z)"
+    #:description "a term: a column, all, 1, 0, a transform such as (log x), (factor x), or a group such as (* x z) or (x + z)"
     #:attributes (expr)
     (pattern (~and a (~datum all))
              #:with expr #''a)
@@ -461,6 +505,12 @@
              #:with expr #'(list 'o t.expr u.expr ...))
     (pattern ((~and o (~datum ^)) t:term n:power)
              #:with expr #'(list 'o t.expr 'n))
+    (pattern ((~datum factor) a:factor-argument)
+             #:with expr #'(list 'factor a.expr))
+    (pattern (~and g ((~datum factor) . args)
+                   (~fail #:when (let ([args (syntax->list #'args)]) (and args (= (length args) 1)))))
+             #:fail-when #'g "factor takes one column or Racket expression, as in (factor cyl)"
+             #:with expr #'g)
     (pattern q:quoted
              #:with expr #'q)
     (pattern (~and g ((~and o (~fail #:unless (unsupported-id? #'o))) operand ...)
@@ -469,15 +519,9 @@
              (string-append (unsupported-message #'o) (ratio-hint #'o #'(operand ...)))
              #:with expr #'g)
     (pattern (~and g (f:id _ ...)
-                   (~fail #:when (or (reserved-id? #'f) (quote-id? #'f) (infix-group? #'g))))
-             #:do [(define I? (eq? (syntax-e #'f) 'I))]
-             #:fail-when (and I? (not (= (length (syntax->list #'g)) 2)) #'g)
-             "I takes one Racket expression, as in (I (expt x 2))"
-             #:fail-when (and (not I?) (not (bound-here? #'f)) #'g)
-             (format "~s is not a term: ~a is not bound, so it is not a transform, and a group of terms starts with an operator, as (+ x z) does, or has operators between its terms, as (x + z) does"
-                     (syntax->datum #'g) (syntax-e #'f))
-             #:with t:transform #'g
-             #:with expr #'t.expr)
+                   (~fail #:when (or (reserved-id? #'f) (factor-id? #'f) (infix-group? #'g)))
+                   (~var c (call not-a-term)))
+             #:with expr #'c.expr)
     (pattern (~and g (_ ...) (~fail #:when (group-shape? #'g)))
              #:fail-when #'g
              (format "~s is not a term: a group of terms starts with an operator, as (+ x z) does, or has operators between its terms, as (x + z) does"
@@ -552,15 +596,17 @@
     [(? list? names) (map column-name->string names)]
     [name (list (column-name->string name))]))
 
-;; The terms of formula f on the table's `columns`: R's terms(), without a
-;; response column that stands alone as a term, which R's model.matrix drops
-;; with a warning, as this does. The response columns must be columns of the
-;; table and distinct, and so must every column the formula names, even one
-;; it removes, as R's model.frame evaluates them all. A transform must read a
+;; The terms of formula f on the table: R's terms(), without a response
+;; column that stands alone as a term, which R's model.matrix drops with a
+;; warning, as this does, and with the levels of its factors, which the
+;; table's values decide. The response columns must be columns of the table
+;; and distinct, and so must every column the formula names, even one it
+;; removes, as R's model.frame evaluates them all. A transform must read a
 ;; column, from which its rows come. The design matrix's column names must be
 ;; distinct, and none "(Intercept)", as coef keys the coefficients by them and
 ;; the intercept by that name.
-(define (formula-expansion who f columns)
+(define (formula-expansion who f table)
+  (define columns (table-names table who))
   (define responses (response-columns f))
   (define present (for/hash ([c (in-list columns)]) (values c #t)))
   (define (check-column name)
@@ -583,7 +629,8 @@
   (for ([v (in-list dropped)])
     (log-glmnet-warning "~a: the response column ~s appeared on the right-hand side and was dropped"
                         who (variable-label v)))
-  (define names (model-terms-column-names kept))
+  (define resolved (resolve-levels who kept table))
+  (define names (model-terms-column-names resolved))
   (when (member "(Intercept)" names)
     (raise-arguments-error who "a column of the formula's design matrix has the intercept's name"
                            "name" "(Intercept)" "formula" f))
@@ -591,7 +638,7 @@
   (when same-name
     (raise-arguments-error who "two columns of the formula's design matrix have the same name"
                            "name" same-name "formula" f))
-  kept)
+  resolved)
 
 (define (check-predictors who f mt)
   (when (null? (model-terms-terms mt))
@@ -599,12 +646,11 @@
                            "formula" f)))
 
 (define (formula-predictor-names f table)
-  (define who 'formula-predictor-names)
-  (model-terms-column-names (formula-expansion who f (table-names table who))))
+  (model-terms-column-names (formula-expansion 'formula-predictor-names f table)))
 
 (define (formula-design-matrix f table)
   (define who 'formula-design-matrix)
-  (define mt (formula-expansion who f (table-names table who)))
+  (define mt (formula-expansion who f table))
   (check-predictors who f mt)
   (terms->design-matrix who mt table))
 
@@ -658,14 +704,20 @@
    (define (deviance-ratio m) (dev-ratio (formula-model-fit m)))])
 
 ;; The model that the formula procedures make: a formula model with the
-;; expanded terms of its fit, from which `predict` builds the design matrix of
-;; a new table. The terms are internal, so they live in this subtype and
+;; expanded terms of its fit, with its factors' levels, from which `predict`
+;; builds the design matrix of a new table, and the classes of its response,
+;; or #f (model-frame). They are internal, so they live in this subtype and
 ;; formula-model keeps its documented fields.
-(struct formula-model/terms formula-model (terms)
+(struct formula-model/terms formula-model (terms classes)
   #:transparent
   #:property prop:predictor-matrix
   (lambda (m X who)
-    (terms->design-matrix who (formula-model/terms-terms m) X)))
+    (terms->design-matrix who (formula-model/terms-terms m) X))
+  #:property prop:class-labels
+  (lambda (m) (formula-model/terms-classes m)))
+
+(define (formula-model-levels m)
+  (model-terms-factor-levels (formula-model/terms-terms m)))
 
 ;; --- families --------------------------------------------------------------------
 
@@ -763,36 +815,61 @@
     (raise-arguments-error who "a multinomial response must use every class label from 0 to its largest"
                            "column" column "missing label" missing "largest label" largest)))
 
-;; The terms, the design matrix of predictors and the response arguments of the
-;; family's procedures, from the table: R's model.frame, model.matrix and
-;; model.response.
+;; The terms, the design matrix of predictors, the response arguments of the
+;; family's procedures and the response's classes, from the table: R's
+;; model.frame, model.matrix and model.response. A binomial or multinomial
+;; response of strings, symbols or booleans has classes, its levels in R's
+;; order, as R's glmnet makes a factor response's; the second of a binomial
+;; response's two is the one whose probability the model gives. Otherwise
+;; the classes are #f.
 (define (model-frame who f table family-name)
-  (define mt (formula-expansion who f (table-names table who)))
+  (define mt (formula-expansion who f table))
   (check-predictors who f mt)
   (define x (terms->design-matrix who mt table))
   (define responses (response-columns f))
-  (define y (select-table-columns table responses who))
-  (unless (= (design-matrix-nrows y) (design-matrix-nrows x))
-    (raise-arguments-error who "the response and the predictors have different lengths"
-                           "response rows" (design-matrix-nrows y)
-                           "predictor rows" (design-matrix-nrows x)))
-  (define ys (design-matrix->columns y))
-  (define y1 (car ys))
   (define column (car responses))
+  (define-values (classes indices)
+    (if (memq family-name '(binomial multinomial))
+        (response-classes who column (car (select-table-values table (list column) who)))
+        (values #f #f)))
+  (define y (and (not classes) (select-table-columns table responses who)))
+  (define ys
+    (if classes
+        (list (for/list ([k (in-vector indices)]) (exact->inexact k)))
+        (design-matrix->columns y)))
+  (define y1 (car ys))
+  (unless (= (length y1) (design-matrix-nrows x))
+    (raise-arguments-error who "the response and the predictors have different lengths"
+                           "response rows" (length y1)
+                           "predictor rows" (design-matrix-nrows x)))
   (values
    mt
    x
    (case family-name
      [(gaussian) (list y1)]
      [(binomial)
-      (check-values who column y1 zero-or-one? "a binomial response must be 0 or 1")
+      (cond
+        [classes
+         (unless (= (length classes) 2)
+           (raise-arguments-error who (if (null? (cdr classes))
+                                          "a binomial response needs two classes"
+                                          "a binomial response has two classes; the multinomial family takes more")
+                                  "column" column "classes" classes))]
+        [else (check-values who column y1 zero-or-one? "a binomial response must be 0 or 1")])
       (list y1)]
      [(multinomial)
-      (check-values who column y1 (lambda (v) (and (integer? v) (>= v 0.0)))
-                    "a multinomial response must be a class label 0, 1, ...")
-      (define labels (map inexact->exact y1))
-      (check-class-labels who column labels)
-      (list labels)]
+      (cond
+        [classes
+         (when (null? (cdr classes))
+           (raise-arguments-error who "a multinomial response needs at least two classes"
+                                  "column" column "classes" classes))
+         (list (vector->list indices))]
+        [else
+         (check-values who column y1 (lambda (v) (and (integer? v) (>= v 0.0)))
+                       "a multinomial response must be a class label 0, 1, ...")
+         (define labels (map inexact->exact y1))
+         (check-class-labels who column labels)
+         (list labels)])]
      [(poisson)
       (check-values who column y1 (lambda (v) (>= v 0.0)) "a Poisson response must be non-negative")
       (list y1)]
@@ -800,7 +877,8 @@
       (check-values who column y1 positive? "a survival time must be positive")
       (check-values who (cadr responses) (cadr ys) zero-or-one? "an event status must be 0 or 1")
       (list y1 (cadr ys))]
-     [(mgaussian) (list y)])))
+     [(mgaussian) (list y)])
+   classes))
 
 ;; An #:intercept? option that was not given.
 (define unsupplied-intercept (string->uninterned-symbol "unsupplied"))
@@ -812,7 +890,7 @@
 ;; family, which has no intercept, takes none.
 (define (fit-formula who select f table family-name options)
   (define spec (hash-ref families family-name))
-  (define-values (mt x responses) (model-frame who f table family-name))
+  (define-values (mt x responses classes) (model-frame who f table family-name))
   (define fold-ids (cond [(assq '#:fold-ids options) => cdr] [else #f]))
   (when (and fold-ids (not (= (length fold-ids) (design-matrix-nrows x))))
     (raise-arguments-error who "fold-ids does not have one entry per row of the table"
@@ -831,7 +909,8 @@
      (lambda ()
        (keyword-apply (select spec) (map car kws) (map cdr kws)
                       (cons x responses))))
-   mt))
+   mt
+   classes))
 
 ;; The value of thunk, which calls one of the family's procedures. An error
 ;; that the family's procedures raise in their own name is raised again in the

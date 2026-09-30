@@ -83,7 +83,9 @@
   (provide single-fit-path
            write-fit
            predict-as
-           prop:predictor-matrix))
+           prop:predictor-matrix
+           prop:class-labels
+           model-class-labels))
 
 ;; How a model that names its predictors builds their design matrix from a
 ;; table for `predict`: a procedure of the model, the table and the name of the
@@ -92,6 +94,18 @@
 ;; `predict` reads the columns with the predictors' names.
 (define-values (prop:predictor-matrix predictor-matrix? predictor-matrix-ref)
   (make-struct-type-property 'predictor-matrix))
+
+;; How a binomial or multinomial model names its classes: a procedure of the
+;; model that returns their labels, in the order of the class indices, or #f
+;; for the indices themselves. A formula model of a response of strings (#53)
+;; names them, as R's glmnet names a factor response's: `coef` keys a
+;; multinomial model's coefficients by them, and `predict` with #:type 'class
+;; returns them.
+(define-values (prop:class-labels class-labels? class-labels-ref)
+  (make-struct-type-property 'class-labels))
+
+(define (model-class-labels model)
+  (and (class-labels? model) ((class-labels-ref model) model)))
 
 ;; --- single fits -------------------------------------------------------------
 
@@ -229,9 +243,10 @@
 
 ;; For a model with named predictors, what turns coefficient-vector's result
 ;; into association lists keyed as R's coef names its rows and list elements:
-;; "(Intercept)" and the predictor names, inside one list per class label
-;; (multinomial) or response name (multi-response; y1, y2, ... when the model
-;; names no responses). For any other model, `values`.
+;; "(Intercept)" and the predictor names, inside one list per class
+;; (multinomial; its label, or its index when the model names no classes) or
+;; response name (multi-response; y1, y2, ... when the model names no
+;; responses). For any other model, `values`.
 (define (coefficient-namer who model p)
   (define names (model-predictor-names who model p))
   (cond
@@ -246,7 +261,7 @@
          (cons key (label v))))
      (define k (vector-length (vector-ref (glmnet-path-coefficients p) 0)))
      (case (glmnet-path-family p)
-       [(multinomial) (label-groups (range k))]
+       [(multinomial) (label-groups (or (model-class-labels model) (range k)))]
        [(mgaussian)
         (define responses (glmnet-model-response-names model))
         (when (and responses (not (= (length responses) k)))
@@ -343,7 +358,12 @@
   (check-type who family type)
   (define x (model-matrix who model X p))
   (define interpolate (lambda-interpolator (glmnet-path-lambda p)))
-  (define transform (row-transform family type))
+  (define classes (and (eq? type 'class) (model-class-labels model)))
+  (define transform
+    (if classes
+        (let ([labels (list->vector classes)] [index (row-transform family type)])
+          (lambda (eta) (vector-ref labels (index eta))))
+        (row-transform family type)))
   (at-lambdas (resolve-lambda who model s)
               (lambda (s)
                 (define-values (a0 beta) (point-at p interpolate s))

@@ -23,6 +23,7 @@
 (require (for-label glmnet
                     glmnet/plot
                     glmnet/examples/data/mtcars
+                    glmnet/examples/data/iris
                     racket/base
                     racket/contract
                     racket/file
@@ -38,6 +39,7 @@
          (for-label (all-from-out glmnet
                                   glmnet/plot
                                   glmnet/examples/data/mtcars
+                                  glmnet/examples/data/iris
                                   racket/base
                                   racket/contract
                                   racket/file

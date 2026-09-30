@@ -19,6 +19,13 @@ suppressWarnings(suppressMessages({
   library(survival)   # Surv() for the Cox family
 }))
 
+## factor() sorts character levels by the collation locale. The Nix build
+## sandbox of checks.parity runs R in the C locale, where sort() compares
+## bytes, as Racket's string<? compares code points; an en_US session sorts
+## "a" before "B". Fix C here, so that the goldens are the same wherever they
+## are generated.
+invisible(Sys.setlocale("LC_COLLATE", "C"))
+
 ## Goldens are written to GLMNET_GOLDENS_OUT (the CI check points this at a temp
 ## dir; local `nix run .#gen-goldens` defaults to scripts/r-parity/goldens, which
 ## is gitignored). They are never committed -- the parity check regenerates them.
@@ -88,7 +95,8 @@ generic_outputs <- function(fit, family, X, s) {
   preds <- list()
   for (type in predict_types(family)) {
     P <- predict(fit, newx = X, s = s, type = type)
-    if (type == "class") P <- array(as.integer(P), dim(P))
+    ## Classes that are numbers become integers; a factor's labels stay.
+    if (type == "class" && all(grepl("^[0-9]+$", P))) P <- array(as.integer(P), dim(P))
     preds[[type]] <- per_s(P)
   }
   co <- coef(fit, s = s)
@@ -440,18 +448,47 @@ for (f in cv_fixtures) {
 
 ## --- formulas (#53) -----------------------------------------------------------
 ## R's formula algebra on mtcars (R's own copy; the Racket copy is
-## glmnet/examples/data/mtcars.rkt) and longley (the committed CSV). For each
-## formula: terms()'s term labels, intercept and factors attribute (one entry
-## per term, from each of its variables to 1 or 2); model.matrix() without its
-## intercept column, as column names and columns, and the warnings it gave; and
-## glmnet on that matrix with intercept = attr(terms, "intercept"), at a user
-## lambda sequence, through the generic outputs at `s`. `rkt` holds the Racket
-## spellings of the formula, which must all give R's matrix. `names` maps R's
-## name of each transform to the Racket one, its source: log(hp) is
-## "(log hp)", and an interaction's name maps each of its variables.
+## glmnet/examples/data/mtcars.rkt), longley (the committed CSV) and iris
+## (R's, with Species as strings, as glmnet/examples/data/iris.rkt holds it).
+## For each formula: terms()'s term labels, intercept and factors attribute
+## (one entry per term, from each of its variables to 1 or 2); model.matrix()
+## without its intercept column, as column names and columns, and the warnings
+## it gave; the levels of its factors, R's xlevels and the logical variables'
+## FALSE and TRUE; and glmnet on that matrix with intercept =
+## attr(terms, "intercept"), at a user lambda sequence, through the generic
+## outputs at `s`. `rkt` holds the Racket spellings of the formula, which must
+## all give R's matrix. `names` maps R's name of each transform or factor() to
+## the Racket one, its source: log(hp) is "(log hp)" and factor(cyl) is
+## "(factor cyl)", so that factor(cyl)6 is "(factor cyl)6", and an
+## interaction's name maps each of its variables.
+##
+## A fixture may also give `family` (gaussian by default; a binomial or
+## multinomial response of strings or booleans is a factor, as glmnet makes
+## it); `newdata`, a data frame whose design matrix, built with the fit's
+## levels as R's predict builds it, and predictions the golden records;
+## `bad_newdata`, whose factor has levels the fit does not, and R's error
+## names them; and `symbols`, columns that the Racket side reads as symbols
+## rather than strings. The tables `cars` and `mixed` exist only here, and
+## their goldens carry them (`table`).
+
+## mtcars with a string column and a logical one.
+cars <- transform(datasets::mtcars,
+                  gearbox = ifelse(am == 1, "manual", "automatic"),
+                  heavy = wt > 3.3)
+## A string column whose levels differ in case and start with digits and _,
+## for the order of the levels.
+mixed <- data.frame(
+  y = c(3.1, 4.7, 2.2, 5.9, 4.4, 3.8, 6.1, 2.9, 5.2, 3.3, 4.9, 2.6, 5.5, 4.1, 3.6, 6.4),
+  g = rep(c("b", "B", "a", "A", "Z", "_z", "10", "9"), 2),
+  x = c(1.2, 0.4, 2.2, 1.9, 0.7, 1.5, 2.8, 0.9, 1.1, 2.4, 0.3, 1.7, 2.6, 0.8, 1.4, 2.1),
+  stringsAsFactors = FALSE)
 
 formula_data <- list(mtcars = datasets::mtcars,
-                     longley = read.csv(file.path(data_dir, "longley.csv")))
+                     longley = read.csv(file.path(data_dir, "longley.csv")),
+                     iris = transform(datasets::iris, Species = as.character(Species)),
+                     cars = cars,
+                     mixed = mixed)
+inline_data <- c("cars", "mixed")
 
 formula_fixtures <- list(
   list(id = "formula-mtcars-cross", dataset = "mtcars", r = "mpg ~ wt * hp",
@@ -537,13 +574,184 @@ formula_fixtures <- list(
   list(id = "formula-mtcars-quoted-data", dataset = "mtcars",
        r = "mpg ~ wt + as.numeric(cyl %in% c(4, 6))",
        rkt = c("(mpg . ~ . wt + (I (if (memv cyl '(4.0 6.0)) 1 0)))"),
-       names = list(`as.numeric(cyl %in% c(4, 6))` = "(I (if (memv cyl '(4.0 6.0)) 1 0))"))
+       names = list(`as.numeric(cyl %in% c(4, 6))` = "(I (if (memv cyl '(4.0 6.0)) 1 0))")),
+  ## Factors (#53, leg 3): treatment contrasts, the first level the baseline.
+  list(id = "formula-mtcars-factor", dataset = "mtcars", r = "mpg ~ wt + factor(cyl)",
+       rkt = c("(mpg . ~ . wt + (factor cyl))", "(~ mpg wt (factor cyl))",
+               "(~ mpg wt (factor \"cyl\"))"),
+       names = list(`factor(cyl)` = "(factor cyl)"),
+       newdata = "data.frame(wt = c(2.5, 3.2, 4), cyl = c(8, 4, 8))",
+       bad_newdata = "data.frame(wt = c(2.5, 3, 3.5), cyl = c(5, 4, 7))"),
+  ## Without an intercept, the first factor is coded by dummies, even after a
+  ## numeric term, and only that one.
+  list(id = "formula-mtcars-factor-no-intercept", dataset = "mtcars", r = "mpg ~ 0 + wt + factor(cyl)",
+       rkt = c("(mpg . ~ . 0 + wt + (factor cyl))", "(~ mpg 0 wt (factor cyl))"),
+       names = list(`factor(cyl)` = "(factor cyl)"),
+       newdata = "data.frame(wt = c(2.5, 3.2), cyl = c(6, 6))"),
+  list(id = "formula-mtcars-factor-no-intercept-two", dataset = "mtcars",
+       r = "mpg ~ 0 + factor(cyl) + factor(gear)",
+       rkt = c("(mpg . ~ . 0 + (factor cyl) + (factor gear))"),
+       names = list(`factor(cyl)` = "(factor cyl)", `factor(gear)` = "(factor gear)")),
+  list(id = "formula-mtcars-factor-no-intercept-later", dataset = "mtcars",
+       r = "mpg ~ factor(gear):factor(am) + factor(cyl) - 1",
+       rkt = c("(mpg . ~ . (factor gear) : (factor am) + (factor cyl) - 1)"),
+       names = list(`factor(cyl)` = "(factor cyl)", `factor(gear)` = "(factor gear)",
+                    `factor(am)` = "(factor am)")),
+  ## The first factor of the first term that has one, in an interaction.
+  list(id = "formula-mtcars-factor-no-intercept-interaction", dataset = "mtcars",
+       r = "mpg ~ 0 + wt + wt:factor(cyl)",
+       rkt = c("(mpg . ~ . 0 + wt + wt : (factor cyl))"),
+       names = list(`factor(cyl)` = "(factor cyl)")),
+  list(id = "formula-mtcars-factor-no-intercept-power", dataset = "mtcars",
+       r = "mpg ~ 0 + (factor(cyl) + wt + factor(am))^2",
+       rkt = c("(mpg . ~ . 0 + ((factor cyl) + wt + (factor am)) ^ 2)"),
+       names = list(`factor(cyl)` = "(factor cyl)", `factor(am)` = "(factor am)")),
+  ## Factor by numeric, named wt:factor(cyl)6.
+  list(id = "formula-mtcars-factor-cross", dataset = "mtcars", r = "mpg ~ wt * factor(cyl)",
+       rkt = c("(mpg . ~ . wt * (factor cyl))", "(~ mpg (* wt (factor cyl)))"),
+       names = list(`factor(cyl)` = "(factor cyl)"),
+       newdata = "data.frame(wt = c(2.5, 3.2, 4), cyl = c(4, 4, 8))"),
+  ## x:f without f: R's marginality rule codes f by dummies.
+  list(id = "formula-mtcars-factor-marginal", dataset = "mtcars", r = "mpg ~ wt:factor(cyl)",
+       rkt = c("(mpg . ~ . wt : (factor cyl))", "(~ mpg (: wt (factor cyl)))"),
+       names = list(`factor(cyl)` = "(factor cyl)")),
+  list(id = "formula-mtcars-factor-marginal-first", dataset = "mtcars",
+       r = "mpg ~ factor(cyl):wt + qsec",
+       rkt = c("(mpg . ~ . (factor cyl) : wt + qsec)"),
+       names = list(`factor(cyl)` = "(factor cyl)")),
+  ## x:f after a term that contains x, though x is not a term: contrasts.
+  list(id = "formula-mtcars-factor-marginal-contained", dataset = "mtcars",
+       r = "mpg ~ wt:hp + wt:factor(cyl)",
+       rkt = c("(mpg . ~ . wt : hp + wt : (factor cyl))"),
+       names = list(`factor(cyl)` = "(factor cyl)")),
+  ## f + x:f: the slope within each level, f coded by dummies in x:f.
+  list(id = "formula-mtcars-factor-nested", dataset = "mtcars", r = "mpg ~ factor(cyl) + wt:factor(cyl)",
+       rkt = c("(mpg . ~ . (factor cyl) + wt : (factor cyl))"),
+       names = list(`factor(cyl)` = "(factor cyl)")),
+  ## Factor by factor.
+  list(id = "formula-mtcars-factor-factor", dataset = "mtcars", r = "mpg ~ factor(cyl) * factor(gear)",
+       rkt = c("(mpg . ~ . (factor cyl) * (factor gear))", "(~ mpg (* (factor cyl) (factor gear)))"),
+       names = list(`factor(cyl)` = "(factor cyl)", `factor(gear)` = "(factor gear)"),
+       newdata = "data.frame(cyl = c(4, 8), gear = c(5, 3))"),
+  list(id = "formula-mtcars-factor-factor-marginal", dataset = "mtcars",
+       r = "mpg ~ factor(cyl):factor(gear)",
+       rkt = c("(mpg . ~ . (factor cyl) : (factor gear))"),
+       names = list(`factor(cyl)` = "(factor cyl)", `factor(gear)` = "(factor gear)")),
+  list(id = "formula-mtcars-factor-factor-partial", dataset = "mtcars",
+       r = "mpg ~ factor(cyl) + factor(cyl):factor(gear)",
+       rkt = c("(mpg . ~ . (factor cyl) + (factor cyl) : (factor gear))"),
+       names = list(`factor(cyl)` = "(factor cyl)", `factor(gear)` = "(factor gear)")),
+  ## A logical transform, a factor of a transform and a transform of strings.
+  list(id = "formula-mtcars-logical-transform", dataset = "mtcars", r = "mpg ~ I(hp > 150) + wt",
+       rkt = c("(mpg . ~ . (> hp 150) + wt)"),
+       names = list(`I(hp > 150)` = "(> hp 150)"),
+       newdata = "data.frame(hp = c(100, 120), wt = c(2.5, 3))"),
+  list(id = "formula-mtcars-factor-of-transform", dataset = "mtcars", r = "mpg ~ factor(gear > 3) * wt",
+       rkt = c("(mpg . ~ . (factor (> gear 3)) * wt)"),
+       names = list(`factor(gear > 3)` = "(factor (> gear 3))")),
+  list(id = "formula-mtcars-string-transform", dataset = "mtcars",
+       r = "mpg ~ ifelse(hp > 150, \"high\", \"low\") + wt",
+       rkt = c("(mpg . ~ . (if (> hp 150) \"high\" \"low\") + wt)"),
+       names = setNames(list("(if (> hp 150) \"high\" \"low\")"), "ifelse(hp > 150, \"high\", \"low\")"),
+       newdata = "data.frame(hp = c(200, 300), wt = c(3, 3.5))"),
+  ## Transforms of string and logical columns, which read their values.
+  list(id = "formula-iris-string-comparison", dataset = "iris",
+       r = "Sepal.Length ~ I(Species == \"setosa\") + Petal.Width",
+       rkt = c("(Sepal.Length . ~ . (equal? Species \"setosa\") + Petal.Width)"),
+       names = setNames(list("(equal? Species \"setosa\")"), "I(Species == \"setosa\")"),
+       lambda = c(0.5, 0.1, 0.02, 0.005)),
+  list(id = "formula-cars-logical-not", dataset = "cars", r = "mpg ~ I(!heavy) + hp",
+       rkt = c("(mpg . ~ . (not heavy) + hp)"),
+       names = list(`I(!heavy)` = "(not heavy)"),
+       newdata = "data.frame(heavy = c(TRUE, TRUE), hp = c(100, 200))"),
+  list(id = "formula-cars-logical-product", dataset = "cars", r = "mpg ~ I(heavy * wt) + hp",
+       rkt = c("(mpg . ~ . (I (* (if heavy 1 0) wt)) + hp)"),
+       names = list(`I(heavy * wt)` = "(I (* (if heavy 1 0) wt))")),
+  list(id = "formula-cars-string-call", dataset = "cars", r = "mpg ~ factor(toupper(gearbox)) + wt",
+       rkt = c("(mpg . ~ . (factor (string-upcase gearbox)) + wt)"),
+       names = list(`factor(toupper(gearbox))` = "(factor (string-upcase gearbox))"),
+       newdata = "data.frame(gearbox = c(\"manual\", \"manual\"), wt = c(2.5, 3))"),
+  ## A string column, and the same column as symbols.
+  list(id = "formula-iris-string", dataset = "iris", r = "Sepal.Length ~ Species + Petal.Width",
+       rkt = c("(Sepal.Length . ~ . Species + Petal.Width)", "(~ Sepal.Length Species Petal.Width)"),
+       lambda = c(0.5, 0.1, 0.02, 0.005),
+       newdata = "data.frame(Petal.Width = c(1.8, 0.2), Species = c(\"virginica\", \"setosa\"))",
+       bad_newdata = "data.frame(Petal.Width = c(1, 2, 3), Species = c(\"setosa\", \"Setosa\", \"iris\"))"),
+  list(id = "formula-iris-symbol", dataset = "iris", r = "Sepal.Length ~ Species + Petal.Width",
+       rkt = c("(Sepal.Length . ~ . Species + Petal.Width)"), symbols = "Species",
+       lambda = c(0.5, 0.1, 0.02, 0.005),
+       newdata = "data.frame(Petal.Width = c(1.8, 0.2), Species = c(\"virginica\", \"setosa\"))"),
+  list(id = "formula-iris-all", dataset = "iris", r = "Sepal.Length ~ .",
+       rkt = c("(~ Sepal.Length all)"), lambda = c(0.5, 0.1, 0.02, 0.005)),
+  list(id = "formula-iris-no-intercept", dataset = "iris", r = "Sepal.Length ~ 0 + Petal.Width * Species",
+       rkt = c("(Sepal.Length . ~ . 0 + Petal.Width * Species)"), lambda = c(0.5, 0.1, 0.02, 0.005)),
+  list(id = "formula-iris-marginal", dataset = "iris", r = "Sepal.Length ~ Petal.Width:Species",
+       rkt = c("(Sepal.Length . ~ . Petal.Width : Species)"), lambda = c(0.5, 0.1, 0.02, 0.005)),
+  ## A string column in an interaction, logical columns, and the order of
+  ## levels that differ in case (C collation: 10 9 A B Z _z a b).
+  list(id = "formula-cars-string-cross", dataset = "cars", r = "mpg ~ gearbox * wt",
+       rkt = c("(mpg . ~ . gearbox * wt)"),
+       newdata = "data.frame(gearbox = c(\"manual\", \"manual\"), wt = c(2.5, 3))"),
+  list(id = "formula-cars-logical", dataset = "cars", r = "mpg ~ heavy + hp",
+       rkt = c("(mpg . ~ . heavy + hp)"),
+       newdata = "data.frame(heavy = c(TRUE, TRUE), hp = c(100, 200))"),
+  list(id = "formula-cars-logical-no-intercept", dataset = "cars", r = "mpg ~ 0 + heavy + hp",
+       rkt = c("(mpg . ~ . 0 + heavy + hp)")),
+  list(id = "formula-mixed-collation", dataset = "mixed", r = "y ~ g + x",
+       rkt = c("(y . ~ . g + x)"), lambda = c(0.5, 0.1, 0.02, 0.005)),
+  ## String and logical responses: glmnet makes them factors, whose levels
+  ## are the classes.
+  list(id = "formula-iris-multinomial", dataset = "iris", family = "multinomial", r = "Species ~ .",
+       rkt = c("(~ Species all)"), lambda = c(0.2, 0.05, 0.02, 0.005),
+       newdata = "data.frame(Sepal.Length = c(5, 6.5), Sepal.Width = c(3.4, 3), Petal.Length = c(1.5, 5.5), Petal.Width = c(0.2, 2))"),
+  list(id = "formula-cars-binomial-string", dataset = "cars", family = "binomial", r = "gearbox ~ wt + qsec",
+       rkt = c("(gearbox . ~ . wt + qsec)"), lambda = c(0.2, 0.05, 0.02, 0.01)),
+  list(id = "formula-cars-binomial-logical", dataset = "cars", family = "binomial", r = "heavy ~ hp + qsec",
+       rkt = c("(heavy . ~ . hp + qsec)"), lambda = c(0.2, 0.05, 0.02, 0.01)),
+  ## The response in an interaction is kept, and xlevels leave it out.
+  list(id = "formula-iris-response-interaction", dataset = "iris", family = "multinomial",
+       r = "Species ~ Sepal.Length:Species",
+       rkt = c("(Species . ~ . Sepal.Length : Species)"), lambda = c(0.2, 0.05, 0.02, 0.005)),
+  list(id = "formula-cars-logical-response-interaction", dataset = "cars", family = "binomial",
+       r = "heavy ~ hp + hp:heavy",
+       rkt = c("(heavy . ~ . hp + hp : heavy)"), lambda = c(0.2, 0.1, 0.05, 0.02))
 )
+
+## The levels of the factors of the terms, in the order of the variables:
+## R's xlevels (.getXlevels, which leaves out the response, even in an
+## interaction), and FALSE and TRUE for a logical variable other than the
+## response, which R codes as a factor with those levels but leaves out of
+## xlevels.
+factor_levels <- function(tt, mf) {
+  fac <- attr(tt, "factors")
+  xlev <- .getXlevels(tt, mf)
+  response <- if (attr(tt, "response") > 0) rownames(fac)[attr(tt, "response")] else ""
+  out <- list()
+  for (v in rownames(fac)[rowSums(fac) > 0]) {
+    lv <- if (v %in% names(xlev)) xlev[[v]]
+          else if (is.logical(mf[[v]]) && v != response) c("FALSE", "TRUE") else NULL
+    if (!is.null(lv)) out[[length(out) + 1]] <- list(name = v, levels = I(lv))
+  }
+  out
+}
+
+## A data frame as a golden's table: its columns in order, each named.
+table_json <- function(d)
+  unname(lapply(names(d), function(n) list(name = n, values = I(d[[n]]))))
+
+## The design matrix of new data, as R's predict builds it: the model frame
+## of the terms without the response, with the fit's levels.
+new_design <- function(tt, nd, xlev, intercept) {
+  tt0 <- delete.response(tt)
+  mm <- model.matrix(tt0, model.frame(tt0, nd, xlev = xlev))
+  if (intercept) mm[, -1, drop = FALSE] else mm
+}
 
 for (fx in formula_fixtures) {
   d  <- formula_data[[fx$dataset]]
   fm <- as.formula(fx$r)
   tt <- terms(fm, data = d)
+  family <- if (is.null(fx$family)) "gaussian" else fx$family
   warnings <- character(0)
   mm <- withCallingHandlers(model.matrix(fm, d), warning = function(w) {
     warnings <<- c(warnings, conditionMessage(w))
@@ -553,26 +761,50 @@ for (fx in formula_fixtures) {
   x  <- if (intercept) mm[, -1, drop = FALSE] else mm
   y  <- d[[all.vars(fm)[1]]]
   lambda <- if (is.null(fx$lambda)) c(2, 0.5, 0.1, 0.02) else fx$lambda
-  fit <- suppressWarnings(glmnet(x, y, family = "gaussian", alpha = 1, lambda = lambda,
+  fit <- suppressWarnings(glmnet(x, y, family = family, alpha = 1, lambda = lambda,
                                  standardize = TRUE, intercept = intercept, thresh = 1e-7))
   fac <- attr(tt, "factors")
   factors <- lapply(seq_len(ncol(fac)), function(j) {
     nz <- fac[, j] != 0
     setNames(as.list(fac[nz, j]), rownames(fac)[nz])
   })
+  mf <- model.frame(tt, d)
+  xlev <- .getXlevels(tt, mf)
   s <- c(lambda[2], 0.6 * lambda[2] + 0.4 * lambda[3])
-  golden <- list(id = fx$id, kind = "formula", dataset = fx$dataset, family = "gaussian",
+  golden <- list(id = fx$id, kind = "formula", dataset = fx$dataset, family = family,
                  r_formula = fx$r, rkt = I(fx$rkt),
                  names = if (is.null(fx$names)) setNames(list(), character(0)) else fx$names,
                  alpha = 1, thresh = 1e-7,
                  lambda_user = lambda,
                  term_labels = I(attr(tt, "term.labels")), intercept = intercept,
                  factors = factors,
+                 levels = factor_levels(tt, mf),
                  column_names = I(colnames(x)),
                  columns = unname(lapply(seq_len(ncol(x)), function(j) unname(x[, j]))),
                  warnings = I(warnings),
-                 generic = generic_outputs(fit, "gaussian", x, s),
+                 generic = generic_outputs(fit, family, x, s),
                  meta = meta)
+  if (fx$dataset %in% inline_data) golden$table <- table_json(d)
+  if (!is.null(fx$symbols)) golden$symbols <- I(fx$symbols)
+  if (!is.null(fx$newdata)) {
+    nd <- eval(parse(text = fx$newdata))
+    xn <- new_design(tt, nd, xlev, intercept)
+    stopifnot(identical(colnames(xn), colnames(x)))
+    golden$new_table <- table_json(nd)
+    golden$new_columns <- unname(lapply(seq_len(ncol(xn)), function(j) unname(xn[, j])))
+    golden$new_predict <- generic_outputs(fit, family, xn, s)$predict_s
+  }
+  if (!is.null(fx$bad_newdata)) {
+    nd <- eval(parse(text = fx$bad_newdata))
+    err <- tryCatch({ new_design(tt, nd, xlev, intercept); "" },
+                        error = function(e) conditionMessage(e))
+    ## "factor factor(cyl) has new levels 5, 7"
+    parts <- regmatches(err, regexec("^factor (.*) has new levels? (.*)$", err))[[1]]
+    stopifnot(length(parts) == 3)
+    golden$bad_table <- table_json(nd)
+    golden$bad_factor <- parts[2]
+    golden$bad_levels <- I(strsplit(parts[3], ", ")[[1]])
+  }
   path <- file.path(goldens_dir, paste0(fx$id, ".json"))
   writeLines(toJSON(golden, digits = NA, auto_unbox = TRUE, pretty = TRUE), path)
   cat("wrote", path, "  (", ncol(x), "columns )\n")

@@ -44,7 +44,8 @@
                   formula-model?
                   formula-model-fit
                   glmnet-model-predictor-names
-                  glmnet-model-response-names))
+                  glmnet-model-response-names)
+         (only-in (submod "core/model.rkt" support) model-class-labels))
 
 (define model/c (or/c glmnet-path? glmnet-cv? formula-model?))
 (define cv/c (or/c glmnet-cv? formula-model?))
@@ -91,6 +92,7 @@
            label-runs
            keep-apart
            path-panels
+           model-panels
            panel-coefficients
            panel-df
            panel-y-label
@@ -175,8 +177,9 @@
 ;; nonzero coefficients on top, or one of each predictor's 2-norm across them
 ;; ('2norm), with the mean count over the classes, rounded to one decimal
 ;; place (multinomial), or the first response's count (multi-response). A
-;; response is labelled by its name in `responses`, or else as y1, y2, ...
-(define (path-panels p type-coef [responses #f])
+;; response is labelled by its name in `responses`, or else as y1, y2, ...,
+;; and a class by its label in `classes`, or else by its index.
+(define (path-panels p type-coef [responses #f] [classes #f])
   (define family (glmnet-path-family p))
   (define coefs (glmnet-path-coefficients p))
   (case family
@@ -194,7 +197,7 @@
                    [r (in-naturals)])
           (panel betas df (format "Coefficients: Response ~a"
                                   (cond
-                                    [(eq? family 'multinomial) r]
+                                    [(eq? family 'multinomial) (if classes (list-ref classes r) r)]
                                     [responses (list-ref responses r)]
                                     [else (format "y~a" (add1 r))]))))]
        [(2norm)
@@ -287,6 +290,10 @@
   (define fit (model-fit who model path-or-cv? "a path or a cross-validated path"))
   (if (glmnet-cv? fit) (glmnet-cv-path fit) fit))
 
+;; The panels of a model's path p, titled by the model's responses or classes.
+(define (model-panels model p type-coef)
+  (path-panels p type-coef (glmnet-model-response-names model) (model-class-labels model)))
+
 ;; #t labels the curves of a model with named predictors, such as a formula
 ;; model, by name, and those of any other model by position.
 (define (model-label model label)
@@ -349,7 +356,7 @@
                                     #:response [response 0])
   (define who 'coefficient-path-renderers)
   (define p (model-path who model))
-  (define panels (path-panels p type-coef (glmnet-model-response-names model)))
+  (define panels (model-panels model p type-coef))
   (unless (< response (length panels))
     (raise-arguments-error who "the path has no class or response with this index"
                            "response" response
@@ -404,7 +411,7 @@
   (define f (approx-f xvar sign-lambda))
   (define-values (x-min x-max) (padded-range xs))
   (define pictures
-    (for*/list ([pnl (in-list (path-panels p type-coef (glmnet-model-response-names model)))]
+    (for*/list ([pnl (in-list (model-panels model p type-coef))]
                 [renderers (in-value (panel-renderers who pnl xs label* right?))]
                 #:unless (null? renderers))
       (define-values (y-min y-max)

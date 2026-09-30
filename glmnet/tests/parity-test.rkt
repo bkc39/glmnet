@@ -36,12 +36,14 @@
            racket/string
            glmnet
            glmnet/examples/data/mtcars
+           glmnet/examples/data/iris
            ;; The collection's instance, whose transform structs `~` makes;
            ;; the checks run this file from the source tree against an
            ;; installed copy of the package.
            (only-in glmnet/core/terms
                     expand-terms model-terms-labels model-terms-intercept? model-terms-terms
-                    model-terms-codings term-variables variable-label)
+                    model-terms-codings term-variables variable-label drop-response-terms
+                    resolve-levels terms->design-matrix)
            (file "../private/demo-utils.rkt"))
 
   (define-runtime-path committed-goldens "../../scripts/r-parity/goldens")
@@ -127,22 +129,25 @@
   (define (check-generic model X gen tols)
     (define s    (hash-ref gen 's))
     (define ctol (hash-ref tols 'coef))
-    (define ptol (hash-ref tols 'pred))
-    (define preds (hash-ref gen 'predict_s))
     (define coefs (coef model #:lambda s))
     (check-equal? (length coefs) (length (hash-ref gen 'coef_s)) "coef: number of s")
     (for ([got (in-list coefs)]
           [expected (in-list (hash-ref gen 'coef_s))]
           [i (in-naturals)])
       (check-nested-close got expected ctol (format "coef[s ~a]" i)))
+    (check-predict model X s (hash-ref gen 'predict_s) (hash-ref tols 'pred) "predict"))
+
+  ;; `predict` of every type at each of `s` against R's predictions `preds`,
+  ;; by type; a class only where R's is decisive.
+  (define (check-predict model X s preds ptol what)
     (for ([(type all-expected) (in-hash preds)])
       (define all-got (predict model X #:type type #:lambda s))
-      (check-equal? (length all-got) (length all-expected) (format "predict ~a: number of s" type))
+      (check-equal? (length all-got) (length all-expected) (format "~a ~a: number of s" what type))
       (for ([got (in-list all-got)]
             [expected (in-list all-expected)]
             [etas (in-list (hash-ref preds 'link))]
             [i (in-naturals)])
-        (define msg (format "predict ~a[s ~a]" type i))
+        (define msg (format "~a ~a[s ~a]" what type i))
         (cond
           [(eq? type 'class)
            (check-equal? (length got) (length expected) (format "~a: row count" msg))
@@ -335,35 +340,72 @@
                 [#f '()]
                 [(vector _ message _ _) (cons message (loop))]))))
 
+  ;; A table as a golden carries it, a list of named columns, with the
+  ;; strings of the columns named in `symbols` read as symbols.
+  (define (golden-columns->table columns symbols)
+    (for/list ([column (in-list columns)])
+      (define name (hash-ref column 'name))
+      (define entries (hash-ref column 'values))
+      (cons name (if (member name symbols) (map string->symbol entries) entries))))
+
+  ;; The table of a formula golden: R's mtcars or iris as the example modules
+  ;; hold them, a committed dataset, or the table the golden carries.
+  (define (formula-golden-table g symbols)
+    (define table
+      (cond
+        [(hash-ref g 'table #f) => (lambda (columns) (golden-columns->table columns '()))]
+        [else (match (hash-ref g 'dataset)
+                ["mtcars" mtcars]
+                ["iris" iris]
+                [name (load-table name)])]))
+    (for/list ([column (in-list table)])
+      (if (member (car column) symbols)
+          (cons (car column) (map string->symbol (cdr column)))
+          column)))
+
   ;; The formula algebra (#53): for each Racket spelling of the golden's
   ;; formula, `~` and make-formula agree, when the formula has no transforms;
   ;; the expansion has R's term labels, intercept and factors;
   ;; formula-design-matrix is R's model.matrix without its intercept column,
-  ;; names and values, and warns where R does; and the path fitted from the
-  ;; formula is R's glmnet on that matrix. Names are compared after the
-  ;; golden's `names` map R's name of each transform to its Racket source.
+  ;; names and values, and warns where R does; the factors have R's levels;
+  ;; and the path fitted from the formula, for the golden's family, is R's
+  ;; glmnet on that matrix. On new data, the design matrix coded with the
+  ;; fit's levels and the predictions are R's, and a level the fit did not see
+  ;; is an error naming the levels R names. Names are compared after the
+  ;; golden's `names` map R's name of each transform or factor() to its
+  ;; Racket source.
   (define (run-formula-golden g)
-    (define id     (hash-ref g 'id))
-    (define tols   (hash-ref (hash-ref g 'meta) 'tolerances))
-    (define gen    (hash-ref g 'generic))
-    (define table
-      (match (hash-ref g 'dataset)
-        ["mtcars" mtcars]
-        [name (load-table name)]))
+    (define id      (hash-ref g 'id))
+    (define tols    (hash-ref (hash-ref g 'meta) 'tolerances))
+    (define gen     (hash-ref g 'generic))
+    (define s       (hash-ref gen 's))
+    (define family  (string->symbol (hash-ref g 'family)))
+    (define symbols (hash-ref g 'symbols '()))
+    (define table   (formula-golden-table g symbols))
     (define response-dropped?
       (member "the response appeared on the right-hand side and was dropped"
               (hash-ref g 'warnings)))
-    (define transform-names
-      (for/hash ([(r rkt) (in-hash (hash-ref g 'names (hash)))])
-        (values (symbol->string r) rkt)))
-    ;; An R name, a variable's or an interaction's, as the Racket one.
+    ;; R's names of transforms and factor()s, longest first, so that a name
+    ;; is mapped by the longest one it starts with.
+    (define variable-names
+      (sort (for/list ([(r rkt) (in-hash (hash-ref g 'names (hash)))])
+              (cons (symbol->string r) rkt))
+            > #:key (lambda (pair) (string-length (car pair)))))
+    ;; An R name, a variable's, a column's or an interaction's, as the Racket
+    ;; one: a factor's column is its name followed by a level's.
     (define (racket-name r)
-      (string-join (for/list ([v (in-list (string-split r ":"))])
-                     (hash-ref transform-names v v))
+      (string-join (for/list ([part (in-list (string-split r ":"))])
+                     (or (for/first ([pair (in-list variable-names)]
+                                     #:when (string-prefix? part (car pair)))
+                           (string-append (cdr pair) (substring part (string-length (car pair)))))
+                         part))
                    ":"))
     (define coef-names
       (let ([names (hash-ref gen 'coef_names)])
         (hash-set names 'rows (map racket-name (hash-ref names 'rows)))))
+    (define levels
+      (for/list ([l (in-list (hash-ref g 'levels))])
+        (cons (racket-name (hash-ref l 'name)) (hash-ref l 'levels))))
     (for ([source (in-list (hash-ref g 'rkt))])
       (test-case (format "~a ~a" id source)
         (define datum (read (open-input-string source)))
@@ -397,13 +439,33 @@
         (when response-dropped?
           (check-regexp-match #rx"^glmnet: formula-design-matrix: the response column \"[^\"]+\" appeared on the right-hand side and was dropped$"
                               (car warnings)))
-        (define fp (formula-path f table #:lambda (hash-ref g 'lambda_user)
+        (define fp (formula-path f table #:family family #:lambda (hash-ref g 'lambda_user)
                                  #:alpha (hash-ref g 'alpha) #:thresh (hash-ref g 'thresh)))
-        (check-named-coef (coef fp #:lambda (hash-ref gen 's)) (hash-ref gen 'coef_s)
-                          coef-names (hash-ref tols 'coef))
-        (check-nested-close (predict fp table #:lambda (hash-ref gen 's))
-                            (hash-ref (hash-ref gen 'predict_s) 'link) (hash-ref tols 'pred)
-                            "formula predict"))))
+        (check-equal? (formula-model-levels fp) levels "levels")
+        (check-named-coef (coef fp #:lambda s) (hash-ref gen 'coef_s) coef-names (hash-ref tols 'coef))
+        (check-predict fp table s (hash-ref gen 'predict_s) (hash-ref tols 'pred) "formula predict")
+        (define new-columns (hash-ref g 'new_columns #f))
+        (when new-columns
+          (define new-table (golden-columns->table (hash-ref g 'new_table) symbols))
+          (define-values (kept dropped) (drop-response-terms mt))
+          (define coded
+            (terms->design-matrix 'predict (resolve-levels 'parity kept table) new-table))
+          (check-equal? (design-matrix-column-names coded) column-names "new data: column names")
+          (check-mat-close (design-matrix->columns coded) new-columns 1e-12 "new data: design matrix")
+          (check-predict fp new-table s (hash-ref g 'new_predict) (hash-ref tols 'pred)
+                         "new data: predict"))
+        (define bad-levels (hash-ref g 'bad_levels #f))
+        (when bad-levels
+          (define bad-table (golden-columns->table (hash-ref g 'bad_table) symbols))
+          (check-exn (lambda (e)
+                       (and (exn:fail? e)
+                            (regexp-match?
+                             (regexp-quote
+                              (format ": ~s\n  new levels: '~s"
+                                      (racket-name (hash-ref g 'bad_factor)) bad-levels))
+                             (exn-message e))))
+                     (lambda () (predict fp bad-table #:lambda s))
+                     "new levels")))))
 
   (define (run-golden g)
     (define id     (hash-ref g 'id))

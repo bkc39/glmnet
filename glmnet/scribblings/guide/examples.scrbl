@@ -3,7 +3,7 @@
 
 @title[#:tag "examples" #:style 'toc]{Examples}
 
-One section per model, then two on formulas. Each starts from the literate
+One section per model, then three on formulas. Each starts from the literate
 program of the same name in @filepath{glmnet/examples/}, whose companion under
 @filepath{glmnet/examples/test/} runs it and checks the result the prose
 promises, then goes further: it varies @math{λ} or @math{α} to show what the
@@ -13,7 +13,8 @@ The small fixtures of the model sections are chosen so that the right answer is
 known in advance: a response built from some predictors plus a column of pure
 noise, which a good fit should leave out. Where a section prints a sweep over
 @math{λ}, it rounds the numbers to three decimal places so the rows line up.
-The formula sections use R's @tt{mtcars}, and their numbers are R's.
+The formula sections use R's @tt{mtcars} and @tt{iris}, and their numbers are
+R's.
 
 @local-table-of-contents[]
 
@@ -28,3 +29,4 @@ The formula sections use R's @tt{mtcars}, and their numbers are R's.
 @include-section["examples/mgaussian.scrbl"]
 @include-section["examples/formula-interactions.scrbl"]
 @include-section["examples/formula-polynomial.scrbl"]
+@include-section["examples/formula-factors.scrbl"]

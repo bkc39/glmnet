@@ -160,7 +160,9 @@ labels its curves with them:
 ]
 
 For the multi-response family, each plot's y-axis label names its response,
-as R names it by the column of @tt{y}.
+as R names it by the column of @tt{y}, and for a multinomial formula model
+whose response holds strings, symbols or booleans, its class, as R names it
+by the level of a factor @tt{y} (see @secref["formulas-factor-response"]).
 
 @subsection[#:tag "plot-path-multi"]{Several classes or responses}
 

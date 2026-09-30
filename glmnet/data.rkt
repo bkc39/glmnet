@@ -61,6 +61,8 @@
            column-name->string
            table-names
            select-table-columns
+           select-table-values
+           table-column->flvector
            flvectors->design-matrix))
 
 (struct design-matrix (data nrows ncols column-names)
@@ -320,10 +322,9 @@
 (define (table-column-names t)
   (table-names t 'table-column-names))
 
-;; The columns of table t with the given names, in that order, as a design
-;; matrix with those column names.
-(define (select-table-columns t names* who)
-  (define names (map column-name->string names*))
+;; The position of each of the table's columns by name, after checking that
+;; each of `names` (strings) is one of them.
+(define (column-positions t names who)
   (define available (table-names t who))
   (define position
     (for/hash ([name (in-list available)] [j (in-naturals)])
@@ -332,6 +333,13 @@
     (unless (hash-ref position name #f)
       (raise-arguments-error who "the table has no column with this name"
                              "column" name "columns of the table" available)))
+  position)
+
+;; The columns of table t with the given names, in that order, as a design
+;; matrix with those column names.
+(define (select-table-columns t names* who)
+  (define names (map column-name->string names*))
+  (define position (column-positions t names who))
   (cond
     [(design-matrix? t)
      (define v (design-matrix-data t))
@@ -345,40 +353,80 @@
          (f64vector-set! out (+ i (* j no)) (f64vector-ref v (+ from i)))))
      (design-matrix out no ni names)]
     [else
-     (define by-name
-       (if (hash? t)
-           (for/hash ([(name column) (in-hash t)])
-             (values (column-name->string name) column))
-           (for/hash ([entry (in-list t)])
-             (values (column-name->string (car entry)) (cdr entry)))))
-     (named-columns->dm (for/list ([name (in-list names)]) (hash-ref by-name name))
-                        names who)]))
+     (named-columns->dm (named-columns t names) names who)]))
+
+;; The values of the columns of table t with the given names, in that order,
+;; each a vector, as they are in the table: the formula front end (#53) reads
+;; factors, whose values are strings, symbols or booleans, this way.
+(define (select-table-values t names* who)
+  (define names (map column-name->string names*))
+  (define position (column-positions t names who))
+  (cond
+    [(design-matrix? t)
+     (define v (design-matrix-data t))
+     (define no (design-matrix-nrows t))
+     (for/list ([name (in-list names)])
+       (define from (* no (hash-ref position name)))
+       (for/vector #:length no ([i (in-range no)])
+         (f64vector-ref v (+ from i))))]
+    [else
+     (define columns (named-columns t names))
+     (check-column-lengths columns names who)
+     (for/list ([column (in-list columns)])
+       (if (vector? column) column (list->vector column)))]))
+
+;; The columns (lists or vectors) of a hash or association list with the given
+;; names, which it has.
+(define (named-columns t names)
+  (define by-name
+    (if (hash? t)
+        (for/hash ([(name column) (in-hash t)])
+          (values (column-name->string name) column))
+        (for/hash ([entry (in-list t)])
+          (values (column-name->string (car entry)) (cdr entry)))))
+  (for/list ([name (in-list names)]) (hash-ref by-name name)))
+
+(define (check-column-lengths columns names who)
+  (define no (column-length (car columns)))
+  (when (zero? no)
+    (raise-arguments-error who "the table has a column with no rows" "column" (car names)))
+  (for ([column (in-list columns)]
+        [name (in-list names)])
+    (unless (= (column-length column) no)
+      (raise-arguments-error who "the table's columns have different lengths"
+                             "column" name "length" (column-length column)
+                             (format "length of column ~s" (car names)) no))))
+
+;; Element i of the table's column `name` as a flonum; it must be a finite real.
+(define (table-element->flonum x name i who)
+  (define fx
+    (if (real? x)
+        (real->double-flonum x)
+        (raise-arguments-error who "the table has an element that is not a real number"
+                               "column" name "row" i "element" x)))
+  (unless (fl< (flabs fx) +inf.0)
+    (raise-arguments-error who "the table has an element that is not finite"
+                           "column" name "row" i "element" x))
+  fx)
+
+;; The values of the table's column `name`, a vector from select-table-values,
+;; as an flvector.
+(define (table-column->flvector entries name who)
+  (for/flvector #:length (vector-length entries) ([x (in-vector entries)] [i (in-naturals)])
+    (table-element->flonum x name i who)))
 
 ;; Columns (lists or vectors) with the given names as a design matrix; errors
 ;; name the column by its name.
 (define (named-columns->dm columns names who)
+  (check-column-lengths columns names who)
   (define no (column-length (car columns)))
-  (when (zero? no)
-    (raise-arguments-error who "the table has a column with no rows" "column" (car names)))
   (define ni (length columns))
   (define v (make-f64vector (* no ni)))
   (for ([column (in-list columns)]
         [name (in-list names)]
         [j (in-naturals)])
-    (unless (= (column-length column) no)
-      (raise-arguments-error who "the table's columns have different lengths"
-                             "column" name "length" (column-length column)
-                             (format "length of column ~s" (car names)) no))
     (define (store! x i)
-      (define fx
-        (if (real? x)
-            (real->double-flonum x)
-            (raise-arguments-error who "the table has an element that is not a real number"
-                                   "column" name "row" i "element" x)))
-      (unless (fl< (flabs fx) +inf.0)
-        (raise-arguments-error who "the table has an element that is not finite"
-                               "column" name "row" i "element" x))
-      (f64vector-set! v (+ i (* j no)) fx))
+      (f64vector-set! v (+ i (* j no)) (table-element->flonum x name i who)))
     (if (vector? column)
         (for ([x (in-vector column)] [i (in-naturals)]) (store! x i))
         (for ([x (in-list column)] [i (in-naturals)]) (store! x i))))

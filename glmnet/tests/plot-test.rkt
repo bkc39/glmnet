@@ -206,6 +206,22 @@
                       (png (plot-coefficient-path (formula-model-fit mg) #:label '(a b))))
     (check-size (plot-coefficient-path mg #:label #t #:height 200) 400 400))
 
+  (test-case "a formula model's classes name the multinomial panels, as R's plot.multnet does"
+    ;; R titles each panel by names(beta), the response's levels.
+    (define species
+      (for/list ([c (in-list classes)]) (list-ref '("setosa" "versicolor" "virginica") c)))
+    (define table (list (cons "species" species) (cons "a" (map first X)) (cons "b" (map second X))))
+    (define m (formula-path (~ species a b) table #:family 'multinomial))
+    (check-equal? (map panel-y-label (model-panels m (formula-model-fit m) 'coef))
+                  '("Coefficients: Response setosa" "Coefficients: Response versicolor"
+                    "Coefficients: Response virginica"))
+    (define numbered (formula-path (~ k a b) (cons (cons "k" classes) (cdr table))
+                                   #:family 'multinomial))
+    (check-equal? (formula-model-fit numbered) (formula-model-fit m))
+    (check-equal? (map panel-y-label (model-panels numbered (formula-model-fit numbered) 'coef))
+                  '("Coefficients: Response 0" "Coefficients: Response 1" "Coefficients: Response 2"))
+    (check-not-equal? (png (plot-coefficient-path m)) (png (plot-coefficient-path numbered))))
+
   (test-case "a lambda of 0 has no place on a log axis and is left out"
     (define p (elnet-path X y #:lambda '(1.0 0.5 0.1 0.0)))
     (define lines (length (ever-nonzero (response-coefficients p 0))))

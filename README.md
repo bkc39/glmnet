@@ -23,7 +23,7 @@ matrices (#11). See `AGENTS.md` for the development workflow.
 
 The Scribble manual (`glmnet/scribblings/`) has a user guide (getting started,
 concepts, formulas and named data, plots, one worked example per model family
-and two on formulas: interactions, and transforms)
+and three on formulas: interactions, transforms and factors)
 and an API reference.
 With the package installed, build it with
 `raco scribble --htmls glmnet/scribblings/glmnet.scrbl`.
@@ -42,9 +42,11 @@ needed to use the package.
 Any family can be fitted from a table of named columns (an association list,
 a hash, or a design matrix with column names) with an R-style formula, which
 has R's algebra of terms: interactions, crossing, powers and the intercept,
-prefix or infix, and transforms such as `(log x1)` and `(I (expt x1 2))`. The
-model keys its coefficients by name, and `predict` builds its predictors from
-a new table by name:
+prefix or infix; transforms such as `(log x1)` and `(I (expt x1 2))`; and
+factors, columns of strings, symbols or booleans and `(factor x)`, coded by
+R's treatment contrasts. The model keys its coefficients by name, and
+`predict` builds its predictors from a new table by name, with the factors'
+levels of the fit:
 
 ```racket
 (define data
@@ -56,6 +58,8 @@ a new table by name:
 (predict m (list (cons "x2" '(6.0)) (cons "x1" '(7.0))))
 (formula-path (y . ~ . x1 * x2) data)     ; R's y ~ x1 * x2: x1, x2 and x1:x2
 (formula-path (y . ~ . x1 + (I (expt x1 2))) data)   ; R's y ~ x1 + I(x1^2)
+(formula-path (mpg . ~ . wt * (factor cyl)) mtcars)  ; R's mpg ~ wt * factor(cyl)
+(formula-fit (~ Species all) iris #:family 'multinomial #:lambda 0.05)  ; string classes
 (formula-cv (~ (surv time status) (- all id)) patients #:family 'cox)
 ```
 
@@ -86,7 +90,7 @@ The manual's *Plots* chapter draws every plot it describes.
 
 ```bash
 nix develop                     # builds the native lib + link-installs the package
-bash scripts/run-examples.sh    # runs all eleven examples (glmnet/examples/); prints each fit
+bash scripts/run-examples.sh    # runs all twelve examples (glmnet/examples/); prints each fit
 raco test ./glmnet/             # full suite: unit tests + example harnesses
 ```
 
