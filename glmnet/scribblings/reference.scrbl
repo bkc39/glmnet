@@ -311,8 +311,9 @@ only that cell:
        @tt{-2.5}, @tt{.5}, @tt{5.} or @tt{1e-3}; a hexadecimal one, such as
        @tt{0x1A}, @tt{0x.8} or @tt{0x1.8p1}; or @tt{Inf}, @tt{Infinity} or
        @tt{NaN}, in any case; each with an optional sign. White space around a
-       number is ignored. A decimal number is rounded correctly, which R's
-       reader does not always do.}
+       number is ignored. A number is rounded correctly, however many digits
+       it has, which R's reader does not always do for a decimal number.
+       @tt{-0} is @racket[-0.0], where R reads it as the integer 0.}
  @item{@tt{TRUE} and @tt{T} are @racket[#t], and @tt{FALSE} and @tt{F} are
        @racket[#f]. Other spellings, such as @tt{true} or @tt{False}, are
        strings, as they are in R.}
@@ -320,6 +321,14 @@ only that cell:
        space included: @tt{" TRUE"} and @tt{"NA "} are strings, as they are in
        R, and @tt{""} is the empty string.}
 ]
+
+White space is what R takes as white space in a UTF-8 locale: space, tab,
+line feed, vertical tab, form feed and carriage return, and the Unicode
+spaces U+1680, U+2000 to U+2006, U+2008 to U+200A, U+2028, U+2029, U+205F
+and U+3000, but not the no-break spaces U+00A0, U+2007 and U+202F. It makes a
+cell blank, and it can follow a number; before a number, only the ASCII white
+space is skipped, as in R. In the C locale R takes only the ASCII white space,
+and reads a cell of Unicode spaces as a string.
 
 Quotes change the value of a cell only when it is empty or holds only white
 space: then it is a string when it is quoted, and missing when it is not,
@@ -345,7 +354,8 @@ reads back as the same flonum, without a trailing @tt{.0}; an infinity as
 back as NaN, where R's @tt{write.csv} writes @tt{NA}. A boolean is @tt{TRUE}
 or @tt{FALSE}, and a string, or a symbol's name, is written as it is. A cell
 or a name is quoted when it holds a comma, a double quote or a line break,
-starts or ends with white space, or is empty, and a string is also quoted
+starts or ends with white space or starts with a byte-order mark, or is
+empty, and a string is also quoted
 when it would read as another value, such as @racket["42"] or @racket["T"],
 as R's @tt{write.csv} quotes every string. It still reads back as that value,
 as it does in R. A string that would read back as a missing value,
@@ -361,6 +371,7 @@ without a name; an error names the column and the row.
   (csv->table (open-input-string "note\n\"said \"\"hi\"\"\"\n\"two\nlines\"\n"))
   (csv->table (open-input-string "x\n0x1A\n-inf\n 7 \n\" TRUE\"\ntrue\n"))
   (eval:error (csv->table (open-input-string "x,y\n1,2\n3,NA\n")))
+  (eval:error (csv->table (open-input-string "x\n1\u3000\n\u3000\n")))
   (eval:error (csv->table (open-input-bytes #"name\nM\374ller\n")))]}
 
 @defproc[(csv-file->table [path path-string?]) table?]{
@@ -420,7 +431,9 @@ fitter, in order: the predictors as a design matrix whose columns are named
 @racket["V1"], @racket["V2"], and so on, as R's @tt{coef} names the columns
 of these unnamed matrices, and then the response, in the shape the family
 takes (see @secref["concepts-data"]). @racket[mtcars] and @racket[iris] are
-tables, read when the module is instantiated.
+tables, read when the module is instantiated. Every module that requires
+them shares them, so their columns are immutable vectors;
+@racket[csv-file->table] reads a fresh copy whose columns can be changed.
 
 @defproc[(quick-start-example) (values design-matrix? (listof flonum?))]{
   R's @tt{QuickStartExample}, the data of the vignette's Quick Start: 100
@@ -497,7 +510,7 @@ tables, read when the module is instantiated.
 @defthing[mtcars table?]{
   R's @tt{datasets::mtcars}, from the 1974 Motor Trend road tests of 32 cars,
   as an association list from each of R's eleven column names to its column,
-  a vector:
+  an immutable vector:
   @racket["mpg"], @racket["cyl"], @racket["disp"], @racket["hp"],
   @racket["drat"], @racket["wt"], @racket["qsec"], @racket["vs"],
   @racket["am"], @racket["gear"] and @racket["carb"], in R's order, with the
@@ -506,12 +519,13 @@ tables, read when the module is instantiated.
 
   @examples[#:eval ev
   (table-column-names mtcars)
-  (cdr (assoc "wt" mtcars))]}
+  (cdr (assoc "wt" mtcars))
+  (eval:error (vector-set! (cdr (assoc "wt" mtcars)) 0 3.0))]}
 
 @defthing[iris table?]{
   R's @tt{datasets::iris}, Anderson's measurements of 150 irises, 50 of each
   of three species, as an association list from each of R's five column names
-  to its column, a vector: @racket["Sepal.Length"], @racket["Sepal.Width"],
+  to its column, an immutable vector: @racket["Sepal.Length"], @racket["Sepal.Width"],
   @racket["Petal.Length"] and @racket["Petal.Width"] in centimetres, and
   @racket["Species"], whose values are the strings @racket["setosa"],
   @racket["versicolor"] and @racket["virginica"]. R holds the species as a

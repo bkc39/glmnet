@@ -124,13 +124,14 @@
 (define (scan-record b n pos line fields who where)
   (let loop ([pos pos] [line line] [fields fields] [k 0])
     (define fields*
-      (if (fx< k (vector-length fields))
-          fields
-          (let ([grown (make-vector (fx* 2 (vector-length fields)) #f)])
-            (vector-copy! grown 0 fields)
-            (for ([j (in-range (vector-length fields) (vector-length grown))])
-              (vector-set! grown j (field #f 0 0 #f)))
-            grown)))
+      (cond
+        [(fx< k (vector-length fields)) fields]
+        [else
+         (define grown (make-vector (fx* 2 (vector-length fields)) #f))
+         (vector-copy! grown 0 fields)
+         (for ([j (in-range (vector-length fields) (vector-length grown))])
+           (vector-set! grown j (field #f 0 0 #f)))
+         grown]))
     (define-values (after line*) (scan-field! (vector-ref fields* k) b n pos line who where))
     (cond
       [(and (fx< after n) (fx= (bytes-ref b after) comma))
@@ -155,7 +156,7 @@
   (define s (field-start f))
   (define e (field-end f))
   (cond
-    [(and (not (field-quoted? f)) (fx= (skip-spaces b s e) e)) missing]
+    [(and (not (field-quoted? f)) (blank? b s e)) missing]
     [(bytes-range=? b s e #"NA") missing]
     [(bytes->flonum b s e)]
     [(or (bytes-range=? b s e #"TRUE") (bytes-range=? b s e #"T")) #t]
@@ -170,13 +171,14 @@
 (define (skip-spaces b p e)
   (if (and (fx< p e) (space-byte? (bytes-ref b p))) (skip-spaces b (fx+ p 1) e) p))
 
-;; R's R_strtod accepts white space after a number as iswspace does in a
-;; UTF-8 locale, which takes these characters besides the ASCII ones.
+;; White space in a blank cell and after a number is what R's iswspace takes
+;; in a UTF-8 locale: the ASCII white space and these characters.
 (define unicode-spaces
   (list->string (map integer->char '(#x1680 #x2000 #x2001 #x2002 #x2003 #x2004 #x2005 #x2006
                                      #x2008 #x2009 #x200A #x2028 #x2029 #x205F #x3000))))
 
-(define (trailing-spaces? b p e)
+;; Whether b[p, e) is only white space.
+(define (blank? b p e)
   (define q (skip-spaces b p e))
   (or (fx= q e)
       (and (fx>= (bytes-ref b q) 128)
@@ -223,7 +225,7 @@
           (hex-magnitude b (fx+ p 2) e)]
          [else (decimal-magnitude b p e)]))
      (and magnitude
-          (trailing-spaces? b end e)
+          (blank? b end e)
           (if negative? (fl* -1.0 magnitude) magnitude))]))
 
 ;; An exponent's optional sign and digits, which must be at least one; R
@@ -238,35 +240,57 @@
       [(fx= ndigits 0) (values #f q)]
       [else (values (fx* sign n) q)])))
 
+;; A mantissa keeps its first `kept-digits` significant digits. A flonum, or a
+;; point halfway between two, has at most 767 significant decimal digits and
+;; 15 hexadecimal ones, so the digits after those change the rounding only by
+;; whether one of them is not zero, which a last digit 1 stands for.
+(define kept-digits 800)
+
 ;; A hexadecimal number after its 0x: digits with an optional point, which
 ;; R lets appear more than once, the last one counting, and an optional
 ;; binary exponent.
 (define (hex-magnitude b p e)
-  (let loop ([p p] [mantissa 0] [point-bits -1])
+  (let loop ([p p] [mantissa 0] [kept 0] [dropped 0] [point-bits -1] [sticky? #f])
     (define c (if (fx< p e) (bytes-ref b p) 0))
     (define d (hex-digit-value c))
+    (define point-bits* (if (fx>= point-bits 0) (fx+ point-bits 4) -1))
     (cond
-      [d (loop (fx+ p 1) (+ (* 16 mantissa) d) (if (fx>= point-bits 0) (fx+ point-bits 4) -1))]
-      [(fx= c 46) (loop (fx+ p 1) mantissa 0)]
-      [(fx= (fxior c 32) 112)
-       (define-values (expn end) (scan-exponent b (fx+ p 1) e))
-       (if expn
-           (values (binary->flonum mantissa (fx- expn (fxmax point-bits 0))) end)
-           (values #f p))]
-      [else (values (binary->flonum mantissa (fx- 0 (fxmax point-bits 0))) p)])))
+      [(and d (fx< kept kept-digits))
+       (define m (+ (* 16 mantissa) d))
+       (loop (fx+ p 1) m (if (eqv? m 0) 0 (fx+ kept 1)) dropped point-bits* sticky?)]
+      [d (loop (fx+ p 1) mantissa kept (fx+ dropped 1) point-bits* (or sticky? (fx> d 0)))]
+      [(fx= c 46) (loop (fx+ p 1) mantissa kept dropped 0 sticky?)]
+      [else
+       (define shift (fx- (fx* 4 dropped) (fxmax point-bits 0)))
+       (define-values (m s)
+         (if sticky? (values (+ (* 2 mantissa) 1) (fx- shift 1)) (values mantissa shift)))
+       (cond
+         [(fx= (fxior c 32) 112)
+          (define-values (expn end) (scan-exponent b (fx+ p 1) e))
+          (if expn (values (binary->flonum m (fx+ expn s)) end) (values #f p))]
+         [else (values (binary->flonum m s) p)])])))
 
 (define (decimal-magnitude b p e)
-  (let loop ([p p] [mantissa 0] [ndigits 0] [expn 0] [point? #f])
+  (let loop ([p p] [mantissa 0] [kept 0] [ndigits 0] [expn 0] [point? #f] [sticky? #f])
     (define c (if (fx< p e) (bytes-ref b p) 0))
     (define d (digit-value c))
     (cond
-      [d (loop (fx+ p 1) (+ (* 10 mantissa) d) (fx+ ndigits 1) (if point? (fx- expn 1) expn) point?)]
-      [(and (fx= c 46) (not point?)) (loop (fx+ p 1) mantissa ndigits expn #t)]
+      [(and d (fx< kept kept-digits))
+       (define m (+ (* 10 mantissa) d))
+       (loop (fx+ p 1) m (if (eqv? m 0) 0 (fx+ kept 1)) (fx+ ndigits 1)
+             (if point? (fx- expn 1) expn) point? sticky?)]
+      [d (loop (fx+ p 1) mantissa kept (fx+ ndigits 1) (if point? expn (fx+ expn 1))
+               point? (or sticky? (fx> d 0)))]
+      [(and (fx= c 46) (not point?)) (loop (fx+ p 1) mantissa kept ndigits expn #t sticky?)]
       [(fx= ndigits 0) (values #f p)]
-      [(fx= (fxior c 32) 101)
-       (define-values (n end) (scan-exponent b (fx+ p 1) e))
-       (if n (values (decimal->flonum mantissa (fx+ expn n)) end) (values #f p))]
-      [else (values (decimal->flonum mantissa expn) p)])))
+      [else
+       (define-values (m x)
+         (if sticky? (values (+ (* 10 mantissa) 1) (fx- expn 1)) (values mantissa expn)))
+       (cond
+         [(fx= (fxior c 32) 101)
+          (define-values (n end) (scan-exponent b (fx+ p 1) e))
+          (if n (values (decimal->flonum m (fx+ x n)) end) (values #f p))]
+         [else (values (decimal->flonum m x) p)])])))
 
 (define powers-of-ten (for/flvector #:length 23 ([k (in-range 23)]) (exact->inexact (expt 10 k))))
 
@@ -364,6 +388,10 @@
 (define (quote-text s)
   (string-append "\"" (string-replace s "\"" "\"\"") "\""))
 
+(define needs-quotes-rx
+  (let ([space (string-append "[ \t\v\f" unicode-spaces "]")])
+    (regexp (string-append "[\",\r\n]|^$|^" space "|" space "$|^\uFEFF"))))
+
 (define (string->cell s name i who)
   (define b (string->bytes/utf-8 s))
   (define read-back (field-value (field b 0 (bytes-length b) #t)))
@@ -371,15 +399,14 @@
     [(eq? read-back missing)
      (raise-arguments-error who "the table has a string that would be read back as a missing value"
                             "column" name "row" i "element" s)]
-    [(or (regexp-match? #rx"[\",\r\n]|^$|^[ \t\v\f]|[ \t\v\f]$" s)
-         (not (string? read-back)))
+    [(or (regexp-match? needs-quotes-rx s) (not (string? read-back)))
      (quote-text s)]
     [else s]))
 
 (define (name->cell name who)
   (when (string=? name "")
     (raise-arguments-error who "the table has a column without a name"))
-  (if (regexp-match? #rx"[\",\r\n]|^[ \t]|[ \t]$|^﻿" name) (quote-text name) name))
+  (if (regexp-match? needs-quotes-rx name) (quote-text name) name))
 
 (define (real->csv x)
   (define v (real->double-flonum x))

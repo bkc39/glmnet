@@ -90,6 +90,31 @@
   (test-case "blanks around a number are ignored, and a string keeps them"
     (check-equal? (read-csv "a,b\n 1 , x \n") '(("a" . #(1.0)) ("b" . #(" x ")))))
 
+  (test-case "white space is R's in a UTF-8 locale, Unicode spaces but not no-break ones"
+    (for ([cell (in-list '("\u3000" "\u2003\u2003" " \u3000\t" "\u1680" "\u2028" "\u205F"))])
+      (check-error (lambda () (read-csv (string-append "a,b\n" cell ",1\n")))
+                   #rx"missing value" #rx"column: \"a\"" #rx"row: 0"))
+    (check-equal? (read-csv "a,b\n\"\u3000\",\u00A0\n\u2007,\u202F\n\u0085,\u200B\n")
+                  '(("a" . #("\u3000" "\u2007" "\u0085")) ("b" . #("\u00A0" "\u202F" "\u200B"))))
+    (check-equal? (read-csv "a\n1\u3000\n2 \u2003\n\u30001\n1\u00A0\n")
+                  '(("a" . #(1.0 2.0 "\u30001" "1\u00A0")))))
+
+  (test-case "a number of a million digits is read correctly rounded"
+    (define (read-number text) (vector-ref (cdr (car (read-csv (string-append "x\n" text "\n")))) 0))
+    (define zeros (make-string 1000000 #\0))
+    ;; 2^53 + 1 is halfway between two flonums: the even one wins, unless a
+    ;; digit far along makes the number larger.
+    (check-eqv? (read-number (string-append "9007199254740993." zeros)) 9007199254740992.0)
+    (check-eqv? (read-number (string-append "9007199254740993." zeros "1")) 9007199254740994.0)
+    (check-eqv? (read-number (string-append "9007199254740993" (make-string 900 #\0) "1e-901"))
+                9007199254740994.0)
+    (check-eqv? (read-number (string-append "0." (make-string 5000 #\0) "15e5002")) 15.0)
+    (check-eqv? (read-number (string-append "-1" zeros)) -inf.0)
+    (check-eqv? (read-number (string-append "0." zeros "1")) 0.0)
+    (check-eqv? (read-number (string-append "0x20000000000001." zeros)) 9007199254740992.0)
+    (check-eqv? (read-number (string-append "0x20000000000001." zeros "1")) 9007199254740994.0)
+    (check-eqv? (read-number (string-append "0x" zeros "1.8")) 1.5))
+
   (test-case "-0 is -0.0"
     (check-eqv? (vector-ref (cdr (assoc "a" (read-csv "a\n-0\n"))) 0) -0.0)
     (check-eqv? (vector-ref (cdr (assoc "a" (read-csv "a\n0\n"))) 0) 0.0))
@@ -208,7 +233,16 @@
 
   (test-case "a string of white space is quoted, and kept"
     (define t (list (cons "s" (vector "\f" "\v" " " "\t\t" "a\v"))))
-    (check-equal? (round-trip t) t))
+    (check-equal? (round-trip t) t)
+    (define u (list (cons "\u3000s" (vector "\u3000" "\u2003x" "x\u2003" "\u00A0"))))
+    (check-equal? (write-csv u) "\"\u3000s\"\n\"\u3000\"\n\"\u2003x\"\n\"x\u2003\"\n\u00A0\n")
+    (check-equal? (round-trip u) u))
+
+  (test-case "each read makes fresh columns, which can be changed"
+    (define t (read-csv "x\n1\n"))
+    (check-false (immutable? (cdr (car t))))
+    (vector-set! (cdr (car t)) 0 2.0)
+    (check-equal? (read-csv "x\n1\n") '(("x" . #(1.0)))))
 
   (test-case "names are quoted when they need it"
     (check-equal? (write-csv (list (cons "a,b" '(1)) (cons "say \"x\"" '(2)) (cons " c" '(3))))

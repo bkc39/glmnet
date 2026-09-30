@@ -846,6 +846,16 @@ for (name in names(frames)) {
 ## types, not rounding: no decimal has more digits than R_strtod reads
 ## exactly, since beyond that its result depends on the platform's long double
 ## (macOS's R reads 123456789012345678901234567890 one double away from Linux's).
+## White space is iswspace's in a UTF-8 locale, which glmnet/data/csv follows.
+## The Nix build sandbox runs R in the C locale, where read.csv(text = ...)
+## turns each non-ASCII character into "<U+3000>" text, so the cells are read
+## in a UTF-8 locale wherever the goldens are generated.
+
+csv_cells_ctype <- Sys.getlocale("LC_CTYPE")
+if (is.null(Find(function(l) nzchar(suppressWarnings(Sys.setlocale("LC_CTYPE", l))),
+                 c("C.UTF-8", "en_US.UTF-8", "UTF-8"))) ||
+    !l10n_info()$`UTF-8`)
+  stop("the csv-cells golden needs a UTF-8 locale, and none of C.UTF-8, en_US.UTF-8 or UTF-8 is")
 
 csv_cell_tokens <- c(
   "T", "F", "TRUE", "FALSE", "true", "false", "True", "False", "t", " TRUE", "TRUE ", "\tT",
@@ -861,7 +871,10 @@ csv_cell_tokens <- c(
   "1e999", "-1e999", "1e-400", "1e99999999", "0e99999", "00012", "-0", "-0.0", "+.5e-3",
   "1.5.2", "--1", "+-1", "1e5.5", "0.1", "2.5", "-300", "1234567890123456",
   "4.9e-324", "1 ", " 1", "1 ",
-  "x", "a b", "é", "TRUE1", "1TRUE", "1L", "0b1", "1i", "", "  ")
+  "x", "a b", "é", "TRUE1", "1TRUE", "1L", "0b1", "1i", "", "  ",
+  "\u3000", "\u2003\u2003", " \u3000\t", "\u1680", "\u2000", "\u200A", "\u2028", "\u2029",
+  "\u205F", "\u00A0", "\u2007", "\u202F", "\u0085", "\u200B", "\u180E", "1\u3000", "\u30001",
+  "-1\u2029", "TRUE\u3000", "NA\u3000")
 
 csv_cells <- list()
 for (token in csv_cell_tokens) {
@@ -881,6 +894,7 @@ golden <- list(id = "csv-cells", kind = "csv-cells", cells = csv_cells, meta = m
 path <- file.path(goldens_dir, "csv-cells.json")
 writeLines(toJSON(golden, auto_unbox = TRUE, pretty = TRUE), path)
 cat("wrote", path, "  (", length(csv_cells), "cells )\n")
+invisible(Sys.setlocale("LC_CTYPE", csv_cells_ctype))
 
 ## The vignette's calls on each glmnet dataset (glmnet.Rmd and Coxnet.Rmd):
 ## glmnet(x, y, family) with every default, printed; coef and predict at the
