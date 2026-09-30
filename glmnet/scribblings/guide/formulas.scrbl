@@ -479,8 +479,10 @@ function by name and skips a column: with a column @racket[max],
 @racket[(max max x)] is the larger of that column and @racket[x], R's
 @tt{pmax(max, x)}. Names that the transform binds itself, with @racket[let],
 @racket[lambda] or @racket[for/sum], are its own, and so are not read from the
-table, and neither are the names in quoted data; @racket[predict] needs only
-the columns that a transform reads. A name that is neither a column nor bound
+table, and neither are the names in quoted data, nor the names that Racket's
+forms match as literals, such as @racket[cond]'s @racket[=>] and @racket[else]
+and @racket[quasiquote]'s @racket[unquote]; @racket[predict] needs only the
+columns that a transform reads. A name that is neither a column nor bound
 is an error when the formula is fitted, which names it:
 
 @examples[#:eval ev #:label #f
@@ -491,7 +493,12 @@ At the top level, as in the REPL and in this chapter, a transform's function
 must be defined before the formula, since a later definition cannot be seen
 there; in a module it can be defined anywhere in the module. A name in
 argument position can be defined later in both, since the transform reads it
-when it runs.
+when it runs. A bug in Racket's contracts at the top level makes a formula
+procedure whose first call in a session had a syntax error in its formula
+fail from then on with @tt{lifted/1.1: undefined}; restart the REPL when
+that happens, or define the formula on its own first, as
+@racket[(define f (~ ....))], where a syntax error does no harm, and pass
+@racket[f] to the procedure.
 
 A transform is elementwise: it sees one row at a time. R's @tt{scale(x)} and
 @tt{x - mean(x)} read the whole column; compute such a column in the table
@@ -550,6 +557,16 @@ column @racket["(log hp)"] here:
 
 R's vectorized @tt{pmin} is Racket's @racket[min] here, since a transform
 sees one row at a time.
+
+A name is the source as the reader writes it, so quoted data keeps its
+abbreviation, @racket['x] and not @racketfont{(quote x)}. A transform reads a
+column's values as flonums, so the data it compares them with are flonums
+too, @racket['(40.0 50.0)] and not @racket['(40 50)], which @racket[memv]
+would never find:
+
+@examples[#:eval ev #:label #f
+(formula-predictor-names (~ bp (I (if (memv age '(40.0 50.0)) 1 0))) patients)
+]
 
 @section[#:tag "formulas-factors"]{Categorical predictors}
 

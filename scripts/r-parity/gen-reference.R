@@ -570,6 +570,11 @@ formula_fixtures <- list(
   list(id = "formula-mtcars-log-response", dataset = "mtcars", r = "mpg ~ log(mpg) + wt",
        rkt = c("(mpg . ~ . (log mpg) + wt)"),
        names = list(`log(mpg)` = "(log mpg)")),
+  ## A transform's name writes quoted data as the reader abbreviates it.
+  list(id = "formula-mtcars-quoted-data", dataset = "mtcars",
+       r = "mpg ~ wt + as.numeric(cyl %in% c(4, 6))",
+       rkt = c("(mpg . ~ . wt + (I (if (memv cyl '(4.0 6.0)) 1 0)))"),
+       names = list(`as.numeric(cyl %in% c(4, 6))` = "(I (if (memv cyl '(4.0 6.0)) 1 0))")),
   ## Factors (#53, leg 3): treatment contrasts, the first level the baseline.
   list(id = "formula-mtcars-factor", dataset = "mtcars", r = "mpg ~ wt + factor(cyl)",
        rkt = c("(mpg . ~ . wt + (factor cyl))", "(~ mpg wt (factor cyl))",

@@ -186,15 +186,15 @@
     (format "~a is an operator of R's formulas that this formula language does not have"
             (syntax-e stx)))
   ;; A 0 or 1 whose source is longer than its digit, such as -0, which the
-  ;; reader reads as 0, dropping the sign that R reads as an operator.
+  ;; reader reads as 0, dropping the sign that R reads as an operator. The
+  ;; spelling is gone, so the message names no sign: +0 and -0 differ in R.
   (define (glued-number? stx)
     (define span (syntax-span stx))
     (and span (> span 1)))
   (define (glued-number-message stx)
     (define n (syntax-e stx))
-    (define sign (if (eqv? n 0) "-" "+"))
-    (format "~a has a sign glued to it, which the reader drops, reading ~a~a as ~a; put a space after the sign, as in (~a ~a)"
-            n sign n n sign n))
+    (format "~a is written with more than its digit, and the reader reads the rest away, as it does a sign glued to it, which R reads as an operator; write ~a, (+ ~a) or (- ~a)"
+            n n n n))
 
   (define (ratio-hint o operands)
     (cond
@@ -205,14 +205,19 @@
                  [_ '(I (/ x z))]))]
       [else ""]))
 
+  ;; The source of stx as it is written, 'x rather than (quote x): the name
+  ;; of a transform's column, and so a key of coef.
+  (define (syntax->source-string stx)
+    (parameterize ([print-reader-abbreviations #t])
+      (format "~s" (syntax->datum stx))))
+
   (define (quote-id? stx)
     (and (identifier? stx)
          (or (free-identifier=? stx #'quote) (free-identifier=? stx #'quasiquote))))
   (define (quoted-message g d)
     (define v (syntax-e d))
     (format "~a is quoted, and ~~ quotes the names of a formula itself: ~a"
-            (parameterize ([print-reader-abbreviations #t])
-              (format "~s" (syntax->datum g)))
+            (syntax->source-string g)
             (cond
               [(symbol? v) (format "write the column as ~a or ~s" v (symbol->string v))]
               [(string? v) (format "write the column as ~s" v)]
@@ -249,6 +254,16 @@
                              (argument-identifiers (syntax->list #'(arg ...))))]
                     [_ '()]))
                 stxs))
+
+  ;; Names that Racket's forms match as literals, by binding: cond's => and
+  ;; else, quasiquote's unquote and unquote-splicing, and the patterns' ...
+  ;; and _. A transform never rebinds them, which would break the match.
+  (define racket-literals
+    (list (quote-syntax =>) (quote-syntax else) (quote-syntax unquote)
+          (quote-syntax unquote-splicing) (quote-syntax ...) (quote-syntax _)))
+  (define (racket-literal? id)
+    (for/or ([literal (in-list racket-literals)])
+      (free-identifier=? id literal)))
 
   ;; A transform's body is checked as it is expanded, where every binding is
   ;; known, so that a name bound in the transform, by let or lambda, and
@@ -342,16 +357,20 @@
   ;; the Racket binding of the name where the formula is written, which a
   ;; thunk captures when the name has one. The names it reads are those in
   ;; argument position that its body, once expanded, refers to, so not a name
-  ;; that it binds itself; the body is expanded here to find them.
+  ;; that it binds itself; the body is expanded here to find them. The class
+  ;; commits: a later term's failure must not backtrack into the second
+  ;; alternative, which would expand (I e) as a call of I and raise there.
   (define-syntax-class transform
     #:attributes (expr)
+    #:commit
     (pattern (~and t (~or* ((~datum I) body) (~and body (_ arg ...))))
              #:do [(define power? (not (bound-here? (datum->syntax #'t '^))))
                    (define names
                      (for/list ([id (in-list (remove-duplicates
                                               (argument-identifiers (or (attribute arg) (list #'body)))
                                               bound-identifier=?))]
-                                #:unless (and power? (eq? (syntax-e id) '^)))
+                                #:unless (or (and power? (eq? (syntax-e id) '^))
+                                             (racket-literal? id)))
                        id))
                    (define reads (box '()))
                    (define proc
@@ -364,7 +383,7 @@
              #:with (slot ...) (for/list ([tmp (in-list tmps)] [r (in-list read?)]) (if r tmp #'#f))
              #:with proc proc
              #:with (fallback ...) (map fallback-thunk (syntax->list #'(id ...)))
-             #:with name (format "~s" (syntax->datum #'t))
+             #:with name (syntax->source-string #'t)
              #:with expr
              #'(source-transform
                 'name '(id ...)

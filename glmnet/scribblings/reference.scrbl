@@ -1336,8 +1336,11 @@ when the table has a column of that name, as R looks up the function of a
 call by name and skips a column: with a column @racket[max],
 @racket[(max max x)] is the larger of that column and @racket[x], R's
 @tt{pmax(max, x)}. A name that the transform binds itself, with
-@racket[let], @racket[lambda] or a @racket[for] form, is its own, and a name
-in quoted data is data; the columns a transform reads are the others. The
+@racket[let], @racket[lambda] or a @racket[for] form, is its own, a name
+in quoted data is data, and a name that Racket's forms match as a literal,
+@racket[=>], @racket[else], @racket[unquote], @racket[unquote-splicing],
+@racket[...] or @racket[_], keeps its Racket meaning; the columns a
+transform reads are the others. The
 expression is evaluated once for each row, with each column name standing for
 the row's value, so a transform is elementwise. A column of numbers gives its
 value as a flonum, and a column of strings, symbols or booleans gives the
@@ -1459,7 +1462,9 @@ Trend road tests, and R's @tt{iris}, 150 irises of three species, which
   result is @racket[(make-formula 'response rhs ...)], with the elements of the
   right-hand side as written. Each transform becomes a
   @racket[transform-term?] value that computes it, whose name is its source,
-  the datum written as @racket[write] writes it. A transform's
+  the datum as @racket[write] writes it with @racket[print-reader-abbreviations]
+  on, so that quoted data is written @racket['x] and not
+  @racketfont{(quote x)}. A transform's
   @racket[proc-id] must be bound where the formula is written: in a module,
   anywhere in it; at the top level, as in the REPL, by a definition evaluated
   before the formula, since a later one cannot be seen there. A name in
@@ -1477,16 +1482,24 @@ Trend road tests, and R's @tt{iris}, 150 irises of three species, which
   or @litchar{+}. The reader reads @tt{wt:hp} and @tt{-wt} as one name, so an
   operator needs spaces around it; written as an identifier, such a name is a
   syntax error that says so. So is a number other than @racket[0] and
-  @racket[1]; a @racket[0] or @racket[1] with a sign glued to it, since the
-  reader reads @tt{-0} as @racket[0] and drops the sign that R reads as an
-  operator, so that R's @tt{-0} is written @racket[(- 0)]; a group that is
-  neither a prefix form, an infix form nor a transform, such as
-  @racket[(1 x z)]; a quoted name, such as @racket['hp], since @racket[~]
-  quotes the names itself; and R's @tt{/} or @tt{%in%}, between terms or at
-  the head of a group, where the error for @tt{/} says to write a ratio as
-  @racket[(I (/ hp wt))]. The error points at the form that is wrong. Inside a transform, a column whose name
-  is not an identifier is written with bars, as
-  @racket[(log |blood pressure|)].
+  @racket[1]; a @racket[0] or @racket[1] written with more than its digit,
+  such as @tt{-0} or @tt{+0}, since the reader reads both as @racket[0] and
+  drops the sign that R reads as an operator, so that R's @tt{-0} is written
+  @racket[(- 0)] and its @tt{+0} @racket[(+ 0)]; a group that is neither a
+  prefix form, an infix form nor a transform, such as @racket[(1 x z)]; a
+  quoted name, such as @racket['hp], since @racket[~] quotes the names
+  itself; and R's @tt{/} or @tt{%in%}, between terms or at the head of a
+  group, where the error for @tt{/} says to write a ratio as
+  @racket[(I (/ hp wt))]. The error points at the form that is wrong. Inside
+  a transform, a column whose name is not an identifier is written with bars,
+  as @racket[(log |blood pressure|)].
+
+  Whether a @racket[0] or @racket[1] is written with more than its digit is
+  read from its source location, the only trace of its spelling. A macro that
+  builds one into a formula therefore gives it a location of its own, or none:
+  a @racket[0] made by @racket[datum->syntax] with the location of a longer
+  form, such as the @racket[#f] option it stands for, counts as written with
+  more than its digit, and is a syntax error.
 
   @racket[(factor column)] is R's @tt{factor(column)}, and is quoted as the
   list @racket[(factor column)]. @racket[factor] of a transform is the list of

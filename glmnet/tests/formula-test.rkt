@@ -22,6 +22,7 @@
            racket/match
            syntax/macro-testing
            (only-in racket/math sqr)
+           (for-syntax racket/base syntax/parse)
            glmnet
            glmnet/examples/data/mtcars
            (only-in glmnet/examples/data/iris [iris iris-species])
@@ -343,28 +344,58 @@
 
   ;; R 4.5.3's attr(terms(f), "intercept"): 1 for mpg ~ wt + hp + -0, whose
   ;; unary minus flips what 0 means, and 0 for mpg ~ wt + hp - -0, which flips
-  ;; it twice. The reader reads -0 as 0, which would invert both.
+  ;; it twice; 0 for + +0 and 1 for - +0. The reader reads -0 and +0 as 0,
+  ;; which would invert two of the four, so the message names no sign.
   (test-case "a sign glued to 0 or 1 is a syntax error; (- 0) is R's -0, both ways"
     (define (message-of thunk)
       (with-handlers ([exn:fail:syntax? exn-message]) (thunk) #f))
-    (check-regexp-match
-     #rx"~: 0 has a sign glued to it, which the reader drops, reading -0 as 0; put a space after the sign, as in \\(- 0\\)\n  at: 0"
-     (message-of (lambda () (convert-compile-time-error (mpg . ~ . wt + hp + -0)))))
-    (check-regexp-match #rx"~: 0 has a sign glued to it"
+    (define glued-0
+      #rx"~: 0 is written with more than its digit, and the reader reads the rest away, as it does a sign glued to it, which R reads as an operator; write 0, \\(\\+ 0\\) or \\(- 0\\)\n  at: 0")
+    (check-regexp-match glued-0
+                        (message-of (lambda () (convert-compile-time-error (mpg . ~ . wt + hp + -0)))))
+    (check-regexp-match glued-0
                         (message-of (lambda () (convert-compile-time-error (mpg . ~ . wt + hp - -0)))))
-    (check-regexp-match #rx"~: 0 has a sign glued to it"
+    (check-regexp-match glued-0
                         (message-of (lambda () (convert-compile-time-error (~ mpg wt hp -0)))))
-    (check-regexp-match #rx"~: 0 has a sign glued to it"
+    (check-regexp-match glued-0
                         (message-of (lambda () (convert-compile-time-error (~ mpg (- (+ wt hp) +0))))))
-    (check-regexp-match
-     #rx"~: 1 has a sign glued to it, which the reader drops, reading \\+1 as 1; put a space after the sign, as in \\(\\+ 1\\)\n  at: 1"
-     (message-of (lambda () (convert-compile-time-error (mpg . ~ . +1 + wt + hp)))))
+    (check-regexp-match glued-0
+                        (message-of (lambda () (convert-compile-time-error (mpg . ~ . wt + hp + +0)))))
+    (check-regexp-match glued-0
+                        (message-of (lambda () (convert-compile-time-error (~ mpg wt hp 00)))))
+    (define glued-1
+      #rx"~: 1 is written with more than its digit, and the reader reads the rest away, as it does a sign glued to it, which R reads as an operator; write 1, \\(\\+ 1\\) or \\(- 1\\)\n  at: 1")
+    (check-regexp-match glued-1
+                        (message-of (lambda () (convert-compile-time-error (mpg . ~ . +1 + wt + hp)))))
+    (check-regexp-match glued-1
+                        (message-of (lambda () (convert-compile-time-error (~ mpg #e1 wt hp)))))
+    (check-same (formula-fit (mpg . ~ . wt + hp + (+ 0)) mtcars #:lambda 0.1)
+                (elnet-fit mtcars-rows mpg #:lambda 0.1 #:intercept? #f))
+    (check-same (formula-fit (mpg . ~ . wt + hp - (+ 0)) mtcars #:lambda 0.1)
+                (elnet-fit mtcars-rows mpg #:lambda 0.1))
     (define without (elnet-fit mtcars-rows mpg #:lambda 0.1 #:intercept? #f))
     (define with (elnet-fit mtcars-rows mpg #:lambda 0.1))
     (for ([f (list (mpg . ~ . wt + hp + (- 0)) (~ mpg wt hp (- 0)) (mpg . ~ . - 0 + wt + hp))])
       (check-same (formula-fit f mtcars #:lambda 0.1) with))
     (for ([f (list (mpg . ~ . wt + hp - (- 0)) (~ mpg (- (+ wt hp) (- 0))))])
       (check-same (formula-fit f mtcars #:lambda 0.1) without)))
+
+  (define-syntax (intercept-formula stx)
+    (syntax-parse stx
+      [(_ keep?:boolean)
+       #:with n (datum->syntax #'keep? (if (syntax-e #'keep?) 1 0))
+       #'(~ mpg n wt hp)]))
+  (define-syntax (intercept-formula/borrowed stx)
+    (syntax-parse stx
+      [(_ keep?:boolean)
+       #:with n (datum->syntax #'keep? (if (syntax-e #'keep?) 1 0) #'keep?)
+       #'(~ mpg n wt hp)]))
+
+  (test-case "a 0 or 1 that a macro builds has a location of its own, or none"
+    (check-equal? (intercept-formula #f) (~ mpg 0 wt hp))
+    (check-equal? (intercept-formula #t) (~ mpg 1 wt hp))
+    (check-exn #rx"~: 0 is written with more than its digit"
+               (lambda () (convert-compile-time-error (intercept-formula/borrowed #f)))))
 
   (test-case "an #:intercept? that contradicts the formula's 1, 0 or - 1 blames the caller"
     (check-exn (blame-matching
@@ -720,8 +751,19 @@
     ;; Quoted data is data: its names are not read.
     (check-equal? (hash-ref (columns-of (formula-design-matrix
                                          (~ mpg (I (+ hp (length '(wt * qsec ^ 2))))) mtcars))
-                            "(I (+ hp (length (quote (wt * qsec ^ 2)))))")
+                            "(I (+ hp (length '(wt * qsec ^ 2))))")
                   (map (lambda (v) (+ v 5)) (mtcars-column "hp"))))
+
+  (test-case "=>, else, unquote and the pattern literals keep their Racket meaning in a transform"
+    (define f (~ mpg (I (cond [(memv hp '(110.0)) => (lambda (l) 1.0)] [else 0.0]))
+                 (I (cdr `(,hp . ,wt)))
+                 (I (match (list hp wt) [(list _ _) 1.0]))))
+    (define x (columns-of (formula-design-matrix f mtcars)))
+    (check-equal? (hash-ref x "(I (cond ((memv hp '(110.0)) => (lambda (l) 1.0)) (else 0.0)))")
+                  (for/list ([v (in-list (mtcars-column "hp"))]) (if (= v 110.0) 1.0 0.0)))
+    (check-equal? (hash-ref x "(I (cdr `(,hp . ,wt)))") (mtcars-column "wt"))
+    (check-equal? (hash-ref x "(I (match (list hp wt) ((list _ _) 1.0)))")
+                  (for/list ([v (in-list (mtcars-column "hp"))]) 1.0)))
 
   (test-case "a function or ^ that a transform binds itself is Racket's, not R's infix arithmetic"
     (define x (columns-of (formula-design-matrix
@@ -826,6 +868,19 @@
     (check-equal? (make-formula 'mpg (transform-term "(log hp)" '(hp) log) '* 'wt)
                   (mpg . ~ . (log hp) * wt)))
 
+  (test-case "a transform's name writes quoted data with the reader's abbreviations"
+    (define f (~ mpg wt (I (if (memv cyl '(4.0 6.0)) 1 0)) (I (length `(,hp x ,@(list wt))))))
+    (check-equal? (mtcars-names f)
+                  '("wt" "(I (if (memv cyl '(4.0 6.0)) 1 0))" "(I (length `(,hp x ,@(list wt))))"))
+    (check-equal? (format "~a" f)
+                  "(~ mpg wt (I (if (memv cyl '(4.0 6.0)) 1 0)) (I (length `(,hp x ,@(list wt)))))")
+    (check-equal? (map car (coef (formula-fit f mtcars #:lambda 0.1)))
+                  '("(Intercept)" "wt" "(I (if (memv cyl '(4.0 6.0)) 1 0))"
+                    "(I (length `(,hp x ,@(list wt))))"))
+    (check-equal? (hash-ref (columns-of (formula-design-matrix f mtcars))
+                            "(I (if (memv cyl '(4.0 6.0)) 1 0))")
+                  (for/list ([c (in-list (mtcars-column "cyl"))]) (if (= c 8.0) 0.0 1.0))))
+
   (test-case "transform-term makes a transform from a procedure, its name and its columns"
     (define ratio (transform-term "hp/wt" '("hp" wt) /))
     (define f (make-formula 'mpg ratio '+ 'qsec))
@@ -853,6 +908,26 @@
                         (message-of (lambda () (convert-compile-time-error (~ mpg (log (hp + 1)))))))
     (check-regexp-match #rx"~: I takes one Racket expression, as in \\(I \\(expt x 2\\)\\)\n  at: \\(I hp wt\\)"
                         (message-of (lambda () (convert-compile-time-error (~ mpg (I hp wt)))))))
+
+  (test-case "an error after an (I expr) term is that error, not one about I"
+    (define (message-of thunk)
+      (with-handlers ([exn:fail:syntax? exn-message]) (thunk) #f))
+    (check-regexp-match #rx"~: wt:hp reads as one name; put spaces around an operator, as in wt : hp, or write a column with this name as a string, \"wt:hp\"\n  at: wt:hp"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (I (expt hp 2)) wt:hp)))))
+    (check-regexp-match #rx"~: expected a power, an exact integer of at least 2\n  at: 1"
+                        (message-of (lambda () (convert-compile-time-error
+                                                (mpg . ~ . hp + (I (expt hp 2)) + wt ^ 1)))))
+    (check-regexp-match #rx"~: \\(1 x z\\) is not a term: a group of terms starts with an operator, as \\(\\+ x z\\) does, or has operators between its terms, as \\(x \\+ z\\) does\n  at: \\(1 x z\\)"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (I (expt hp 2)) (1 x z))))))
+    (check-regexp-match #rx"~: 'wt is quoted, and ~ quotes the names of a formula itself: write the column as wt or \"wt\"\n  at: \\(quote wt\\)"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (I (expt hp 2)) 'wt)))))
+    (check-regexp-match #rx"~: / is an operator of R's formulas that this formula language does not have; for a ratio, write \\(I \\(/ hp wt\\)\\)\n  at: /"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (I (expt hp 2)) (/ hp wt))))))
+    (check-regexp-match #rx"~: \\(squared hp\\) is not a term: squared is not bound, so it is not a transform, and a group of terms starts with an operator.*\n  at: \\(squared hp\\)"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (I (* wt hp)) (squared hp))))))
+    (define two #rx"~: 2 is not a term; a formula's numbers are 1, 0 and a power after \\^\n  at: 2")
+    (check-regexp-match two (message-of (lambda () (convert-compile-time-error (~ mpg (log hp) (I (* wt hp)) 2)))))
+    (check-regexp-match two (message-of (lambda () (convert-compile-time-error (~ mpg (I (* wt hp)) (log hp) 2))))))
 
   (test-case "a formula fit with transforms is the matrix fit of the transformed columns, for any family"
     (define f (mpg . ~ . hp + (sqr hp) + (log wt)))
