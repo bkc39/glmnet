@@ -71,7 +71,7 @@
     (define M (list*->matrix rows))
     (check-false (design-matrix-column-names (matrix->design-matrix M)))
     (check-equal? (design-matrix-column-names (matrix->design-matrix M #:column-names '(a "b")))
-                  '(a "b"))
+                  '("a" "b"))
     (check-equal? (matrix->design-matrix M #:column-names '(x1 x2))
                   (rows->design-matrix rows #:column-names '(x1 x2)))
     (check-error (lambda () (matrix->design-matrix M #:column-names '(a)))

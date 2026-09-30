@@ -24,7 +24,7 @@
  (struct-out elnet-result)
  (contract-out
   [elnet-fit
-   (->* (design-matrix/c response/c #:lambda (>=/c 0))
+   (->* (design-matrix/c (response/c real?) #:lambda (>=/c 0))
         (#:alpha (real-in 0 1)
          #:standardize? boolean?
          #:intercept? boolean?
@@ -32,28 +32,28 @@
          #:max-iters exact-positive-integer?)
         elnet-result?)]
   [ols
-   (->* (design-matrix/c response/c)
+   (->* (design-matrix/c (response/c real?))
         (#:standardize? boolean?
          #:intercept? boolean?
          #:thresh (>/c 0)
          #:max-iters exact-positive-integer?)
         elnet-result?)]
   [ridge
-   (->* (design-matrix/c response/c #:lambda (>=/c 0))
+   (->* (design-matrix/c (response/c real?) #:lambda (>=/c 0))
         (#:standardize? boolean?
          #:intercept? boolean?
          #:thresh (>/c 0)
          #:max-iters exact-positive-integer?)
         elnet-result?)]
   [lasso
-   (->* (design-matrix/c response/c #:lambda (>=/c 0))
+   (->* (design-matrix/c (response/c real?) #:lambda (>=/c 0))
         (#:standardize? boolean?
          #:intercept? boolean?
          #:thresh (>/c 0)
          #:max-iters exact-positive-integer?)
         elnet-result?)]
   [elastic-net
-   (->* (design-matrix/c response/c #:alpha (real-in 0 1) #:lambda (>=/c 0))
+   (->* (design-matrix/c (response/c real?) #:alpha (real-in 0 1) #:lambda (>=/c 0))
         (#:standardize? boolean?
          #:intercept? boolean?
          #:thresh (>/c 0)
@@ -65,7 +65,7 @@
 (provide
  (contract-out
   [elnet-path
-   (->* (design-matrix/c response/c)
+   (->* (design-matrix/c (response/c real?))
            (#:lambda lambda-sequence/c
             #:nlambda exact-positive-integer?
             #:lambda-min-ratio lambda-min-ratio/c
@@ -76,7 +76,7 @@
             #:max-iters exact-positive-integer?)
         glmnet-path?)]
   [elnet-cv
-   (->* (design-matrix/c response/c)
+   (->* (design-matrix/c (response/c real?))
         (#:type-measure (or/c 'mse 'deviance 'mae)
          #:nfolds nfolds/c
          #:fold-ids fold-ids/c
@@ -118,7 +118,7 @@
   (define no (design-matrix-nrows x))
   (define ni (design-matrix-ncols x))
   (define yv (as-response y no who "y"))
-  (check-response-varies (list y) intercept? who)
+  (check-response-varies yv no 1 intercept? who)
   (define beta (make-f64vector ni 0.0))
   (define-values (intercept rsq lam nlp jerr)
     (glmnet-elnet-solo/raw (exact->inexact alpha) no ni (design-matrix-data x) yv
@@ -234,7 +234,7 @@
   (define no (design-matrix-nrows x))
   (define ni (design-matrix-ncols x))
   (define yv (as-response y no 'elnet-path "y"))
-  (check-response-varies (list y) intercept? 'elnet-path)
+  (check-response-varies yv no 1 intercept? 'elnet-path)
   (define-values (nlam flmin ulam)
     (path-lambdas lambda nlambda lambda-min-ratio no ni))
   (define a0 (make-f64vector nlam 0.0))
@@ -269,8 +269,7 @@
                   #:thresh [thresh 1e-7]
                   #:max-iters [max-iters 100000])
   (define x (as-design-matrix X 'elnet-cv "X"))
-  (define ys
-    (list->vector (f64vector->list (as-response y (design-matrix-nrows x) 'elnet-cv "y"))))
+  (define ys (response->vector (as-response y (design-matrix-nrows x) 'elnet-cv "y")))
   (define (fit x y)
     (elnet-path x y
                 #:lambda lambda #:nlambda nlambda #:lambda-min-ratio lambda-min-ratio

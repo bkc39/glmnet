@@ -1,3 +1,7 @@
 # Pristine upstream R glmnet Fortran (see fortran/vendor/NOTICE.md): collapsed in
 # GitHub diffs and left out of the language statistics.
 fortran/vendor/*.f linguist-generated=true
+# R glmnet's example datasets, which scripts/export-datasets.R writes.
+glmnet/datasets/*.csv linguist-generated=true
+# A CSV test fixture whose byte-order mark and CRLF line endings are the point.
+glmnet/tests/fixtures/excel.csv -text

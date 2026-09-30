@@ -21,13 +21,15 @@
          (for-syntax racket/base))
 
 (require (for-label glmnet
+                    glmnet/data/nested
                     glmnet/plot
+                    glmnet/data/csv
                     glmnet/data/math
-                    glmnet/examples/data/mtcars
-                    glmnet/examples/data/iris
+                    glmnet/datasets
                     racket/base
                     racket/contract
                     racket/file
+                    racket/flonum
                     racket/match
                     ffi/vector
                     math/array
@@ -41,13 +43,15 @@
 (provide (all-from-out scribble/manual)
          (all-from-out scribble/example)
          (for-label (all-from-out glmnet
+                                  glmnet/data/nested
                                   glmnet/plot
+                                  glmnet/data/csv
                                   glmnet/data/math
-                                  glmnet/examples/data/mtcars
-                                  glmnet/examples/data/iris
+                                  glmnet/datasets
                                   racket/base
                                   racket/contract
                                   racket/file
+                                  racket/flonum
                                   racket/match
                                   ffi/vector
                                   math/array

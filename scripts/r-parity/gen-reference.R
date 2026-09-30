@@ -265,7 +265,12 @@ path_fit <- function(family, d, alpha, lambda = NULL, nlambda = NULL,
 
 fit_path <- function(family, d, alpha, lambda = NULL, nlambda = NULL,
                      lambda_min_ratio = NULL, thresh = 1e-7) {
-  fit <- path_fit(family, d, alpha, lambda, nlambda, lambda_min_ratio, thresh)
+  path_record(path_fit(family, d, alpha, lambda, nlambda, lambda_min_ratio, thresh), family)
+}
+
+## A fitted path as the golden records it: every lambda, and the deviance
+## ratio, df, coefficients and intercepts at each.
+path_record <- function(fit, family) {
   L  <- length(fit$lambda)
   co <- coef(fit)
   if (is.list(co)) {                 # multinomial, mgaussian: one matrix per class/response
@@ -379,6 +384,17 @@ cv_coef <- function(cv, s) {
   else unname(as.numeric(co[, 1]))
 }
 
+## A cv.glmnet result as the golden records it.
+cv_record <- function(cv)
+  list(measure = names(cv$name), name = unname(cv$name),
+       lambda = cv$lambda, cvm = unname(cv$cvm), cvsd = unname(cv$cvsd),
+       cvup = unname(cv$cvup), cvlo = unname(cv$cvlo),
+       nzero = as.integer(cv$nzero),
+       lambda_min = cv$lambda.min, lambda_1se = cv$lambda.1se,
+       index_min = cv$index[1, 1], index_1se = cv$index[2, 1],
+       coef_min = cv_coef(cv, "lambda.min"), coef_1se = cv_coef(cv, "lambda.1se"),
+       coef_names = coef_names(coef(cv, s = "lambda.min")))
+
 cv_fixtures <- list(
   list(id = "cv-gaussian-longley-mse",           dataset = "longley",    family = "gaussian",    nfolds = 4,  seed = 1, type_measure = "mse"),
   list(id = "cv-gaussian-longley-deviance",      dataset = "longley",    family = "gaussian",    nfolds = 4,  seed = 1, type_measure = "deviance"),
@@ -430,16 +446,7 @@ for (f in cv_fixtures) {
                  alpha = alpha, thresh = 1e-7, type_measure = f$type_measure,
                  grouped = grouped, foldid = foldid)
   if (!is.null(f$lambda)) golden$lambda_user <- f$lambda
-  golden <- c(golden,
-              list(measure = names(cv$name), name = unname(cv$name),
-                   lambda = cv$lambda, cvm = unname(cv$cvm), cvsd = unname(cv$cvsd),
-                   cvup = unname(cv$cvup), cvlo = unname(cv$cvlo),
-                   nzero = as.integer(cv$nzero),
-                   lambda_min = cv$lambda.min, lambda_1se = cv$lambda.1se,
-                   index_min = cv$index[1, 1], index_1se = cv$index[2, 1],
-                   coef_min = cv_coef(cv, "lambda.min"), coef_1se = cv_coef(cv, "lambda.1se"),
-                   coef_names = coef_names(coef(cv, s = "lambda.min")),
-                   meta = meta))
+  golden <- c(golden, cv_record(cv), list(meta = meta))
   path <- file.path(goldens_dir, paste0(f$id, ".json"))
   writeLines(toJSON(golden, digits = NA, auto_unbox = TRUE, pretty = TRUE), path)
   cat("wrote", path, "  ( lambda.min", signif(cv$lambda.min, 4),
@@ -448,8 +455,8 @@ for (f in cv_fixtures) {
 
 ## --- formulas (#53) -----------------------------------------------------------
 ## R's formula algebra on mtcars (R's own copy; the Racket copy is
-## glmnet/examples/data/mtcars.rkt), longley (the committed CSV) and iris
-## (R's, with Species as strings, as glmnet/examples/data/iris.rkt holds it).
+## glmnet/datasets/mtcars.csv), longley (the committed CSV) and iris
+## (R's, with Species as strings, as glmnet/datasets/iris.csv holds it).
 ## For each formula: terms()'s term labels, intercept and factors attribute
 ## (one entry per term, from each of its variables to 1 or 2); model.matrix()
 ## without its intercept column, as column names and columns, and the warnings
@@ -808,4 +815,134 @@ for (fx in formula_fixtures) {
   path <- file.path(goldens_dir, paste0(fx$id, ".json"))
   writeLines(toJSON(golden, digits = NA, auto_unbox = TRUE, pretty = TRUE), path)
   cat("wrote", path, "  (", ncol(x), "columns )\n")
+}
+
+## --- R glmnet's example datasets (#61) ----------------------------------------
+## Each CSV that glmnet/datasets ships (scripts/export-datasets.R writes them)
+## against R's own copy of its data, bit for bit: a number as C's %a, its
+## exact binary value, and a string as it is.
+
+source("scripts/export-datasets.R")
+frames <- dataset_frames()
+
+for (name in names(frames)) {
+  d <- frames[[name]]
+  columns <- unname(lapply(names(d), function(n) {
+    v <- d[[n]]
+    if (is.character(v)) list(name = n, strings = I(v))
+    else list(name = n, hex = I(sprintf("%a", as.double(v))))
+  }))
+  golden <- list(id = paste0("dataset-", name), kind = "dataset", file = paste0(name, ".csv"),
+                 nrow = nrow(d), columns = columns, meta = meta)
+  path <- file.path(goldens_dir, paste0(golden$id, ".json"))
+  writeLines(toJSON(golden, auto_unbox = TRUE, pretty = TRUE), path)
+  cat("wrote", path, "  (", nrow(d), "x", ncol(d), ")\n")
+}
+
+## --- CSV cells (#61) ----------------------------------------------------------
+## glmnet/data/csv types each cell as R's read.csv types a column that holds
+## only that cell. Each token below, as a bare cell and in quotes, and how R
+## reads it: its class, and its value, a number as C's %a. The tokens test
+## types, not rounding: no decimal has more digits than R_strtod reads
+## exactly, since beyond that its result depends on the platform's long double
+## (macOS's R reads 123456789012345678901234567890 one double away from Linux's).
+
+csv_cell_tokens <- c(
+  "T", "F", "TRUE", "FALSE", "true", "false", "True", "False", "t", " TRUE", "TRUE ", "\tT",
+  "NA", " NA", "NA ", "na", "N/A", "NaN", "nan", "Nan", "NAN", "-nan", "+NaN", "-NAN", " NAN",
+  "NaNx", "-NA", " NaN ",
+  "Inf", "inf", "INF", "-Inf", "+inf", "Infinity", "infinity", "-INFINITY", "Infin", "infinityx",
+  " Inf ", "Inf1",
+  "0x10", "0X1A", "-0x10", "+0x10", "0x", "0x ", "0x1p3", "0x1P-2", "0x.8", "0X.8P1", "0x1.8p1",
+  "0x1.8.8", "0xg", "0x10g", " 0x10 ", "0x1p", "0x1p+", "00x1", "0x1.", "0x.", "0x-1", "-0x0",
+  "0xFFFFFFFFFFFFFFFFFF", "0x1p99999", "0x1p-1080",
+  "1", "-1", "+1", "1.", ".5", ".", "-.", "+", "-", "1e5", "1E5", "1e", "1e+", "1e-", "1e+5",
+  "1.e5", ".e5", "1 ", " 1", " 1 ", "\t1\t", "\f1", "1\v", "1 2", "1_000", "1/2", "1d5", "#e1.5",
+  "1e999", "-1e999", "1e-400", "1e99999999", "0e99999", "00012", "-0", "-0.0", "+.5e-3",
+  "1.5.2", "--1", "+-1", "1e5.5", "0.1", "2.5", "-300", "1234567890123456",
+  "4.9e-324", "1 ", " 1", "1 ",
+  "x", "a b", "é", "TRUE1", "1TRUE", "1L", "0b1", "1i", "", "  ")
+
+csv_cells <- list()
+for (token in csv_cell_tokens) {
+  for (quoted in c(FALSE, TRUE)) {
+    cell <- if (quoted) paste0("\"", token, "\"") else token
+    v <- read.csv(text = paste0("a,b\n", cell, ",z\n"), stringsAsFactors = FALSE)$a[1]
+    na <- is.na(v) && !is.nan(v)
+    value <- if (na) ""
+             else if (is.numeric(v)) sprintf("%a", as.double(v))
+             else if (is.logical(v)) v
+             else as.character(v)
+    csv_cells[[length(csv_cells) + 1]] <-
+      list(token = token, cell = cell, quoted = quoted, class = class(v), na = na, value = value)
+  }
+}
+golden <- list(id = "csv-cells", kind = "csv-cells", cells = csv_cells, meta = meta)
+path <- file.path(goldens_dir, "csv-cells.json")
+writeLines(toJSON(golden, auto_unbox = TRUE, pretty = TRUE), path)
+cat("wrote", path, "  (", length(csv_cells), "cells )\n")
+
+## The vignette's calls on each glmnet dataset (glmnet.Rmd and Coxnet.Rmd):
+## glmnet(x, y, family) with every default, printed; coef and predict at the
+## vignette's s on its rows of x; and cv.glmnet with every default but the
+## folds. The vignette draws folds with R's random numbers, which the Racket
+## side does not reproduce, so the folds here are fixed, rep(1:10, length = n).
+## glmnet's multinomial classes are y's levels, 1, 2 and 3, which are the
+## class indices 0, 1 and 2 on the Racket side. SparseExample is fitted from
+## its dense copy, the matrix that its CSV holds.
+
+vignette_fixtures <- list(
+  list(id = "vignette-quick-start", dataset = "QuickStartExample", family = "gaussian",
+       s = c(0.1, 0.05), rows = 1:5, type_measure = "mse"),
+  list(id = "vignette-binomial", dataset = "BinomialExample", family = "binomial",
+       s = c(0.05, 0.01), rows = 1:5, type_measure = "class"),
+  list(id = "vignette-multinomial", dataset = "MultinomialExample", family = "multinomial",
+       s = c(0.05, 0.01), rows = 1:10, type_measure = "deviance"),
+  list(id = "vignette-poisson", dataset = "PoissonExample", family = "poisson",
+       s = c(1, 0.1), rows = 1:5, type_measure = "deviance"),
+  list(id = "vignette-cox", dataset = "CoxExample", family = "cox",
+       s = c(0.05), rows = 1:5, type_measure = "C"),
+  list(id = "vignette-mgaussian", dataset = "MultiGaussianExample", family = "mgaussian",
+       s = c(0.1, 0.01), rows = 1:5, type_measure = "mse"),
+  list(id = "vignette-sparse", dataset = "SparseExample", family = "gaussian",
+       s = c(0.1, 0.05), rows = 1:5, type_measure = "mse")
+)
+
+## A multinomial class, R's level of y, as its 0-based index.
+class_index <- function(preds, family) {
+  if (family == "multinomial" && !is.null(preds$class))
+    preds$class <- lapply(preds$class, function(P) P - 1L)
+  preds
+}
+
+for (f in vignette_fixtures) {
+  e <- new.env()
+  data(list = f$dataset, package = "glmnet", envir = e)
+  d <- get(f$dataset, envir = e)
+  x <- as.matrix(d$x)
+  y <- d$y
+  newx <- x[f$rows, , drop = FALSE]
+  fit <- glmnet(x, y, family = f$family)
+  gen <- generic_outputs(fit, f$family, newx, f$s)
+  gen$s <- I(gen$s)
+  gen$predict_s <- class_index(gen$predict_s, f$family)
+  foldid <- rep(seq_len(10), length.out = nrow(x))
+  cv <- cv.glmnet(x, y, family = f$family, foldid = foldid, type.measure = f$type_measure)
+  cv_predict <- list()
+  for (type in predict_types(f$family)) {
+    P <- predict(cv, newx = newx, s = "lambda.min", type = type)
+    if (type == "class") P <- array(as.integer(P), dim(P))
+    cv_predict[[type]] <- list(if (length(dim(P)) == 3) unname(P[, , 1]) else unname(P[, 1]))
+  }
+  golden <- c(list(id = f$id, kind = "vignette", dataset = f$dataset, family = f$family,
+                   rows = f$rows),
+              path_record(fit, f$family),
+              list(print = print_table(fit), generic = gen,
+                   cv = c(list(type_measure = f$type_measure, foldid = foldid), cv_record(cv),
+                          list(predict_min = class_index(cv_predict, f$family))),
+                   meta = meta))
+  path <- file.path(goldens_dir, paste0(f$id, ".json"))
+  writeLines(toJSON(golden, digits = NA, auto_unbox = TRUE, pretty = TRUE), path)
+  cat("wrote", path, "  (", length(fit$lambda), "lambdas; lambda.min", signif(cv$lambda.min, 4),
+      "lambda.1se", signif(cv$lambda.1se, 4), ")\n")
 }

@@ -14,7 +14,9 @@
 (require racket/contract
          racket/flonum
          racket/list
-         (only-in "../data.rkt" design-matrix-select-rows)
+         racket/match
+         (only-in "../data.rkt" design-matrix-select-rows response/c)
+         (only-in (submod "../data.rkt" support) one-dimensional-length one-dimensional->vector)
          (only-in "marshal.rkt" design-matrix-nrows design-matrix-ncols linear-predictor)
          "model.rkt"
          "path.rkt"
@@ -22,6 +24,7 @@
 
 (provide
  (struct-out glmnet-cv)
+ fold-ids/c
  (contract-out
   [random-fold-ids
    (->i ([n exact-positive-integer?])
@@ -32,7 +35,6 @@
 ;; For the family modules and the unit tests only; not part of the public API.
 (module* support #f
   (provide nfolds/c
-           fold-ids/c
            cv-lambda-sequence/c
            select
            cross-validate
@@ -112,46 +114,80 @@
     (vector-set! ids j t))
   (vector->list ids))
 
-;; A #:fold-ids argument: #f, or fold ids from 0 that use every fold up to the
-;; largest, of which there are at least 3. Only ids below the number of
-;; observations are tallied, so a huge id costs no memory: with more folds than
-;; observations, one of those ids is necessarily missing.
-(define fold-ids/c
-  (and/c (or/c #f (and/c (listof exact-nonnegative-integer?) pair?))
-         (flat-contract-with-explanation
-          (lambda (ids)
-            (define k (and ids (add1 (apply max ids))))
-            (define (missing-fold)
-              (define present (make-vector (min k (length ids)) #f))
-              (for ([f (in-list ids)] #:when (< f (vector-length present)))
-                (vector-set! present f #t))
-              (for/first ([p (in-vector present)] [f (in-naturals)] #:unless p) f))
-            (cond
-              [(not ids) #t]
-              [(< k 3)
-               (lambda (blame)
-                 (raise-blame-error blame ids
-                                    '("cross-validation needs at least 3 folds"
-                                      expected: "fold ids from 0 to at least 2" given: "~e")
-                                    ids))]
-              [(missing-fold)
-               => (lambda (f)
-                    (lambda (blame)
-                      (raise-blame-error blame ids
-                                         '("a fold has no observations; fold ids must cover 0 to ~a"
-                                           expected: "an observation in fold ~a" given: "~e")
-                                         (sub1 k) f ids)))]
-              [else #t]))
-          #:name 'fold-ids-covering-every-fold)))
+;; The fold ids of a #:fold-ids argument, a list, vector, flvector or
+;; f64vector, as a vector of exact integers.
+(define (fold-ids->vector ids)
+  (for/vector #:length (one-dimensional-length ids) ([f (in-vector (one-dimensional->vector ids))])
+    (inexact->exact f)))
 
-;; The fold of each of the n observations, as a vector.
+;; What is wrong with fold ids (exact integers from 0, in a vector), or #f:
+;; they must use every fold up to the largest, of which there are at least 3.
+;; The result is (list 'few k) for k folds, or (list 'missing k f) when fold f
+;; of k has no observation. Only ids below the number of observations are
+;; tallied, so a huge id costs no memory: with more folds than observations,
+;; one of those ids is necessarily missing.
+(define (fold-ids-problem ids)
+  (define k (add1 (for/fold ([m 0]) ([f (in-vector ids)]) (max m f))))
+  (define (missing-fold)
+    (define present (make-vector (min k (vector-length ids)) #f))
+    (for ([f (in-vector ids)] #:when (< f (vector-length present)))
+      (vector-set! present f #t))
+    (for/first ([p (in-vector present)] [f (in-naturals)] #:unless p) f))
+  (cond
+    [(< k 3) (list 'few k)]
+    [(missing-fold) => (lambda (f) (list 'missing k f))]
+    [else #f]))
+
+(define fold-id-list/c (response/c (and/c integer? (>=/c 0))))
+
+;; A #:fold-ids argument: #f, for folds drawn at random, or fold ids from 0,
+;; exact or inexact integers in a list, vector, flvector or f64vector, that use
+;; every fold up to the largest, of which there are at least 3.
+(define fold-ids/c
+  (make-flat-contract
+   #:name 'fold-ids/c
+   #:first-order
+   (lambda (v)
+     (or (not v)
+         (and (contract-first-order-passes? fold-id-list/c v)
+              (not (fold-ids-problem (fold-ids->vector v))))))
+   #:late-neg-projection
+   (lambda (blame)
+     (define ids-projection ((get/build-late-neg-projection fold-id-list/c) blame))
+     (lambda (v neg-party)
+       (when v
+         (ids-projection v neg-party)
+         (match (fold-ids-problem (fold-ids->vector v))
+           [#f (void)]
+           [(list 'few _)
+            (raise-blame-error blame #:missing-party neg-party v
+                               '("cross-validation needs at least 3 folds"
+                                 expected: "fold ids from 0 to at least 2" given: "~e")
+                               v)]
+           [(list 'missing k f)
+            (raise-blame-error blame #:missing-party neg-party v
+                               '("a fold has no observations; fold ids must cover 0 to ~a"
+                                 expected: "an observation in fold ~a" given: "~e")
+                               (sub1 k) f v)]))
+       v))))
+
+;; The fold of each of the n observations, as a vector. The ids are checked
+;; again on this copy, which the caller cannot change.
 (define (resolve-folds who n nfolds fold-ids)
   (cond
     [fold-ids
-     (unless (= (length fold-ids) n)
+     (define length (one-dimensional-length fold-ids))
+     (unless (= length n)
        (raise-arguments-error who "fold-ids does not have one entry per row of X"
-                              "length of fold-ids" (length fold-ids) "rows of X" n))
-     (list->vector fold-ids)]
+                              "length of fold-ids" length "rows of X" n))
+     (define folds (fold-ids->vector fold-ids))
+     (match (fold-ids-problem folds)
+       [#f folds]
+       [(list 'few k) (raise-arguments-error who "cross-validation needs at least 3 folds" "folds" k)]
+       [(list 'missing k f)
+        (raise-arguments-error who (format "a fold has no observations; fold ids must cover 0 to ~a"
+                                           (sub1 k))
+                               "fold" f)])]
     [else
      (when (> nfolds n)
        (raise-arguments-error who "there are more folds than observations"

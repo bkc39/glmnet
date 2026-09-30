@@ -21,9 +21,18 @@ glmnet/                        Racket collection
   foreign.rkt                  contracted wrappers + load-time precision guard
   data.rkt                     design-matrix layer (glmnet/data): the one input layout,
                                and tables (named columns) that convert into it
+  data/nested.rkt              glmnet/data/nested: the four nestings of lists and
+                               vectors to and from a design matrix (not re-exported)
+  data/csv.rkt                 glmnet/data/csv: CSV files to and from tables (RFC 4180,
+                               each cell typed as R's type.convert types a column of
+                               that one cell); each data format is a module in data/ (#41)
   data/math.rkt                glmnet/data/math: math/matrix matrices <-> design matrices,
                                math arrays -> responses; its element loops are a Typed
                                Racket submodule; main.rkt does not load it (math-lib)
+  datasets.rkt                 glmnet/datasets: R glmnet's example datasets (loaders
+                               returning the family fitter's arguments) and R's
+                               mtcars and iris, from datasets/*.csv
+  datasets/*.csv               R's data, written by scripts/export-datasets.R
   core/*.rkt                   one module per family; marshal.rkt, path.rkt shared
   core/model.rkt               gen:glmnet-model: predict / coef / deviance-ratio on any result
   core/cv.rkt                  cross-validation (R's cv.glmnet) behind every family's *-cv
@@ -33,8 +42,6 @@ glmnet/                        Racket collection
                                transforms (log x), (I expr), factors (strings,
                                booleans, (factor x)) with their levels, and
                                model.matrix()'s coding; terms are sorted index lists
-  examples/data/mtcars.rkt     R's mtcars as a table, for formula examples and parity
-  examples/data/iris.rkt       R's iris, Species as strings, likewise
   main.rkt                     public API (require glmnet)
   plot.rkt                     glmnet/plot: R's plot.glmnet / plot.cv.glmnet on plot-lib
                                (picts); not re-exported by main.rkt
@@ -46,7 +53,8 @@ glmnet/                        Racket collection
   tests/*.rkt                  rackunit unit tests
   private/install-glmnet-native.rkt   pre-install hook (env -> staged -> candidate)
   native-libs/candidates/<plat>/      committed prebuilt shared objects
-scripts/                       build-so.sh, test-local.sh (portable candidates)
+scripts/                       build-so.sh, test-local.sh (portable candidates);
+                               export-datasets.R (glmnet/datasets/*.csv from R)
 flake.nix                      native + racket derivations, devShell, checks
 ```
 
@@ -57,6 +65,35 @@ them: plot-lib is Typed Racket and pulls in the drawing stack, and
 `(require glmnet)` must not load it, just as Racket's own `plot` stays out of
 `racket`. Their documentation is a guide chapter (`guide/plots.scrbl`, tag
 `plots`) and a reference section (`ref-plot`, `@defmodule[glmnet/plot]`).
+
+Data sources follow the same rule (#41, #61): a conversion from a format
+into a design matrix or a table is a module `glmnet/data/<format>.rkt`, such
+as `glmnet/data/csv`, and the example datasets are `glmnet/datasets`;
+`main.rkt` re-exports neither. The documentation tags follow the module
+names:
+
+- the guide's Data chapter, `guide/data.scrbl` (tag `data`), has a section
+  `data-<format>` for each format and `data-datasets` for the datasets;
+- the reference has a top-level section `ref-data-<format>` for each, with
+  its `@defmodule`, after `ref-data` (the design-matrix layer) and before
+  `ref-datasets`;
+- the Concepts section `concepts-data` holds only what every fitter accepts:
+  the design matrix, the response forms and named data.
+
+A format builds its design matrix, and reports bad data, with the one support
+set in `data.rkt`'s `support` submodule, which documents each procedure:
+`flat->design-matrix` (a flat flvector or f64vector, column- or row-major,
+copied or adopted, its length checked by contract), `element-error` and
+`missing-error` (the two error shapes, "<what> has an element that is not a
+real number / not finite" and "<what> has a missing value", with the fields
+column, row and element, or position), `->finite-flonum` and
+`default-column-names` (R's `V1` ... `Vn`). Column names are strings in every
+design matrix. `tests/docs-coverage-test.rkt` lists `glmnet/data/` itself, so
+a new format's exports are checked without editing the test. The datasets are CSV files that
+`scripts/export-datasets.R` writes from the pinned R; the `dataset-*` parity
+goldens check every number of every file against R's, bit for bit, the
+`vignette-*` goldens the vignette's calls on each dataset, and the
+`csv-cells` golden how R's `read.csv` types each spelling of a cell.
 
 The formula language (#53) is R's, checked against R's `terms()` and
 `model.matrix()` by the parity goldens. A new kind of formula term, such as
@@ -193,8 +230,11 @@ its `glmnet/examples/NN-*.rkt` changes. `tests/docs-coverage-test.rkt` fails,
 naming the bindings, if anything `(require glmnet)` exports has no `defproc`,
 `defstruct*`, `defthing` or `defform` entry in the manual: `scribblings/glmnet.scrbl`
 and the files it reaches through `include-section`, outside code blocks and
-examples, and so does anything `(require glmnet/plot)` exports. A new `.scrbl`
-file counts once something includes it.
+examples, and so does anything `(require glmnet/plot)`, `(require
+glmnet/datasets)` or a module under `glmnet/data/` exports. A definition with
+`#:link-target? #f` does not count, nor does a `defstruct*` with
+`#:omit-constructor` for the constructor. A new `.scrbl` file counts once
+something includes it.
 
 ## Local dev loop
 
@@ -250,11 +290,12 @@ Done: Phase 0 (toolchain + FFI spine); the six families of R glmnet 4.1
 Poisson and multi-response Gaussian) as single fits; and the R-style modelling
 arc #44: regularization paths (#10), the design-matrix layer (#35), the
 generic model interface (#25), cross-validation (#27), plots (#28) and the
-formula front end (#26); and R's formula language, its algebra, transforms
-and factors (#53).
+formula front end (#26); R's formula language, its algebra, transforms
+and factors (#53); and R glmnet's example datasets, CSV files for tables and
+parity fixtures that follow the vignette on each dataset (#61).
 
 Next: the per-fit knobs, weights,
 `penalty.factor`, coefficient limits, offsets and `exclude` (#12); sparse
 input through `spelnet` / `splognet` / `spfishnet` (#11), already present in
-`vendor/`; the data-source adapters of the input-formats arc (#41); and parity
-fixtures from glmnet's example datasets (#17).
+`vendor/`; and the data-source adapters of the input-formats arc (#41), each a
+module under `glmnet/data/` beside `glmnet/data/csv`.

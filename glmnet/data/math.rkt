@@ -12,7 +12,7 @@
 ;; row-major order.
 
 (require racket/contract
-         (only-in racket/flonum flvector? make-flvector flvector-set!)
+         (only-in racket/flonum flvector? flvector-length make-flvector flvector-set!)
          (only-in ffi/vector f64vector-ref)
          (only-in math/array array? mutable-array? mutable-array-data flarray-data)
          (only-in math/matrix matrix? matrix-shape)
@@ -21,7 +21,7 @@
          (only-in "../data.rkt" design-matrix?)
          (only-in (submod "../data.rkt" support)
                   design-matrix-data design-matrix-nrows design-matrix-ncols
-                  row-major-flvector->design-matrix))
+                  flat->design-matrix))
 
 (module typed typed/racket/base
   (require racket/flonum
@@ -141,9 +141,11 @@
   (define who 'matrix->design-matrix)
   (define-values (m n) (matrix-shape M))
   (define storage (array-storage M))
-  (row-major-flvector->design-matrix
-   (if (flvector? storage) storage (matrix-flonums M storage who))
-   m n names who))
+  (flat->design-matrix
+   (if (and (flvector? storage) (= (flvector-length storage) (* m n)))
+       storage
+       (matrix-flonums M storage who))
+   m n names who "the matrix" #:order 'row-major))
 
 (define (design-matrix->matrix dm)
   (define v (design-matrix-data dm))
