@@ -27,7 +27,7 @@
  (struct-out logistic-result)
  (contract-out
   [logistic-fit
-   (->* (design-matrix/c binary-response/c #:lambda (>=/c 0))
+   (->* (design-matrix/c (response/c (or/c 0 1)) #:lambda (>=/c 0))
         (#:alpha (real-in 0 1)
          #:standardize? boolean?
          #:intercept? boolean?
@@ -43,7 +43,7 @@
 (provide
  (contract-out
   [logistic-path
-   (->* (design-matrix/c binary-response/c)
+   (->* (design-matrix/c (response/c (or/c 0 1)))
            (#:lambda lambda-sequence/c
             #:nlambda exact-positive-integer?
             #:lambda-min-ratio lambda-min-ratio/c
@@ -54,7 +54,7 @@
             #:max-iters exact-positive-integer?)
         glmnet-path?)]
   [logistic-cv
-   (->* (design-matrix/c binary-response/c)
+   (->* (design-matrix/c (response/c (or/c 0 1)))
         (#:type-measure (or/c 'deviance 'class 'auc 'mse 'mae)
          #:nfolds nfolds/c
          #:fold-ids fold-ids/c
@@ -83,17 +83,11 @@
                       (logistic-result-coefficients r) (logistic-result-dev-ratio r)
                       (logistic-result-num-passes r)))])
 
-;; --- input contract --------------------------------------------------------
-
-;; The response is a non-empty list of 0/1 class labels (exact or inexact).
-(define (binary-label? v) (and (real? v) (or (= v 0) (= v 1))))
-(define binary-response/c (and/c (listof binary-label?) pair?))
-
 ;; Cross-validation fits every fold to data with both classes, so the data must
 ;; have both.
-(define (check-both-classes y who)
+(define (check-both-classes ys who)
   (for ([c (in-list '(0 1))])
-    (unless (for/or ([v (in-list y)]) (= v c))
+    (unless (for/or ([v (in-vector ys)]) (= v c))
       (error who "class ~a has no observations; y needs both 0 and 1" c))))
 
 ;; Logistic adds the 8000/9000 (a class probability collapsed -- e.g. perfect
@@ -200,7 +194,7 @@
   (define x (as-design-matrix X 'logistic-cv "X"))
   (define ys
     (list->vector (f64vector->list (as-response y (design-matrix-nrows x) 'logistic-cv "y"))))
-  (check-both-classes y 'logistic-cv)
+  (check-both-classes ys 'logistic-cv)
   (define (fit x y)
     (logistic-path x y
                    #:lambda lambda #:nlambda nlambda #:lambda-min-ratio lambda-min-ratio

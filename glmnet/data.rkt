@@ -4,7 +4,10 @@
 ;; predictor matrix that the Fortran solvers read, and the standalone
 ;; conversions into and out of it. `glmnet` re-exports this module; it does not
 ;; load the native library, so adapters can build on it alone. Tables (#26),
-;; the named data that formulas read, convert into it here too.
+;; the named data that formulas read, convert into it here too. The fitters
+;; accept rows in any nesting of lists and vectors, and responses as lists,
+;; vectors, flvectors or f64vectors (#36), so those conversions live here, and
+;; glmnet/data/nested, which builds on this module, exports them by name.
 ;;
 ;; Invariant: `data` is a column-major f64vector of nrows * ncols finite
 ;; flonums, element (i, j) at index i + j*nrows. Every constructor validates
@@ -23,6 +26,7 @@
  design-matrix?
  design-matrix/c
  (contract-out
+  [response/c (-> flat-contract? flat-contract?)]
   [rows->design-matrix
    (->* ((listof list?)) (#:column-names column-names/c) design-matrix?)]
   [columns->design-matrix
@@ -46,7 +50,7 @@
   [design-matrix->rows (-> design-matrix? (listof (listof flonum?)))]
   [design-matrix->columns (-> design-matrix? (listof (listof flonum?)))]
   [design-matrix->f64vector (-> design-matrix? f64vector?)]
-  [response->f64vector (-> list? f64vector?)]
+  [response->f64vector (-> (or/c list? vector? flvector? f64vector?) f64vector?)]
   [table? (-> any/c boolean?)]
   [table-column-names (-> table? (listof string?))]
   [table->design-matrix (->* (table?) (column-list/c) design-matrix?)]))
@@ -56,6 +60,8 @@
   (provide design-matrix-data
            design-matrix-nrows
            design-matrix-ncols
+           nested-matrix?
+           nested->dm
            as-design-matrix
            as-response
            column-name->string
@@ -87,9 +93,64 @@
                (design-matrix-ncols dm)
                (design-matrix-column-names dm))))
 
+(define (nested-matrix? v)
+  (define (line? xs) (or (list? xs) (vector? xs)))
+  (cond
+    [(list? v) (for/and ([xs (in-list v)]) (line? xs))]
+    [(vector? v) (for/and ([xs (in-vector v)]) (line? xs))]
+    [else #f]))
+
 ;; What the fitters and prediction helpers accept for a matrix argument: a
-;; design-matrix, or a list of rows that `rows->design-matrix` converts.
-(define design-matrix/c (or/c design-matrix? (listof list?)))
+;; design-matrix, or rows in any of the four nestings. A flat contract, unlike
+;; vectorof, so that a vector argument reaches the conversion unwrapped.
+(define design-matrix/c
+  (flat-named-contract
+   '(or/c design-matrix? (listof (or/c list? vector?)) (vectorof (or/c list? vector?)))
+   (lambda (v) (or (design-matrix? v) (nested-matrix? v)))))
+
+;; A one-dimensional input with at least one element, each satisfying `elem`.
+;; An element that fails is blamed with its position.
+(define (response/c elem)
+  (define elem/c (coerce-flat-contract 'response/c elem))
+  (define elem? (flat-contract-predicate elem/c))
+  (define (failure k x) (and (not (elem? x)) (cons k x)))
+  (define (first-failure v)
+    (cond
+      [(list? v) (for/or ([x (in-list v)] [k (in-naturals)]) (failure k x))]
+      [(vector? v) (for/or ([x (in-vector v)] [k (in-naturals)]) (failure k x))]
+      [(flvector? v) (for/or ([x (in-flvector v)] [k (in-naturals)]) (failure k x))]
+      [else (for/or ([k (in-range (f64vector-length v))]) (failure k (f64vector-ref v k)))]))
+  (define (shape? v)
+    (and (one-dimensional? v) (positive? (one-dimensional-length v))))
+  (make-flat-contract
+   #:name (build-compound-type-name 'response/c elem/c)
+   #:first-order (lambda (v) (and (shape? v) (not (first-failure v))))
+   #:late-neg-projection
+   (lambda (blame)
+     (lambda (v neg-party)
+       (cond
+         [(not (shape? v))
+          (raise-blame-error blame #:missing-party neg-party v
+                             '(expected: "a non-empty list, vector, flvector or f64vector of ~a"
+                               given: "~e")
+                             (contract-name elem/c) v)]
+         [(first-failure v)
+          => (lambda (k+x)
+               (define elem-blame
+                 (blame-add-context blame (format "the element at position ~a of" (car k+x))))
+               (((get/build-late-neg-projection elem/c) elem-blame) (cdr k+x) neg-party)
+               v)]
+         [else v])))))
+
+(define (one-dimensional? v)
+  (or (list? v) (vector? v) (flvector? v) (f64vector? v)))
+
+(define (one-dimensional-length v)
+  (cond
+    [(list? v) (length v)]
+    [(vector? v) (vector-length v)]
+    [(flvector? v) (flvector-length v)]
+    [else (f64vector-length v)]))
 
 ;; --- validation --------------------------------------------------------------
 
@@ -139,57 +200,60 @@
 
 ;; --- conversions in --------------------------------------------------------
 
-(define (rows->dm rows names who what)
-  (when (null? rows)
-    (raise-arguments-error who (format "~a has no rows" what)))
-  (define no (length rows))
-  (define ni (length (car rows)))
-  (when (zero? ni)
-    (raise-arguments-error who (format "~a has no columns" what)))
-  (define v (make-f64vector (* no ni)))
-  (define (ragged i row)
-    (raise-arguments-error who (format "~a has rows of different lengths" what)
-                           "row" i "length" (length row) "length of row 0" ni))
-  ;; One walk per row: element j of row i goes to i + j*no.
-  (for ([row (in-list rows)]
-        [i (in-naturals)])
-    (let loop ([xs row] [j 0] [k i])
-      (cond
-        [(null? xs) (unless (= j ni) (ragged i row))]
-        [(= j ni) (ragged i row)]
-        [else
-         (f64vector-set! v k (->finite-flonum (car xs) who what i j))
-         (loop (cdr xs) (add1 j) (+ k no))])))
+;; Rows (by = 'rows) or columns (by = 'columns) in any of the four nestings as
+;; a design matrix. The outer sequence runs over the rows or columns and each
+;; inner one along it; entry p of outer line o goes to o*outer-stride +
+;; p*inner-stride of the column-major array.
+(define (nested->dm xss by names who what)
+  (define rows? (eq? by 'rows))
+  (define-values (line other) (if rows? (values "row" "column") (values "column" "row")))
+  (define n-outer (if (vector? xss) (vector-length xss) (length xss)))
+  (when (zero? n-outer)
+    (raise-arguments-error who (format "~a has no ~as" what line)))
+  (define n-inner (line-length (if (vector? xss) (vector-ref xss 0) (car xss))))
+  (when (zero? n-inner)
+    (raise-arguments-error who (format "~a has no ~as" what other)))
+  (define-values (no ni) (if rows? (values n-outer n-inner) (values n-inner n-outer)))
+  (define-values (outer-stride inner-stride) (if rows? (values 1 no) (values no 1)))
+  (define v (make-f64vector (* n-outer n-inner)))
+  (define (ragged o xs)
+    (raise-arguments-error who (format "~a has ~as of different lengths" what line)
+                           line o "length" (line-length xs)
+                           (format "length of ~a 0" line) n-inner))
+  (define (entry x o p)
+    (cond
+      [(and (flonum? x) (fl< (flabs x) +inf.0)) x]
+      [rows? (->finite-flonum x who what o p)]
+      [else (->finite-flonum x who what p o)]))
+  (define (store! xs o)
+    (define start (* o outer-stride))
+    (cond
+      [(vector? xs)
+       (unless (= (vector-length xs) n-inner) (ragged o xs))
+       (for ([x (in-vector xs)]
+             [p (in-naturals)])
+         (f64vector-set! v (+ start (* p inner-stride)) (entry x o p)))]
+      [else
+       (let loop ([ys xs] [p 0] [k start])
+         (cond
+           [(null? ys) (unless (= p n-inner) (ragged o xs))]
+           [(= p n-inner) (ragged o xs)]
+           [else
+            (f64vector-set! v k (entry (car ys) o p))
+            (loop (cdr ys) (add1 p) (+ k inner-stride))]))]))
+  (if (vector? xss)
+      (for ([xs (in-vector xss)] [o (in-naturals)]) (store! xs o))
+      (for ([xs (in-list xss)] [o (in-naturals)]) (store! xs o)))
   (design-matrix v no ni (check-column-names names ni who)))
 
-(define (columns->dm columns names who what)
-  (when (null? columns)
-    (raise-arguments-error who (format "~a has no columns" what)))
-  (define ni (length columns))
-  (define no (length (car columns)))
-  (when (zero? no)
-    (raise-arguments-error who (format "~a has no rows" what)))
-  (define v (make-f64vector (* no ni)))
-  (define (ragged j column)
-    (raise-arguments-error who (format "~a has columns of different lengths" what)
-                           "column" j "length" (length column) "length of column 0" no))
-  ;; One walk per column: element i of column j goes to i + j*no.
-  (for ([column (in-list columns)]
-        [j (in-naturals)])
-    (let loop ([xs column] [i 0])
-      (cond
-        [(null? xs) (unless (= i no) (ragged j column))]
-        [(= i no) (ragged j column)]
-        [else
-         (f64vector-set! v (+ i (* j no)) (->finite-flonum (car xs) who what i j))
-         (loop (cdr xs) (add1 i))])))
-  (design-matrix v no ni (check-column-names names ni who)))
+(define (line-length xs)
+  (if (vector? xs) (vector-length xs) (length xs)))
 
 (define (rows->design-matrix rows #:column-names [names #f])
-  (rows->dm rows names 'rows->design-matrix "the matrix"))
+  (nested->dm rows 'rows names 'rows->design-matrix "the matrix"))
 
 (define (columns->design-matrix columns #:column-names [names #f])
-  (columns->dm columns names 'columns->design-matrix "the matrix"))
+  (nested->dm columns 'columns names 'columns->design-matrix "the matrix"))
 
 (define (f64vector->design-matrix v nrows ncols #:column-names [names #f])
   (define who 'f64vector->design-matrix)
@@ -247,23 +311,32 @@
 
 ;; --- responses -------------------------------------------------------------
 
-(define (list->response y who what)
-  (when (null? y)
+;; A list, vector, flvector or f64vector of reals as a fresh f64vector.
+(define (->response y who what)
+  (define n (one-dimensional-length y))
+  (when (zero? n)
     (raise-arguments-error who (format "~a is empty" what)))
-  (define v (make-f64vector (length y)))
-  (for ([x (in-list y)]
-        [k (in-naturals)])
-    (define fx
-      (if (real? x)
-          (real->double-flonum x)
-          (element-error who what "not a real number" x "position" k)))
+  (define v (make-f64vector n))
+  (define (store-flonum! fx x k)
     (unless (fl< (flabs fx) +inf.0)
       (element-error who what "not finite" x "position" k))
     (f64vector-set! v k fx))
+  (define (store! x k)
+    (cond
+      [(flonum? x) (store-flonum! x x k)]
+      [(real? x) (store-flonum! (real->double-flonum x) x k)]
+      [else (element-error who what "not a real number" x "position" k)]))
+  (cond
+    [(list? y) (for ([x (in-list y)] [k (in-naturals)]) (store! x k))]
+    [(vector? y) (for ([x (in-vector y)] [k (in-naturals)]) (store! x k))]
+    [(flvector? y) (for ([x (in-flvector y)] [k (in-naturals)]) (store-flonum! x x k))]
+    [else (for ([k (in-range n)])
+            (define x (f64vector-ref y k))
+            (store-flonum! x x k))])
   v)
 
 (define (response->f64vector y)
-  (list->response y 'response->f64vector "the response"))
+  (->response y 'response->f64vector "the response"))
 
 ;; --- the fitters' entry points (support submodule) ---------------------------
 
@@ -271,14 +344,15 @@
 (define (as-design-matrix X who what)
   (if (design-matrix? X)
       X
-      (rows->dm X #f who what)))
+      (nested->dm X 'rows #f who what)))
 
 ;; A fitter's response argument as an f64vector with one entry per observation.
 (define (as-response y no who what)
-  (unless (= (length y) no)
+  (define n (one-dimensional-length y))
+  (unless (= n no)
     (raise-arguments-error who (format "~a does not have one entry per row of X" what)
-                           (format "length of ~a" what) (length y) "rows of X" no))
-  (list->response y who what))
+                           (format "length of ~a" what) n "rows of X" no))
+  (->response y who what))
 
 ;; --- tables (#26) ------------------------------------------------------------
 

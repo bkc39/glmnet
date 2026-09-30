@@ -23,10 +23,15 @@ The fit procedures share their argument conventions:
 
 @itemlist[
  @item{@racket[X] is a @tech{design matrix}, one row per observation: a
-       @racket[design-matrix?] value or a non-empty list of equal-length rows
-       of reals (see @racket[design-matrix/c] and @secref["ref-data"]).
-       Prediction helpers take new data in the same forms, with as many columns
-       as the fit has coefficients.}
+       @racket[design-matrix?] value, or a non-empty list or vector of
+       equal-length rows of reals, each row a list or a vector (see
+       @racket[design-matrix/c], @secref["ref-data"] and
+       @secref["ref-data-nested"]). Prediction helpers take new data in the
+       same forms, with as many columns as the fit has coefficients.}
+ @item{A @tech{response} @racket[y], and a Cox model's @racket[times] and
+       @racket[statuses], is a non-empty list, vector, @racket[flvector] or
+       @racket[f64vector] with one entry per row of @racket[X] (see
+       @racket[response/c]).}
  @item{@racket[#:lambda] is the penalty strength @math{λ ≥ 0}. It is
        required.}
  @item{@racket[#:alpha] is the mixing parameter @math{α ∈ [0, 1]}:
@@ -84,16 +89,43 @@ matrix can be passed to any number of fits.
 
 @defthing[design-matrix/c flat-contract?]{
   The contract on the @racket[X] argument of every fit and prediction
-  procedure, and on the response matrix @racket[Y] of @racket[mgaussian-fit]
-  and @racket[mgaussian-path]. It accepts a @racket[design-matrix?] value, or a
-  list of lists that @racket[rows->design-matrix] then converts and checks.
-  Equivalent to @racket[(or/c design-matrix? (listof list?))].
+  procedure, and on the response matrix @racket[Y] of @racket[mgaussian-fit],
+  @racket[mgaussian-path] and @racket[mgaussian-cv]. It accepts a
+  @racket[design-matrix?] value, or rows in any of four nestings: a list or a
+  vector of rows, each row a list or a vector. Each of those procedures
+  converts and checks the rows as @racket[nested->design-matrix] does, so
+  every nesting fits exactly as the same list of lists. A violation reports the contract's
+  name, @racket[(or/c design-matrix? (listof (or/c list? vector?)) (vectorof (or/c list? vector?)))];
+  unlike @racket[vectorof], the contract never wraps a vector.
 
   @examples[#:eval ev
   (require racket/contract)
   (contract-first-order-passes? design-matrix/c D)
   (contract-first-order-passes? design-matrix/c '((1.0 2.0) (3.0 4.0)))
+  (contract-first-order-passes? design-matrix/c (vector #(1.0 2.0) '(3.0 4.0)))
   (contract-first-order-passes? design-matrix/c '(1.0 2.0))]}
+
+@defproc[(response/c [elem flat-contract?]) flat-contract?]{
+  A contract for a one-dimensional input, such as a @tech{response}: a
+  non-empty list, vector, @racket[flvector] or @racket[f64vector] each of whose
+  elements satisfies @racket[elem]. The fit procedures use it for their
+  responses, for example @racket[(response/c (or/c 0 1))] for the labels of
+  @racket[logistic-fit]. A violation names the accepted shapes, or the
+  position of the first element that fails @racket[elem], counting from 0.
+  Like @racket[design-matrix/c], it never wraps a vector.
+
+  @examples[#:eval ev
+  (require racket/flonum)
+  (define labels/c (response/c (or/c 0 1)))
+  (contract-first-order-passes? labels/c '(0 1 1))
+  (contract-first-order-passes? labels/c (flvector 0.0 1.0))
+  (contract-first-order-passes? labels/c (vector 0 2))
+  (contract-first-order-passes? labels/c (vector))
+  (define/contract (events statuses)
+    (-> (response/c (or/c 0 1)) exact-nonnegative-integer?)
+    (for/sum ([s statuses]) (if (= s 1) 1 0)))
+  (events (vector 1 0 1))
+  (eval:error (events (flvector 1.0 0.0 0.5)))]}
 
 @defproc[(rows->design-matrix [rows (listof list?)]
                               [#:column-names column-names
@@ -104,7 +136,8 @@ matrix can be passed to any number of fits.
   must have the same length, and every entry must be a real, finite number.
   @racket[column-names], when given, names the columns: one distinct string or
   symbol per column. Names are compared as strings, so @racket["x"] and
-  @racket['x] are the same name.
+  @racket['x] are the same name. For rows that are vectors, or a vector of
+  rows, see @racket[nested->design-matrix].
 
   @examples[#:eval ev
   (define named (rows->design-matrix '((1 2) (3 4)) #:column-names '(age dose)))
@@ -121,7 +154,8 @@ matrix can be passed to any number of fits.
                                                  #f])
          design-matrix?]{
   Builds a design matrix from a list of columns, one per predictor, under the
-  same rules as @racket[rows->design-matrix].
+  same rules as @racket[rows->design-matrix]. For columns in the other
+  nestings, see @racket[nested->design-matrix] with @racket[#:by 'columns].
 
   @examples[#:eval ev
   (design-matrix->rows (columns->design-matrix '((1 2 3) (4 5 6))))
@@ -208,16 +242,23 @@ matrix can be passed to any number of fits.
   @examples[#:eval ev
   (f64vector->list (design-matrix->f64vector D))]}
 
-@defproc[(response->f64vector [y list?]) f64vector?]{
-  Converts a non-empty list of real, finite numbers to an @racket[f64vector],
-  the form in which a @tech{response} reaches the Fortran. The fit procedures
-  apply the same conversion to their responses, after checking that the
-  response has one entry per row of @racket[X]. An error names the position of
-  the offending entry, counting from 0.
+@defproc[(response->f64vector [y (or/c list? vector? flvector? f64vector?)])
+         f64vector?]{
+  Converts a non-empty list, vector, @racket[flvector] or @racket[f64vector] of
+  real, finite numbers to a fresh @racket[f64vector], the form in which a
+  @tech{response} reaches the Fortran. The fit procedures apply the same
+  conversion to their responses, after checking that the response has one
+  entry per row of @racket[X]. An @racket[flvector] is always copied, since
+  the FFI cannot pass one where the Fortran expects an @racket[f64vector]; so
+  is an @racket[f64vector], so that the result never shares memory with
+  @racket[y]. An error names the position of the offending entry, counting
+  from 0.
 
   @examples[#:eval ev
   (f64vector->list (response->f64vector '(1 1/2 2.5)))
-  (eval:error (response->f64vector '(1.0 +nan.0 2.0)))]}
+  (f64vector->list (response->f64vector (vector 1 1/2 2.5)))
+  (f64vector->list (response->f64vector (flvector 1.0 0.5 2.5)))
+  (eval:error (response->f64vector (flvector 1.0 +nan.0 2.0)))]}
 
 @subsection[#:tag "ref-tables"]{Tables}
 
@@ -325,6 +366,69 @@ modules provide. @racketmodname[glmnet] does not re-export them.
   (table-column-names iris)
   (formula-predictor-names (Sepal.Length . ~ . Petal.Width + Species) iris)]}
 
+@section[#:tag "ref-data-nested"]{Nested lists and vectors}
+
+@defmodule[glmnet/data/nested]
+
+Racket's own data for a @tech{design matrix} is a list or a vector of rows,
+each row a list or a vector. Every fit and prediction procedure accepts these
+four nestings as they are (see @racket[design-matrix/c]). This module converts
+them to a @racket[design-matrix?] value, to check the data once and fit it
+many times or to name its columns, and converts a design matrix back to any of
+them. A @tech{response} needs no conversion of its own: a list, vector,
+@racket[flvector] or @racket[f64vector] is accepted wherever a response is
+(see @racket[response/c] and @racket[response->f64vector]).
+@racketmodname[glmnet] does not re-export this module.
+
+@racket[rows->design-matrix] and @racket[columns->design-matrix] are the
+list-of-lists cases of @racket[nested->design-matrix]. The three read their
+input the same way, so the same entries give @racket[equal?] design matrices,
+and so do the fits and predictions on them.
+
+@defproc[(nested->design-matrix [xss (or/c (listof (or/c list? vector?))
+                                           (vectorof (or/c list? vector?)))]
+                                [#:by by (or/c 'rows 'columns) 'rows]
+                                [#:column-names column-names
+                                                (or/c #f (listof (or/c string? symbol?)))
+                                                #f])
+         design-matrix?]{
+  Builds a design matrix from @racket[xss], whose elements are the rows of the
+  matrix when @racket[by] is @racket['rows] and its columns when @racket[by]
+  is @racket['columns]. A list and a vector can be mixed at either level. The
+  rules are those of @racket[rows->design-matrix]: at least one row and one
+  column, every row (or column) of the same length, every entry a real, finite
+  number, and @racket[column-names], when given, one distinct name per column.
+  A design matrix with column names is a @tech{table}, from which the formula
+  front end fits by name.
+
+  @examples[#:eval ev
+  (require glmnet/data/nested)
+  (define vrows (vector #(1.0 4.0) #(2.0 5.0) #(3.0 6.0)))
+  (define V (nested->design-matrix vrows))
+  (design-matrix->rows V)
+  (equal? V (nested->design-matrix (list #(1 2 3) '(4 5 6)) #:by 'columns))
+  (equal? V (rows->design-matrix '((1 4) (2 5) (3 6))))
+  (design-matrix-column-names (nested->design-matrix vrows #:column-names '(x z)))
+  (eval:error (nested->design-matrix (vector #(1.0 2.0) #(3.0))))]}
+
+@defproc[(design-matrix->nested [dm design-matrix?]
+                                [#:by by (or/c 'rows 'columns) 'rows]
+                                [#:outer outer (or/c 'list 'vector) 'list]
+                                [#:inner inner (or/c 'list 'vector) 'list])
+         (or/c list? vector?)]{
+  The entries of @racket[dm], as flonums: its rows when @racket[by] is
+  @racket['rows], and its columns when it is @racket['columns]. They are held
+  in an @racket[outer] (a list or a vector) of @racket[inner]s, so that the
+  defaults give the list of lists of @racket[design-matrix->rows]. The vectors
+  are fresh and mutable. The column names are not included; see
+  @racket[design-matrix-column-names].
+
+  @examples[#:eval ev
+  (design-matrix->nested V #:outer 'vector #:inner 'vector)
+  (design-matrix->nested V #:inner 'vector)
+  (design-matrix->nested V #:by 'columns #:outer 'vector)
+  (equal? (design-matrix->nested V) (design-matrix->rows V))]}
+
 @section[#:tag "ref-gaussian"]{Gaussian models}
 
 The @tech{Gaussian family}. The four named models are @racket[elnet-fit] with a
@@ -356,7 +460,7 @@ fixed @racket[#:alpha]. See @secref["ex-ols"], @secref["ex-ridge"],
   (elnet-result-coefficients fit)]}
 
 @defproc[(elnet-fit [X design-matrix/c]
-                    [y (and/c (listof real?) pair?)]
+                    [y (response/c real?)]
                     [#:lambda lambda (>=/c 0)]
                     [#:alpha alpha (real-in 0 1) 1.0]
                     [#:standardize? standardize? boolean? #t]
@@ -375,7 +479,7 @@ fixed @racket[#:alpha]. See @secref["ex-ols"], @secref["ex-ridge"],
   (eval:error (lasso X '(2.0 2.0 2.0 2.0 2.0 2.0) #:lambda 0.5))]}
 
 @defproc[(ols [X design-matrix/c]
-              [y (and/c (listof real?) pair?)]
+              [y (response/c real?)]
               [#:standardize? standardize? boolean? #t]
               [#:intercept? intercept? boolean? #t]
               [#:thresh thresh (>/c 0) 1e-10]
@@ -392,7 +496,7 @@ fixed @racket[#:alpha]. See @secref["ex-ols"], @secref["ex-ridge"],
         '(1.0 4.0 3.0 6.0 5.0)))]}
 
 @defproc[(ridge [X design-matrix/c]
-                [y (and/c (listof real?) pair?)]
+                [y (response/c real?)]
                 [#:lambda lambda (>=/c 0)]
                 [#:standardize? standardize? boolean? #t]
                 [#:intercept? intercept? boolean? #t]
@@ -407,7 +511,7 @@ fixed @racket[#:alpha]. See @secref["ex-ols"], @secref["ex-ridge"],
   (elnet-result-coefficients (ridge X y #:lambda 0.1))]}
 
 @defproc[(lasso [X design-matrix/c]
-                [y (and/c (listof real?) pair?)]
+                [y (response/c real?)]
                 [#:lambda lambda (>=/c 0)]
                 [#:standardize? standardize? boolean? #t]
                 [#:intercept? intercept? boolean? #t]
@@ -421,7 +525,7 @@ fixed @racket[#:alpha]. See @secref["ex-ols"], @secref["ex-ridge"],
   (elnet-result-coefficients (lasso X y #:lambda 0.5))]}
 
 @defproc[(elastic-net [X design-matrix/c]
-                      [y (and/c (listof real?) pair?)]
+                      [y (response/c real?)]
                       [#:alpha alpha (real-in 0 1)]
                       [#:lambda lambda (>=/c 0)]
                       [#:standardize? standardize? boolean? #t]
@@ -469,7 +573,7 @@ The @tech{binomial family}: two-class logistic regression on 0/1 labels. See
   (logistic-result-dev-ratio fit)]}
 
 @defproc[(logistic-fit [X design-matrix/c]
-                       [y (and/c (listof (or/c 0 1)) pair?)]
+                       [y (response/c (or/c 0 1))]
                        [#:lambda lambda (>=/c 0)]
                        [#:alpha alpha (real-in 0 1) 1.0]
                        [#:standardize? standardize? boolean? #t]
@@ -530,7 +634,7 @@ labels. See @secref["ex-multinomial"].
   (multinomial-result-coefficients fit)]}
 
 @defproc[(multinomial-fit [X design-matrix/c]
-                          [y (and/c (listof exact-nonnegative-integer?) pair?)]
+                          [y (response/c (and/c integer? (>=/c 0)))]
                           [#:lambda lambda (>=/c 0)]
                           [#:alpha alpha (real-in 0 1) 1.0]
                           [#:standardize? standardize? boolean? #t]
@@ -539,7 +643,8 @@ labels. See @secref["ex-multinomial"].
                           [#:max-iters max-iters exact-positive-integer? 100000])
          multinomial-result?]{
   Fits a @math{K}-class multinomial elastic-net model. The labels @racket[y]
-  must cover @racket[0] to @math{K−1} with every class present; otherwise the
+  are integers, exact or inexact as in an @racket[flvector], and must cover
+  @racket[0] to @math{K−1} with every class present; otherwise the
   @exnraise[exn:fail]. As with @racket[logistic-fit], a collapsed class
   probability raises @racket[exn:fail].
 
@@ -589,8 +694,8 @@ intercept, and so no @racket[#:intercept?] keyword. See @secref["ex-cox"].
   (cox-result-coefficients fit)]}
 
 @defproc[(cox-fit [X design-matrix/c]
-                  [times (and/c (listof (>/c 0)) pair?)]
-                  [statuses (and/c (listof (or/c 0 1)) pair?)]
+                  [times (response/c (>/c 0))]
+                  [statuses (response/c (or/c 0 1))]
                   [#:lambda lambda (>=/c 0)]
                   [#:alpha alpha (real-in 0 1) 1.0]
                   [#:standardize? standardize? boolean? #t]
@@ -648,7 +753,7 @@ The @tech{Poisson family}: counts with a log link. See @secref["ex-poisson"].
   (poisson-result-coefficients fit)]}
 
 @defproc[(poisson-fit [X design-matrix/c]
-                      [y (and/c (listof (>=/c 0)) pair?)]
+                      [y (response/c (>=/c 0))]
                       [#:lambda lambda (>=/c 0)]
                       [#:alpha alpha (real-in 0 1) 1.0]
                       [#:standardize? standardize? boolean? #t]
@@ -819,7 +924,7 @@ These are R's @tt{glmnet.control} defaults (@tt{fdev = 1e-5},
   (glmnet-path-df path)]}
 
 @defproc[(elnet-path [X design-matrix/c]
-                     [y (and/c (listof real?) pair?)]
+                     [y (response/c real?)]
                      [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) pair?)) #f]
                      [#:nlambda nlambda exact-positive-integer? 100]
                      [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>=/c 0) (</c 1))) #f]
@@ -838,7 +943,7 @@ These are R's @tt{glmnet.control} defaults (@tt{fdev = 1e-5},
   (eval:error (elnet-path X y #:lambda '(0.1) #:max-iters 1))]}
 
 @defproc[(logistic-path [X design-matrix/c]
-                        [y (and/c (listof (or/c 0 1)) pair?)]
+                        [y (response/c (or/c 0 1))]
                         [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) pair?)) #f]
                         [#:nlambda nlambda exact-positive-integer? 100]
                         [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>=/c 0) (</c 1))) #f]
@@ -854,7 +959,7 @@ These are R's @tt{glmnet.control} defaults (@tt{fdev = 1e-5},
   (glmnet-path-df (logistic-path X '(0 0 0 1 1 1) #:lambda '(0.3 0.1 0.03)))]}
 
 @defproc[(multinomial-path [X design-matrix/c]
-                           [y (and/c (listof exact-nonnegative-integer?) pair?)]
+                           [y (response/c (and/c integer? (>=/c 0)))]
                            [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) pair?)) #f]
                            [#:nlambda nlambda exact-positive-integer? 100]
                            [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>=/c 0) (</c 1))) #f]
@@ -871,8 +976,8 @@ These are R's @tt{glmnet.control} defaults (@tt{fdev = 1e-5},
   (vector-ref (glmnet-path-coefficients mpath) 1)]}
 
 @defproc[(cox-path [X design-matrix/c]
-                   [times (and/c (listof (>/c 0)) pair?)]
-                   [statuses (and/c (listof (or/c 0 1)) pair?)]
+                   [times (response/c (>/c 0))]
+                   [statuses (response/c (or/c 0 1))]
                    [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) pair?)) #f]
                    [#:nlambda nlambda exact-positive-integer? 100]
                    [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>=/c 0) (</c 1))) #f]
@@ -890,7 +995,7 @@ These are R's @tt{glmnet.control} defaults (@tt{fdev = 1e-5},
   (glmnet-path-coefficients cpath)]}
 
 @defproc[(poisson-path [X design-matrix/c]
-                       [y (and/c (listof (>=/c 0)) pair?)]
+                       [y (response/c (>=/c 0))]
                        [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) pair?)) #f]
                        [#:nlambda nlambda exact-positive-integer? 100]
                        [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>=/c 0) (</c 1))) #f]
@@ -1054,7 +1159,7 @@ carry the signal:
   (deviance-ratio cv)]}
 
 @defproc[(elnet-cv [X design-matrix/c]
-                   [y (and/c (listof real?) pair?)]
+                   [y (response/c real?)]
                    [#:type-measure type-measure (or/c 'mse 'deviance 'mae) 'mse]
                    [#:nfolds nfolds (and/c exact-integer? (>=/c 3)) 10]
                    [#:fold-ids fold-ids (or/c #f (and/c (listof exact-nonnegative-integer?) pair?)) #f]
@@ -1078,7 +1183,7 @@ carry the signal:
   (eval:error (elnet-cv X60 y60 #:fold-ids halves))]}
 
 @defproc[(logistic-cv [X design-matrix/c]
-                      [y (and/c (listof (or/c 0 1)) pair?)]
+                      [y (response/c (or/c 0 1))]
                       [#:type-measure type-measure (or/c 'deviance 'class 'auc 'mse 'mae) 'deviance]
                       [#:nfolds nfolds (and/c exact-integer? (>=/c 3)) 10]
                       [#:fold-ids fold-ids (or/c #f (and/c (listof exact-nonnegative-integer?) pair?)) #f]
@@ -1106,7 +1211,7 @@ carry the signal:
   (logistic-cv X60 labels #:type-measure 'auc #:nfolds 5)]}
 
 @defproc[(multinomial-cv [X design-matrix/c]
-                         [y (and/c (listof exact-nonnegative-integer?) pair?)]
+                         [y (response/c (and/c integer? (>=/c 0)))]
                          [#:type-measure type-measure (or/c 'deviance 'class 'mse 'mae) 'deviance]
                          [#:nfolds nfolds (and/c exact-integer? (>=/c 3)) 10]
                          [#:fold-ids fold-ids (or/c #f (and/c (listof exact-nonnegative-integer?) pair?)) #f]
@@ -1131,8 +1236,8 @@ carry the signal:
   (multinomial-cv X60 classes #:type-measure 'class)]}
 
 @defproc[(cox-cv [X design-matrix/c]
-                 [times (and/c (listof (>/c 0)) pair?)]
-                 [statuses (and/c (listof (or/c 0 1)) pair?)]
+                 [times (response/c (>/c 0))]
+                 [statuses (response/c (or/c 0 1))]
                  [#:type-measure type-measure (or/c 'deviance 'C) 'deviance]
                  [#:nfolds nfolds (and/c exact-integer? (>=/c 3)) 10]
                  [#:fold-ids fold-ids (or/c #f (and/c (listof exact-nonnegative-integer?) pair?)) #f]
@@ -1172,7 +1277,7 @@ carry the signal:
    (cox-cv X60 times fold-0-censored #:fold-ids thirds #:grouped? #f))]}
 
 @defproc[(poisson-cv [X design-matrix/c]
-                     [y (and/c (listof (>=/c 0)) pair?)]
+                     [y (response/c (>=/c 0))]
                      [#:type-measure type-measure (or/c 'deviance 'mse 'mae) 'deviance]
                      [#:nfolds nfolds (and/c exact-integer? (>=/c 3)) 10]
                      [#:fold-ids fold-ids (or/c #f (and/c (listof exact-nonnegative-integer?) pair?)) #f]

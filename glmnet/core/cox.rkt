@@ -27,7 +27,7 @@
  (struct-out cox-result)
  (contract-out
   [cox-fit
-   (->* (design-matrix/c cox-times/c cox-status/c #:lambda (>=/c 0))
+   (->* (design-matrix/c (response/c (>/c 0)) (response/c (or/c 0 1)) #:lambda (>=/c 0))
         (#:alpha (real-in 0 1)
          #:standardize? boolean?
          #:thresh (>/c 0)
@@ -39,7 +39,7 @@
 (provide
  (contract-out
   [cox-path
-   (->* (design-matrix/c cox-times/c cox-status/c)
+   (->* (design-matrix/c (response/c (>/c 0)) (response/c (or/c 0 1)))
            (#:lambda lambda-sequence/c
             #:nlambda exact-positive-integer?
             #:lambda-min-ratio lambda-min-ratio/c
@@ -49,7 +49,7 @@
             #:max-iters exact-positive-integer?)
         glmnet-path?)]
   [cox-cv
-   (->* (design-matrix/c cox-times/c cox-status/c)
+   (->* (design-matrix/c (response/c (>/c 0)) (response/c (or/c 0 1)))
         (#:type-measure (or/c 'deviance 'C)
          #:nfolds nfolds/c
          #:fold-ids fold-ids/c
@@ -75,13 +75,6 @@
      (single-fit-path 'cox (cox-result-lambda r) #f (cox-result-coefficients r)
                       (cox-result-dev-ratio r) (cox-result-num-passes r)))])
 
-;; --- input contracts -------------------------------------------------------
-
-;; Follow-up times must be positive; status is a 0/1 event indicator.
-(define cox-times/c (and/c (listof (>/c 0)) pair?))
-(define (event-flag? s) (and (real? s) (or (= s 0) (= s 1))))
-(define cox-status/c (and/c (listof event-flag?) pair?))
-
 ;; Cox adds the 8888 (all observations censored -> no events) and 20000/30000
 ;; (initialization numerical error) fatal codes on top of the shared cases in
 ;; `check-jerr`.
@@ -98,8 +91,8 @@
                     jerr))]
     [else (check-jerr jerr who lmu)]))
 
-(define (check-events statuses who)
-  (unless (for/or ([s (in-list statuses)]) (= s 1))
+(define (check-events sv who)
+  (unless (for/or ([s (in-list (response-values sv))]) (= s 1))
     (error who "at least one observation must be an event (status = 1)")))
 
 ;; --- public API ------------------------------------------------------------
@@ -115,7 +108,7 @@
   (define ni (design-matrix-ncols x))
   (define tv (as-response times no 'cox-fit "times"))
   (define sv (as-response statuses no 'cox-fit "statuses"))
-  (check-events statuses 'cox-fit)
+  (check-events sv 'cox-fit)
   (define beta (make-f64vector ni 0.0))
   (define-values (dev-ratio lam nlp jerr)
     (glmnet-coxnet-solo/raw (exact->inexact alpha) no ni (design-matrix-data x) tv sv
@@ -153,7 +146,7 @@
   (define ni (design-matrix-ncols x))
   (define tv (as-response times no 'cox-path "times"))
   (define sv (as-response statuses no 'cox-path "statuses"))
-  (check-events statuses 'cox-path)
+  (check-events sv 'cox-path)
   (define-values (nlam flmin ulam)
     (path-lambdas lambda nlambda lambda-min-ratio no ni))
   (define beta (make-f64vector (* ni nlam) 0.0))
@@ -189,7 +182,7 @@
   (define no (design-matrix-nrows x))
   (define tv (as-response times no 'cox-cv "times"))
   (define sv (as-response statuses no 'cox-cv "statuses"))
-  (check-events statuses 'cox-cv)
+  (check-events sv 'cox-cv)
   (define ts (list->vector (f64vector->list tv)))
   (define ds (list->vector (f64vector->list sv)))
   (define (fit x times statuses)

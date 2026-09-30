@@ -26,7 +26,7 @@
  (struct-out multinomial-result)
  (contract-out
   [multinomial-fit
-   (->* (design-matrix/c multiclass-response/c #:lambda (>=/c 0))
+   (->* (design-matrix/c (response/c class-label/c) #:lambda (>=/c 0))
         (#:alpha (real-in 0 1)
          #:standardize? boolean?
          #:intercept? boolean?
@@ -41,7 +41,7 @@
 (provide
  (contract-out
   [multinomial-path
-   (->* (design-matrix/c multiclass-response/c)
+   (->* (design-matrix/c (response/c class-label/c))
            (#:lambda lambda-sequence/c
             #:nlambda exact-positive-integer?
             #:lambda-min-ratio lambda-min-ratio/c
@@ -52,7 +52,7 @@
             #:max-iters exact-positive-integer?)
         glmnet-path?)]
   [multinomial-cv
-   (->* (design-matrix/c multiclass-response/c)
+   (->* (design-matrix/c (response/c class-label/c))
         (#:type-measure (or/c 'deviance 'class 'mse 'mae)
          #:nfolds nfolds/c
          #:fold-ids fold-ids/c
@@ -84,8 +84,13 @@
 
 ;; --- input contract --------------------------------------------------------
 
-;; A non-empty list of integer class labels 0..K-1.
-(define multiclass-response/c (and/c (listof exact-nonnegative-integer?) pair?))
+;; A class label 0..K-1, exact or, as in an flvector, inexact.
+(define class-label/c (and/c integer? (>=/c 0)))
+
+;; The labels of a response the fitter has converted with `as-response`, as
+;; exact integers.
+(define (response-labels yv)
+  (map inexact->exact (response-values yv)))
 
 ;; Validate the labels cover 0..K-1 with every class present; return K (>= 2).
 (define (labels->num-classes y who)
@@ -138,8 +143,8 @@
   (define x (as-design-matrix X 'multinomial-fit "X"))
   (define no (design-matrix-nrows x))
   (define ni (design-matrix-ncols x))
-  (define nc (labels->num-classes y 'multinomial-fit))
   (define yv (as-response y no 'multinomial-fit "y"))
+  (define nc (labels->num-classes (response-labels yv) 'multinomial-fit))
   (define intercepts (make-f64vector nc 0.0))
   (define beta (make-f64vector (* ni nc) 0.0))
   (define-values (dev-ratio lam nlp jerr)
@@ -182,8 +187,8 @@
   (define x (as-design-matrix X 'multinomial-path "X"))
   (define no (design-matrix-nrows x))
   (define ni (design-matrix-ncols x))
-  (define k (labels->num-classes y 'multinomial-path))
   (define yv (as-response y no 'multinomial-path "y"))
+  (define k (labels->num-classes (response-labels yv) 'multinomial-path))
   (define-values (nlam flmin ulam)
     (path-lambdas lambda nlambda lambda-min-ratio no ni))
   (define a0 (make-f64vector (* k nlam) 0.0))
@@ -220,9 +225,9 @@
                         #:thresh [thresh 1e-7]
                         #:max-iters [max-iters 100000])
   (define x (as-design-matrix X 'multinomial-cv "X"))
-  (as-response y (design-matrix-nrows x) 'multinomial-cv "y")
-  (labels->num-classes y 'multinomial-cv)
-  (define labels (list->vector y))
+  (define ys (response-labels (as-response y (design-matrix-nrows x) 'multinomial-cv "y")))
+  (labels->num-classes ys 'multinomial-cv)
+  (define labels (list->vector ys))
   (define (fit x y)
     (multinomial-path x y
                       #:lambda lambda #:nlambda nlambda #:lambda-min-ratio lambda-min-ratio

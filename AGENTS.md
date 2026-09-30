@@ -21,6 +21,8 @@ glmnet/                        Racket collection
   foreign.rkt                  contracted wrappers + load-time precision guard
   data.rkt                     design-matrix layer (glmnet/data): the one input layout,
                                and tables (named columns) that convert into it
+  data/nested.rkt              glmnet/data/nested: the four nestings of lists and
+                               vectors to and from a design matrix (not re-exported)
   core/*.rkt                   one module per family; marshal.rkt, path.rkt shared
   core/model.rkt               gen:glmnet-model: predict / coef / deviance-ratio on any result
   core/cv.rkt                  cross-validation (R's cv.glmnet) behind every family's *-cv

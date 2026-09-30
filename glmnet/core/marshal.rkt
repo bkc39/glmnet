@@ -9,19 +9,22 @@
 
 (require racket/contract
          ffi/vector
-         (only-in "../data.rkt" design-matrix/c)
+         (only-in "../data.rkt" design-matrix/c response/c)
          (submod "../data.rkt" support))
 
 (provide design-matrix/c response/c
          design-matrix-data design-matrix-nrows design-matrix-ncols
-         as-design-matrix as-response
+         as-design-matrix as-response response-values
          prediction-matrix linear-predictor
          check-response-varies
          check-jerr)
 
-;; --- input contracts -------------------------------------------------------
+;; --- responses ---------------------------------------------------------------
 
-(define response/c (and/c (listof real?) pair?))
+;; The entries of a response the fitter has converted with `as-response`, as a
+;; list: what its checks read, whatever form the caller passed.
+(define (response-values yv)
+  (f64vector->list yv))
 
 ;; --- prediction ------------------------------------------------------------
 

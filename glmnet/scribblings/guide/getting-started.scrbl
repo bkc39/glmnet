@@ -40,7 +40,7 @@ module of their own, which @racket[(require glmnet)] does not load:
 
 The simplest form of a @tech{design matrix} is a list of rows, one per
 observation; the response is a list with one entry per row (see
-@secref["concepts-data"] for the other form). Here the response is exactly
+@secref["concepts-data"] for the other forms, vectors among them). Here the response is exactly
 @math{y = 1 + 2x₁ − x₂}, and the third column, @math{x₃ = x₁²}, carries no
 signal:
 
