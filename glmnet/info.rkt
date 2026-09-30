@@ -14,8 +14,9 @@
 ;; .zo files import scribble's lp2 runtime (scribble/lp/lang/lang2.rkt). The
 ;; catalog's `raco setup --check-pkg-deps` flags it under deps, not build-deps.
 ;; draw-lib, pict-lib and plot-lib are for glmnet/plot (plot.rkt), which main.rkt
-;; does not re-export, so `(require glmnet)` does not load them.
-(define deps '("base" "draw-lib" "pict-lib" "plot-lib" "scribble-lib"))
+;; does not re-export, so `(require glmnet)` does not load them. polars is for
+;; glmnet/data/polars, which main.rkt does not re-export either.
+(define deps '("base" "draw-lib" "pict-lib" "plot-lib" "polars" "scribble-lib"))
 ;; at-exp-lib provides scribble/reader, which tests/docs-coverage-test.rkt uses
 ;; to read the manual's sources. pict-doc and plot-doc are for the manual's
 ;; links into their documentation; plot-gui-lib provides `plot`, the module

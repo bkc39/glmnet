@@ -3,9 +3,16 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    # rkt-polars, the catalog package `polars` that glmnet/data/polars adapts.
+    # The sandboxed builds cannot reach the package catalog, so they install
+    # it from this source, whose native library is the prebuilt candidate the
+    # catalog install stages, and its Racket dependencies from the flake's own
+    # fixed-output `racket-deps`. Its nixpkgs is not followed: that output's
+    # hash is taken with rkt-polars' own Racket.
+    rkt-polars.url = "github:bkc39/rkt-polars";
   };
 
-  outputs = { self, nixpkgs }:
+  outputs = { self, nixpkgs, rkt-polars }:
     let
       supportedSystems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
@@ -33,6 +40,20 @@
       rEnvFor = pkgs: pkgs.rWrapper.override {
         packages = with pkgs.rPackages; [ glmnet jsonlite survival ];
       };
+
+      # Installs polars (rkt-polars) and its dependency closure offline into
+      # $PLTUSERHOME, before glmnet. `--copy` moves the sources out of the
+      # read-only store. Setup must run on the dependencies: it copies the
+      # tzdata package's zoneinfo into the share directory, where gregor,
+      # which polars loads, looks for it (the sandbox has no system zoneinfo).
+      # On polars, it runs the pre-install hook that stages the platform's
+      # prebuilt candidate library.
+      installPolars = system: ''
+        raco pkg install --batch --copy --no-docs --scope user \
+          ${rkt-polars.packages.${system}.racket-deps}/*/
+        raco pkg install --batch --copy --no-docs --scope user \
+          --name polars ${rkt-polars}/polars
+      '';
     in
     {
       packages = forAllSystems (system:
@@ -87,6 +108,8 @@
               # the test phase even without the env var.
               mkdir -p ./glmnet/native-libs
               cp ${native}/lib/libglmnetcompat.* ./glmnet/native-libs/ 2>/dev/null || true
+
+              ${installPolars system}
 
               raco pkg install --batch --deps fail --no-setup --copy --scope user \
                 --name glmnet ./glmnet
@@ -164,6 +187,7 @@
               export GLMNET_NATIVE_LIB_PATH=${native}
               mkdir -p $PLTUSERHOME ./glmnet/native-libs
               cp ${native}/lib/libglmnetcompat.* ./glmnet/native-libs/ 2>/dev/null || true
+              ${installPolars system}
               raco pkg install --batch --deps fail --no-setup --copy --scope user \
                 --name glmnet ./glmnet
               raco setup --no-docs --pkgs glmnet

@@ -14,6 +14,7 @@
 (require racket/contract
          racket/flonum
          racket/list
+         (only-in racket/unsafe/ops unsafe-f64vector-ref)
          ffi/vector)
 
 (define column-names/c (or/c #f (listof (or/c string? symbol?))))
@@ -63,7 +64,8 @@
            select-table-columns
            select-table-values
            table-column->flvector
-           flvectors->design-matrix))
+           flvectors->design-matrix
+           adopt-f64vector))
 
 (struct design-matrix (data nrows ncols column-names)
   #:property prop:custom-write
@@ -453,6 +455,21 @@
                                "column" name "row" i "element" x))
       (f64vector-set! v (+ i (* j no)) x)))
   (design-matrix v no ni (check-column-names names ni who)))
+
+;; A bulk export from an adapter (#40) as a design matrix, without a copy: v
+;; is a fresh column-major f64vector of nrows * (length names) entries, which
+;; the caller hands over and keeps no reference to. An entry that is not
+;; finite is an error naming its column, by name, and its row. The index never
+;; leaves v's own length, so the unsafe read is safe.
+(define (adopt-f64vector v nrows names who what)
+  (for ([k (in-range (f64vector-length v))])
+    (define x (unsafe-f64vector-ref v k))
+    (unless (fl< (flabs x) +inf.0)
+      (define-values (j i) (quotient/remainder k nrows))
+      (raise-arguments-error who (format "~a has an element that is not finite" what)
+                             "column" (list-ref names j) "row" i "element" x)))
+  (define ni (length names))
+  (design-matrix v nrows ni (check-column-names names ni who)))
 
 (define (table->design-matrix t [names (table-names t 'table->design-matrix)])
   (define dup (check-duplicates (map column-name->string names)))

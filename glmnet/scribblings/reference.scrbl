@@ -325,6 +325,101 @@ modules provide. @racketmodname[glmnet] does not re-export them.
   (table-column-names iris)
   (formula-predictor-names (Sepal.Length . ~ . Petal.Width + Species) iris)]}
 
+@section[#:tag "ref-data-polars"]{Polars dataframes}
+
+@defmodule[glmnet/data/polars]
+
+Conversions between the dataframes and series of @racketmodname[polars] and
+glmnet's @tech[#:key "design matrix"]{design matrices}, @tech{responses} and
+@tech{tables}.
+@racketmodname[glmnet] does not re-export them and does not load Polars. See
+@secref["concepts-polars"].
+
+A column that is converted to numbers must have an integer or floating-point
+dtype; Polars casts it to doubles as it copies it out. Column names are
+strings or symbols, compared as strings, and must be names of the dataframe's
+columns. A null, anywhere in a column that is converted, is an error naming
+its column and row, and so is a value that is not finite where numbers are
+needed. Nothing is dropped or filled in.
+
+@examples[#:eval ev #:hidden
+(require glmnet/data/polars
+         (only-in polars dataframe series read-csv ref column-names dtype
+                  polars-null))]
+
+@defproc[(polars->design-matrix [df dataframe?]
+                                [columns (and/c (listof (or/c string? symbol?)) pair?)])
+         design-matrix?]{
+  A design matrix of the columns of @racket[df] named by @racket[columns], in
+  that order, with their names as its column names. The contract requires
+  @racket[df] to have at least one row, and @racket[columns] to name distinct
+  columns of @racket[df] with numeric dtypes. The matrix is Polars'
+  column-major export, @racket[dataframe->f64vector], taken over without a
+  further copy.
+
+  @examples[#:eval ev
+  (define trial
+    (dataframe (list (series '(1 2 3) #:name "dose")
+                     (series '(0.5 1.5 2.5) #:name "age")
+                     (series '("a" "b" "a") #:name "site"))))
+  (define trial-matrix (polars->design-matrix trial '(age "dose")))
+  (design-matrix->rows trial-matrix)
+  (design-matrix-column-names trial-matrix)
+  (eval:error (polars->design-matrix trial '("dose" "site")))]}
+
+@defproc[(design-matrix->polars [dm design-matrix?]) dataframe?]{
+  A dataframe of the columns of @racket[dm], each a @racket['float64] series
+  named by the column's name, or @racket["column_0"], @racket["column_1"], …,
+  as Polars names the columns of a matrix, when @racket[dm] has no names.
+
+  @examples[#:eval ev
+  (design-matrix->polars trial-matrix)
+  (column-names (design-matrix->polars (rows->design-matrix '((1 2)))))]}
+
+@defproc[(polars->response [s series?]) (and/c (listof real?) pair?)]{
+  The elements of @racket[s] as a @tech{response}: exact integers from an
+  integer series, flonums from a floating-point one. The contract requires
+  @racket[s] to have a numeric dtype and at least one element.
+
+  @examples[#:eval ev
+  (polars->response (ref trial "dose"))
+  (eval:error (polars->response (series (list 1.0 polars-null 3.0) #:name "y")))]}
+
+@defproc[(polars->table [df dataframe?]
+                        [columns (and/c (listof (or/c string? symbol?)) pair?)
+                                 (column-names df)])
+         table?]{
+  A @tech{table} of the columns of @racket[df] named by @racket[columns], in
+  that order: an association list from each name to a vector of the column's
+  values. Numeric columns hold numbers, exact integers from an integer
+  column, and boolean columns booleans. String columns hold strings, and
+  categorical and enum columns symbols, which the formula front end reads as
+  factors. When @racket[columns] is given, the contract requires it to name
+  distinct columns of @racket[df] with those dtypes; when it is not, every
+  column must have one of them.
+
+  @examples[#:eval ev
+  (polars->table trial)
+  (polars->table trial '("site"))]}
+
+@defproc[(table->polars [table table?]
+                        [names (and/c (listof (or/c string? symbol?)) pair?)
+                               (table-column-names table)])
+         dataframe?]{
+  A dataframe of the columns of @racket[table] named by @racket[names], in
+  that order. A column's values choose its dtype: @racket['int64] for exact
+  integers that fit in 64 bits, @racket['float64] for any other reals,
+  @racket['boolean] for booleans, @racket['categorical] for symbols, and
+  @racket['string] for strings, or for strings and symbols mixed. Each name
+  must be a column of the table, and must appear once; a column whose values
+  no one dtype holds is an error naming its row.
+
+  @examples[#:eval ev
+  (define cars (table->polars mtcars '("mpg" "cyl" "wt")))
+  (map (lambda (name) (dtype (ref cars name))) (column-names cars))
+  (table->polars (list (cons "id" '(a b a)) (cons "x" '(1 2.5 3))))
+  (eval:error (table->polars (list (cons "x" '(1 "two")))))]}
+
 @section[#:tag "ref-gaussian"]{Gaussian models}
 
 The @tech{Gaussian family}. The four named models are @racket[elnet-fit] with a

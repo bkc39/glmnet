@@ -21,6 +21,8 @@ glmnet/                        Racket collection
   foreign.rkt                  contracted wrappers + load-time precision guard
   data.rkt                     design-matrix layer (glmnet/data): the one input layout,
                                and tables (named columns) that convert into it
+  data/polars.rkt              glmnet/data/polars: rkt-polars dataframes to and from
+                               design matrices, responses and tables; not re-exported
   core/*.rkt                   one module per family; marshal.rkt, path.rkt shared
   core/model.rkt               gen:glmnet-model: predict / coef / deviance-ratio on any result
   core/cv.rkt                  cross-validation (R's cv.glmnet) behind every family's *-cv
@@ -54,6 +56,18 @@ them: plot-lib is Typed Racket and pulls in the drawing stack, and
 `(require glmnet)` must not load it, just as Racket's own `plot` stays out of
 `racket`. Their documentation is a guide chapter (`guide/plots.scrbl`, tag
 `plots`) and a reference section (`ref-plot`, `@defmodule[glmnet/plot]`).
+
+The data adapters of arc #41 follow the same rule. Each is a module under
+`glmnet/data/` that converts one format to and from the design matrix,
+responses and tables, and the library it adapts is a real dependency in
+`info.rkt` that `main.rkt` does not load. `glmnet/data/polars` depends on the
+catalog package `polars` (rkt-polars, Apache-2.0 OR MIT), which ships prebuilt
+native libraries for Linux x86-64 and macOS arm64 only. The Nix sandbox cannot
+reach the catalog, so `flake.nix` installs rkt-polars from its flake input,
+with the Racket dependencies from that flake's `racket-deps`; `nix flake
+update rkt-polars` moves it. A bulk export is adopted as a design
+matrix without a copy through `adopt-f64vector` in the `support` submodule of
+`data.rkt`, which checks every entry for finiteness.
 
 The formula language (#53) is R's, checked against R's `terms()` and
 `model.matrix()` by the parity goldens. A new kind of formula term, such as
@@ -190,8 +204,9 @@ its `glmnet/examples/NN-*.rkt` changes. `tests/docs-coverage-test.rkt` fails,
 naming the bindings, if anything `(require glmnet)` exports has no `defproc`,
 `defstruct*`, `defthing` or `defform` entry in the manual: `scribblings/glmnet.scrbl`
 and the files it reaches through `include-section`, outside code blocks and
-examples, and so does anything `(require glmnet/plot)` exports. A new `.scrbl`
-file counts once something includes it.
+examples, and so does anything `(require glmnet/plot)` or
+`(require glmnet/data/polars)` exports. A new `.scrbl` file counts once
+something includes it.
 
 ## Local dev loop
 

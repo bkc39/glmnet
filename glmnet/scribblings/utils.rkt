@@ -18,10 +18,15 @@
          scribble/core
          scribble/decode
          racket/sandbox
+         racket/runtime-path
          (for-syntax racket/base))
 
 (require (for-label glmnet
                     glmnet/plot
+                    glmnet/data/polars
+                    (only-in polars
+                             dataframe? series? dataframe series read-csv ref column-names
+                             dtype polars-null dataframe->f64vector)
                     glmnet/examples/data/mtcars
                     glmnet/examples/data/iris
                     racket/base
@@ -38,6 +43,8 @@
          (all-from-out scribble/example)
          (for-label (all-from-out glmnet
                                   glmnet/plot
+                                  glmnet/data/polars
+                                  polars
                                   glmnet/examples/data/mtcars
                                   glmnet/examples/data/iris
                                   racket/base
@@ -50,7 +57,11 @@
                                   plot/utils))
          make-glmnet-eval
          see-reference
-         exnraise)
+         exnraise
+         iris-csv-path)
+
+;; R's iris as write.csv writes it, for the examples that read a CSV file.
+(define-runtime-path iris-csv-path "../examples/data/iris.csv")
 
 (define (make-glmnet-eval)
   (parameterize ([sandbox-output 'string]
