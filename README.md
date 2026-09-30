@@ -22,7 +22,8 @@ penalty factors, coefficient limits and offsets (#12), and sparse predictor
 matrices (#11). See `AGENTS.md` for the development workflow.
 
 The Scribble manual (`glmnet/scribblings/`) has a user guide (getting started,
-concepts, formulas and named data, plots, one worked example per model family)
+concepts, formulas and named data, plots, one worked example per model family
+and one on formula interactions)
 and an API reference.
 With the package installed, build it with
 `raco scribble --htmls glmnet/scribblings/glmnet.scrbl`.
@@ -39,8 +40,10 @@ needed to use the package.
 ## Formulas and named data
 
 Any family can be fitted from a table of named columns (an association list,
-a hash, or a design matrix with column names) with an R-style formula. The
-model keys its coefficients by name, and `predict` reads a new table by name:
+a hash, or a design matrix with column names) with an R-style formula, which
+has R's algebra of terms: interactions, crossing, powers and the intercept,
+prefix or infix. The model keys its coefficients by name, and `predict` builds
+its predictors from a new table by name:
 
 ```racket
 (define data
@@ -50,6 +53,7 @@ model keys its coefficients by name, and `predict` reads a new table by name:
 (define m (formula-fit (~ y all) data #:lambda 0.05))   ; also formula-path, formula-cv
 (coef m)                                  ; => '(("(Intercept)" . ...) ("x1" . ...) ("x2" . ...))
 (predict m (list (cons "x2" '(6.0)) (cons "x1" '(7.0))))
+(formula-path (y . ~ . x1 * x2) data)     ; R's y ~ x1 * x2: x1, x2 and x1:x2
 (formula-cv (~ (surv time status) (- all id)) patients #:family 'cox)
 ```
 
@@ -80,7 +84,7 @@ The manual's *Plots* chapter draws every plot it describes.
 
 ```bash
 nix develop                     # builds the native lib + link-installs the package
-bash scripts/run-examples.sh    # runs all nine examples (glmnet/examples/); prints each fit
+bash scripts/run-examples.sh    # runs all ten examples (glmnet/examples/); prints each fit
 raco test ./glmnet/             # full suite: unit tests + example harnesses
 ```
 

@@ -437,3 +437,97 @@ for (f in cv_fixtures) {
   cat("wrote", path, "  ( lambda.min", signif(cv$lambda.min, 4),
       "lambda.1se", signif(cv$lambda.1se, 4), ")\n")
 }
+
+## --- formulas (#53) -----------------------------------------------------------
+## R's formula algebra on mtcars (R's own copy; the Racket copy is
+## glmnet/examples/data/mtcars.rkt) and longley (the committed CSV). For each
+## formula: terms()'s term labels, intercept and factors attribute (one entry
+## per term, from each of its variables to 1 or 2); model.matrix() without its
+## intercept column, as column names and columns, and the warnings it gave; and
+## glmnet on that matrix with intercept = attr(terms, "intercept"), at a user
+## lambda sequence, through the generic outputs at `s`. `rkt` holds the Racket
+## spellings of the formula, which must all give R's matrix.
+
+formula_data <- list(mtcars = datasets::mtcars,
+                     longley = read.csv(file.path(data_dir, "longley.csv")))
+
+formula_fixtures <- list(
+  list(id = "formula-mtcars-cross", dataset = "mtcars", r = "mpg ~ wt * hp",
+       rkt = c("(~ mpg (* wt hp))", "(mpg . ~ . wt * hp)", "(~ mpg wt hp (: wt hp))")),
+  list(id = "formula-mtcars-interact", dataset = "mtcars", r = "mpg ~ hp:wt + qsec",
+       rkt = c("(~ mpg (: hp wt) qsec)", "(mpg . ~ . hp : wt + qsec)")),
+  list(id = "formula-mtcars-power-sum", dataset = "mtcars", r = "mpg ~ (wt + hp + qsec)^2",
+       rkt = c("(~ mpg (^ (+ wt hp qsec) 2))", "(mpg . ~ . (wt + hp + qsec) ^ 2)")),
+  list(id = "formula-mtcars-power-column", dataset = "mtcars", r = "mpg ~ wt^2 + hp",
+       rkt = c("(~ mpg (^ wt 2) hp)", "(mpg . ~ . wt ^ 2 + hp)", "(~ mpg wt hp)")),
+  list(id = "formula-mtcars-cross-sums", dataset = "mtcars", r = "mpg ~ (wt + hp) * (qsec + drat)",
+       rkt = c("(~ mpg (* (+ wt hp) (+ qsec drat)))", "(mpg . ~ . (wt + hp) * (qsec + drat))")),
+  list(id = "formula-mtcars-cross-empty-left", dataset = "mtcars", r = "mpg ~ 1*wt + hp + qsec",
+       rkt = c("(mpg . ~ . 1 * wt + hp + qsec)", "(~ mpg (* 1 wt) hp qsec)")),
+  list(id = "formula-mtcars-remove", dataset = "mtcars", r = "mpg ~ (wt + hp + qsec)^2 - wt:hp",
+       rkt = c("(~ mpg (- (^ (+ wt hp qsec) 2) (: wt hp)))", "(mpg . ~ . (wt + hp + qsec) ^ 2 - wt : hp)")),
+  list(id = "formula-mtcars-remove-absent", dataset = "mtcars", r = "mpg ~ wt * hp - qsec",
+       rkt = c("(~ mpg (- (* wt hp) qsec))", "(mpg . ~ . wt * hp - qsec)")),
+  list(id = "formula-mtcars-zero", dataset = "mtcars", r = "mpg ~ 0 + wt + hp",
+       rkt = c("(~ mpg 0 wt hp)", "(mpg . ~ . 0 + wt + hp)")),
+  list(id = "formula-mtcars-minus-one", dataset = "mtcars", r = "mpg ~ wt * hp - 1",
+       rkt = c("(~ mpg (- (* wt hp) 1))", "(mpg . ~ . wt * hp - 1)", "(mpg . ~ . - 1 + wt * hp)")),
+  list(id = "formula-mtcars-one", dataset = "mtcars", r = "mpg ~ 1 + wt + qsec",
+       rkt = c("(~ mpg 1 wt qsec)", "(mpg . ~ . 1 + wt + qsec)")),
+  list(id = "formula-mtcars-minus-zero", dataset = "mtcars", r = "mpg ~ wt + hp + -0",
+       rkt = c("(mpg . ~ . wt + hp + (- 0))", "(~ mpg wt hp (- 0))")),
+  list(id = "formula-mtcars-remove-minus-zero", dataset = "mtcars", r = "mpg ~ wt + hp - -0",
+       rkt = c("(mpg . ~ . wt + hp - (- 0))", "(~ mpg (- (+ wt hp) (- 0)))")),
+  list(id = "formula-mtcars-all", dataset = "mtcars", r = "mpg ~ .",
+       rkt = c("(~ mpg all)")),
+  list(id = "formula-mtcars-all-minus", dataset = "mtcars", r = "mpg ~ . - cyl - disp",
+       rkt = c("(~ mpg (- all cyl disp))", "(mpg . ~ . all - cyl - disp)")),
+  list(id = "formula-mtcars-all-interact", dataset = "mtcars", r = "mpg ~ .:wt - wt",
+       rkt = c("(~ mpg (- (: all wt) wt))", "(mpg . ~ . all : wt - wt)")),
+  list(id = "formula-mtcars-response-rhs", dataset = "mtcars", r = "mpg ~ 1 + wt + mpg + wt*mpg",
+       rkt = c("(mpg . ~ . 1 + wt + mpg + (* wt mpg))", "(~ mpg 1 wt mpg (* wt mpg))")),
+  list(id = "formula-mtcars-response-main", dataset = "mtcars", r = "mpg ~ wt + hp + mpg",
+       rkt = c("(~ mpg wt hp mpg)", "(mpg . ~ . wt + hp + mpg)")),
+  list(id = "formula-longley-power-all", dataset = "longley", r = "Employed ~ .^2",
+       rkt = c("(~ Employed (^ all 2))", "(Employed . ~ . all ^ 2)"), lambda = c(1, 0.5, 0.2)),
+  list(id = "formula-longley-no-intercept", dataset = "longley", r = "Employed ~ GNP * Population - 1",
+       rkt = c("(~ Employed (- (* GNP Population) 1))", "(Employed . ~ . - 1 + GNP * Population)")),
+  list(id = "formula-longley-mixed", dataset = "longley", r = "Employed ~ Year + GNP:Unemployed:Armed.Forces + Unemployed",
+       rkt = c("(Employed . ~ . Year + (: GNP Unemployed Armed.Forces) + Unemployed)"))
+)
+
+for (fx in formula_fixtures) {
+  d  <- formula_data[[fx$dataset]]
+  fm <- as.formula(fx$r)
+  tt <- terms(fm, data = d)
+  warnings <- character(0)
+  mm <- withCallingHandlers(model.matrix(fm, d), warning = function(w) {
+    warnings <<- c(warnings, conditionMessage(w))
+    invokeRestart("muffleWarning")
+  })
+  intercept <- attr(tt, "intercept") == 1
+  x  <- if (intercept) mm[, -1, drop = FALSE] else mm
+  y  <- d[[all.vars(fm)[1]]]
+  lambda <- if (is.null(fx$lambda)) c(2, 0.5, 0.1, 0.02) else fx$lambda
+  fit <- suppressWarnings(glmnet(x, y, family = "gaussian", alpha = 1, lambda = lambda,
+                                 standardize = TRUE, intercept = intercept, thresh = 1e-7))
+  fac <- attr(tt, "factors")
+  factors <- lapply(seq_len(ncol(fac)), function(j) {
+    nz <- fac[, j] != 0
+    setNames(as.list(fac[nz, j]), rownames(fac)[nz])
+  })
+  s <- c(lambda[2], 0.6 * lambda[2] + 0.4 * lambda[3])
+  golden <- list(id = fx$id, kind = "formula", dataset = fx$dataset, family = "gaussian",
+                 r_formula = fx$r, rkt = I(fx$rkt), alpha = 1, thresh = 1e-7,
+                 lambda_user = lambda,
+                 term_labels = I(attr(tt, "term.labels")), intercept = intercept,
+                 factors = factors,
+                 column_names = I(colnames(x)),
+                 columns = unname(lapply(seq_len(ncol(x)), function(j) unname(x[, j]))),
+                 warnings = I(warnings),
+                 generic = generic_outputs(fit, "gaussian", x, s),
+                 meta = meta)
+  path <- file.path(goldens_dir, paste0(fx$id, ".json"))
+  writeLines(toJSON(golden, digits = NA, auto_unbox = TRUE, pretty = TRUE), path)
+  cat("wrote", path, "  (", ncol(x), "columns )\n")
+}

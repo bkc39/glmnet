@@ -1,20 +1,26 @@
 #lang racket/base
 
-;; The formula front end (#26). A formula fit is the matrix fit of the columns
-;; it selects, `equal?` to it for every family and for single fits, paths and
-;; cross-validation. The formula language selects columns by name, `all` and
-;; exclusions, and rejects unknown columns and a response used as a predictor.
-;; `coef` is keyed by name, and `predict` reads a table by name, whatever the
-;; order of its columns. The fixtures are the committed parity datasets, read
-;; as tables with the CSV's column names.
+;; The formula front end (#26, #53). A formula fit is the matrix fit of its
+;; design matrix, `equal?` to it for every family and for single fits, paths
+;; and cross-validation. The formula language is R's algebra: terms expand and
+;; order as R's terms() does, prefix and infix, and the design matrix holds
+;; their products; unknown columns are errors, and a response on the
+;; right-hand side is dropped with a warning. `coef` is keyed by name, and
+;; `predict` rebuilds the design matrix from a table, whatever the order of
+;; its columns. The fixtures are the committed parity datasets, read as tables
+;; with the CSV's column names, and mtcars. parity-test.rkt checks the algebra
+;; against R itself.
 
 (module+ test
   (require rackunit
            (only-in racket/contract exn:fail:contract:blame?)
            racket/generic
            racket/list
+           racket/match
            syntax/macro-testing
+           (for-syntax racket/base syntax/parse)
            glmnet
+           glmnet/examples/data/mtcars
            (file "../private/demo-utils.rkt"))
 
   (define longley (load-table "longley"))
@@ -39,6 +45,10 @@
 
   ;; Three fold ids per observation cycle, for cross-validation.
   (define (folds n) (for/list ([i (in-range n)]) (modulo i 3)))
+
+  ;; A contract error that blames the caller, with a message matching rx.
+  (define ((blame-matching rx) e)
+    (and (exn:fail:contract:blame? e) (regexp-match? rx (exn-message e))))
 
   ;; --- equal to the matrix fits ------------------------------------------------
 
@@ -134,6 +144,15 @@
     (check-equal? (format "~s" (~ (surv time status) all)) "(~ (surv time status) all)")
     (check-false (formula? '(~ y all))))
 
+  (test-case "an infix formula keeps its operators, and prints as the reader's form"
+    (define f (y . ~ . 1 + x + z + (* x z)))
+    (check-equal? f (~ y 1 + x + z + (* x z)))
+    (check-equal? (formula-terms f) '(1 + x + z + (* x z)))
+    (check-equal? f (make-formula 'y 1 '+ 'x '+ 'z '+ '(* x z)))
+    (check-equal? (format "~a" f) "(~ y 1 + x + z + (* x z))")
+    (check-equal? (format "~a" (~ y (x + z) ^ 2 - x : z)) "(~ y (x + z) ^ 2 - x : z)")
+    (check-equal? (format "~a" (~ y)) "(~ y)"))
+
   (define letters
     (list (cons "y" '(1 2 3)) (cons "a" '(1 0 1)) (cons "b" '(0 1 1))
           (cons "c" '(2 2 1)) (cons "d" '(5 4 3))))
@@ -172,7 +191,7 @@
     (check-exn #rx"~: [+] is a word of the formula language.*\"[+]\""
                (lambda () (convert-compile-time-error (~ + x)))))
 
-  (test-case "errors: unknown columns, the response as a predictor, nothing selected"
+  (test-case "errors: unknown columns, a response column twice"
     (define (names f) (formula-predictor-names f letters))
     (check-exn #rx"no column with this name.*column: \"z\".*formula: \\(~ y a z\\)"
                (lambda () (names (~ y a z))))
@@ -180,32 +199,358 @@
                (lambda () (names (~ y (- all z)))))
     (check-exn #rx"no column with this name.*column: \"w\""
                (lambda () (names (~ w all))))
-    (check-exn #rx"a response column is listed as a predictor.*column: \"y\""
-               (lambda () (names (~ y a y))))
-    (check-exn #rx"a response column is listed as a predictor.*column: \"b\""
-               (lambda () (names (~ (surv a b) (+ c b)))))
-    (check-exn #rx"selects no predictors" (lambda () (names (~ y (- all a b c d)))))
     (check-exn #rx"names a column twice.*column: \"a\"" (lambda () (names (~ (a a) all))))
+    (define with-colon (cons (cons "a:b" '(0 1 0)) letters))
+    (check-exn #rx"^formula-predictor-names: two columns of the formula's design matrix have the same name\n  name: \"a:b\""
+               (lambda () (formula-predictor-names (~ y "a:b" (: a b)) with-colon)))
+    (check-exn #rx"^formula-fit: two columns of the formula's design matrix have the same name"
+               (lambda () (formula-fit (~ y "a:b" (: a b)) with-colon #:lambda 0.1)))
+    (define with-intercept-name (cons (cons "(Intercept)" '(2 0 1)) letters))
+    (check-exn #rx"^formula-fit: a column of the formula's design matrix has the intercept's name\n  name: \"\\(Intercept\\)\"\n  formula: \\(~ y \"\\(Intercept\\)\" a\\)"
+               (lambda () (formula-fit (~ y "(Intercept)" a) with-intercept-name #:lambda 0.1)))
+    (check-exn #rx"^formula-predictor-names: a column of the formula's design matrix has the intercept's name"
+               (lambda () (formula-predictor-names (~ y all) with-intercept-name)))
+    (check-equal? (formula-predictor-names (~ y (: "(Intercept)" a)) with-intercept-name)
+                  '("(Intercept):a"))
     (check-exn #rx"no column with this name.*column: \"z\""
                (lambda () (formula-fit (~ y a z) letters #:lambda 0.1))))
 
-  (test-case "the formula language is checked when it is expanded"
-    (check-exn #rx"~: expected more terms" (lambda () (convert-compile-time-error (~ y))))
-    (check-exn #rx"expected one of these literal symbols"
-               (lambda () (convert-compile-time-error (~ y (* a b)))))
-    (check-exn #rx"expected more terms" (lambda () (convert-compile-time-error (~ y (- all)))))
-    (check-exn #rx"expected more terms starting with a column name"
-               (lambda () (convert-compile-time-error (~ (surv t) all))))
-    (check-exn #rx"expected a predictor term"
-               (lambda () (convert-compile-time-error (~ y 3))))
-    (check-exn exn:fail:contract? (lambda () (make-formula 'y '(* a b))))
-    (check-exn exn:fail:contract? (lambda () (make-formula 'all 'x)))
-    (check-exn exn:fail:contract? (lambda () (make-formula '(surv t) 'x)))
-    (check-exn exn:fail:contract? (lambda () (make-formula 'y))))
+  ;; --- R's algebra -------------------------------------------------------------------
 
-  ;; A contract error that blames the caller, with a message matching rx.
-  (define ((blame-matching rx) e)
-    (and (exn:fail:contract:blame? e) (regexp-match? rx (exn-message e))))
+  ;; The names formula f gives mtcars's predictors.
+  (define (mtcars-names f) (formula-predictor-names f mtcars))
+
+  ;; Each expected list is what R 4.5.3 gives for the formula's terms() on
+  ;; mtcars (the R spelling is in the comment).
+  (test-case "terms expand and order as R's terms() does"
+    ;; mpg ~ wt * hp
+    (check-equal? (mtcars-names (~ mpg (* wt hp))) '("wt" "hp" "wt:hp"))
+    ;; mpg ~ hp * wt
+    (check-equal? (mtcars-names (~ mpg (* hp wt))) '("hp" "wt" "hp:wt"))
+    ;; mpg ~ hp:wt + wt: degree first, variables in the order they appear
+    (check-equal? (mtcars-names (~ mpg (: hp wt) wt)) '("wt" "hp:wt"))
+    ;; mpg ~ wt:hp + hp:wt: one term
+    (check-equal? (mtcars-names (~ mpg (: wt hp) (: hp wt))) '("wt:hp"))
+    ;; mpg ~ (wt + hp + qsec)^2
+    (check-equal? (mtcars-names (~ mpg (^ (+ wt hp qsec) 2)))
+                  '("wt" "hp" "qsec" "wt:hp" "wt:qsec" "hp:qsec"))
+    ;; mpg ~ (wt + hp + qsec)^5: at most every variable
+    (check-equal? (mtcars-names (~ mpg (^ (+ wt hp qsec) 5)))
+                  '("wt" "hp" "qsec" "wt:hp" "wt:qsec" "hp:qsec" "wt:hp:qsec"))
+    ;; mpg ~ wt^2, mpg ~ wt:wt and mpg ~ wt*wt are all mpg ~ wt
+    (check-equal? (mtcars-names (~ mpg (^ wt 2))) '("wt"))
+    (check-equal? (mtcars-names (~ mpg (: wt wt))) '("wt"))
+    (check-equal? (mtcars-names (~ mpg (* wt wt))) '("wt"))
+    ;; mpg ~ (wt + hp) * (qsec + drat)
+    (check-equal? (mtcars-names (~ mpg (* (+ wt hp) (+ qsec drat))))
+                  '("wt" "hp" "qsec" "drat" "wt:qsec" "wt:drat" "hp:qsec" "hp:drat"))
+    ;; mpg ~ qsec * (wt + hp)
+    (check-equal? (mtcars-names (~ mpg (* qsec (+ wt hp)))) '("qsec" "wt" "hp" "qsec:wt" "qsec:hp"))
+    ;; mpg ~ wt:hp:qsec + wt + hp:wt
+    (check-equal? (mtcars-names (~ mpg (: wt hp qsec) wt (: hp wt))) '("wt" "wt:hp" "wt:hp:qsec"))
+    ;; mpg ~ .:wt
+    (check-equal? (mtcars-names (~ mpg (: all wt)))
+                  '("wt" "cyl:wt" "disp:wt" "hp:wt" "drat:wt" "wt:qsec" "wt:vs" "wt:am" "wt:gear"
+                    "wt:carb")))
+
+  (test-case "- removes terms that are equal, and ignores an absent one, as R does"
+    ;; mpg ~ wt * hp - hp
+    (check-equal? (mtcars-names (~ mpg (- (* wt hp) hp))) '("wt" "wt:hp"))
+    ;; mpg ~ wt * hp - drat
+    (check-equal? (mtcars-names (~ mpg (- (* wt hp) drat))) '("wt" "hp" "wt:hp"))
+    ;; mpg ~ wt * hp * qsec - wt:hp:qsec
+    (check-equal? (mtcars-names (~ mpg (- (* wt hp qsec) (: wt hp qsec))))
+                  '("wt" "hp" "qsec" "wt:hp" "wt:qsec" "hp:qsec"))
+    ;; mpg ~ -wt + hp
+    (check-equal? (mtcars-names (~ mpg - wt + hp)) '("hp"))
+    ;; mpg ~ wt + (hp - wt): the removal is inside the group
+    (check-equal? (mtcars-names (~ mpg wt (- hp wt))) '("wt" "hp"))
+    (check-equal? (mtcars-names (~ mpg (- wt wt))) '()))
+
+  (test-case "* with an empty left operand is empty, as R's CrossTerms makes it"
+    ;; R: mpg ~ 0*wt + hp is mpg ~ hp - 1; mpg ~ wt*0 is mpg ~ wt - 1;
+    ;; mpg ~ 1*wt*hp has no terms.
+    (check-equal? (mtcars-names (mpg . ~ . 0 * wt + hp)) '("hp"))
+    (check-equal? (mtcars-names (~ mpg (* wt 0))) '("wt"))
+    (check-equal? (mtcars-names (~ mpg (* 1 wt hp))) '())
+    (check-equal? (formula-model-fit (formula-fit (mpg . ~ . 0 * wt + hp + qsec) mtcars #:lambda 0.1))
+                  (elnet-fit (rows-of mtcars '("hp" "qsec")) (cdr (assoc "mpg" mtcars)) #:lambda 0.1
+                             #:intercept? #f)))
+
+  (test-case "infix operators take R's precedence, left to right, and mix with prefix groups"
+    (define (same? a b) (equal? (mtcars-names a) (mtcars-names b)))
+    (check-true (same? (mpg . ~ . wt * hp) (~ mpg (* wt hp))))
+    (check-true (same? (mpg . ~ . wt + hp : qsec) (~ mpg wt (: hp qsec))))
+    (check-true (same? (mpg . ~ . wt : hp * qsec) (~ mpg (* (: wt hp) qsec))))
+    (check-true (same? (mpg . ~ . (wt + hp) ^ 2) (~ mpg (^ (+ wt hp) 2))))
+    (check-true (same? (mpg . ~ . wt + hp ^ 2) (~ mpg wt hp)))
+    (check-true (same? (mpg . ~ . wt * hp - hp) (~ mpg (- (* wt hp) hp))))
+    (check-true (same? (mpg . ~ . wt - hp + hp) (~ mpg wt hp)))
+    (check-true (same? (mpg . ~ . wt + (* hp qsec) - qsec) (~ mpg wt hp (: hp qsec))))
+    (check-true (same? (~ mpg (wt + hp) : qsec) (~ mpg (: (+ wt hp) qsec))))
+    (check-true (same? (~ mpg (- 1 + wt)) (~ mpg 0 wt))))
+
+  (test-case "a symbol table's names and a formula's strings match"
+    (define symbols (for/list ([column (in-list mtcars)])
+                      (cons (string->symbol (car column)) (cdr column))))
+    (check-equal? (formula-predictor-names (~ "mpg" "wt" * hp) symbols) '("wt" "hp" "wt:hp")))
+
+  ;; The columns of a design matrix, by name.
+  (define (columns-of dm)
+    (for/hash ([name (in-list (design-matrix-column-names dm))]
+               [column (in-list (design-matrix->columns dm))])
+      (values name column)))
+
+  (test-case "an interaction column is the product of its variables' columns"
+    (define x (columns-of (formula-design-matrix (~ mpg wt * hp + (: wt hp qsec)) mtcars)))
+    (define (column name) (map exact->inexact (cdr (assoc name mtcars))))
+    (check-equal? (hash-ref x "wt") (column "wt"))
+    (check-equal? (hash-ref x "wt:hp") (map * (column "wt") (column "hp")))
+    (check-equal? (hash-ref x "wt:hp:qsec") (map * (column "wt") (column "hp") (column "qsec")))
+    (check-equal? (design-matrix-column-names (formula-design-matrix (~ mpg (* hp wt)) mtcars))
+                  '("hp" "wt" "hp:wt")))
+
+  (test-case "the design matrix is what a formula fit fits"
+    (define f (~ mpg (^ (+ wt hp qsec) 2)))
+    (define x (formula-design-matrix f mtcars))
+    (define y (cdr (assoc "mpg" mtcars)))
+    (check-same (formula-path f mtcars #:lambda '(1.0 0.1)) (elnet-path x y #:lambda '(1.0 0.1)))
+    (check-equal? (formula-model-predictor-names (formula-fit f mtcars #:lambda 0.1))
+                  (design-matrix-column-names x)))
+
+  ;; --- the intercept -------------------------------------------------------------------
+
+  (define mtcars-rows (rows-of mtcars '("wt" "hp")))
+  (define mpg (cdr (assoc "mpg" mtcars)))
+
+  (test-case "0 and - 1 fit without an intercept; 1 keeps it; the last one wins"
+    (define without (elnet-fit mtcars-rows mpg #:lambda 0.1 #:intercept? #f))
+    (define with (elnet-fit mtcars-rows mpg #:lambda 0.1))
+    (for ([f (list (~ mpg 0 wt hp) (mpg . ~ . wt + hp - 1) (mpg . ~ . - 1 + wt + hp)
+                   (~ mpg (- (+ wt hp) 1)) (mpg . ~ . 1 + wt + hp - 1) (~ mpg wt hp (- 1)))])
+      (check-same (formula-fit f mtcars #:lambda 0.1) without)
+      (check-same (formula-fit f mtcars #:lambda 0.1 #:intercept? #f) without))
+    (for ([f (list (~ mpg wt hp) (~ mpg 1 wt hp) (mpg . ~ . 0 + wt + hp + 1)
+                   (mpg . ~ . wt - 0 + hp) (~ mpg (- (+ wt hp) (+ 0 qsec))))])
+      (check-same (formula-fit f mtcars #:lambda 0.1) with))
+    (check-equal? (assoc "(Intercept)" (coef (formula-fit (~ mpg 0 wt hp) mtcars #:lambda 0.1)))
+                  '("(Intercept)" . 0.0))
+    (check-same (formula-fit (~ mpg wt hp) mtcars #:lambda 0.1 #:intercept? #f) without))
+
+  ;; R 4.5.3's attr(terms(f), "intercept"): 1 for mpg ~ wt + hp + -0, whose
+  ;; unary minus flips what 0 means, and 0 for mpg ~ wt + hp - -0, which flips
+  ;; it twice; 0 for + +0 and 1 for - +0. The reader reads -0 and +0 as 0,
+  ;; which would invert two of the four, so the message names no sign.
+  (test-case "a sign glued to 0 or 1 is a syntax error; (- 0) is R's -0, both ways"
+    (define (message-of thunk)
+      (with-handlers ([exn:fail:syntax? exn-message]) (thunk) #f))
+    (define glued-0
+      #rx"~: 0 is written with more than its digit, and the reader reads the rest away, as it does a sign glued to it, which R reads as an operator; write 0, \\(\\+ 0\\) or \\(- 0\\)\n  at: 0")
+    (check-regexp-match glued-0
+                        (message-of (lambda () (convert-compile-time-error (mpg . ~ . wt + hp + -0)))))
+    (check-regexp-match glued-0
+                        (message-of (lambda () (convert-compile-time-error (mpg . ~ . wt + hp - -0)))))
+    (check-regexp-match glued-0
+                        (message-of (lambda () (convert-compile-time-error (~ mpg wt hp -0)))))
+    (check-regexp-match glued-0
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (- (+ wt hp) +0))))))
+    (check-regexp-match glued-0
+                        (message-of (lambda () (convert-compile-time-error (mpg . ~ . wt + hp + +0)))))
+    (check-regexp-match glued-0
+                        (message-of (lambda () (convert-compile-time-error (~ mpg wt hp 00)))))
+    (define glued-1
+      #rx"~: 1 is written with more than its digit, and the reader reads the rest away, as it does a sign glued to it, which R reads as an operator; write 1, \\(\\+ 1\\) or \\(- 1\\)\n  at: 1")
+    (check-regexp-match glued-1
+                        (message-of (lambda () (convert-compile-time-error (mpg . ~ . +1 + wt + hp)))))
+    (check-regexp-match glued-1
+                        (message-of (lambda () (convert-compile-time-error (~ mpg #e1 wt hp)))))
+    (check-same (formula-fit (mpg . ~ . wt + hp + (+ 0)) mtcars #:lambda 0.1)
+                (elnet-fit mtcars-rows mpg #:lambda 0.1 #:intercept? #f))
+    (check-same (formula-fit (mpg . ~ . wt + hp - (+ 0)) mtcars #:lambda 0.1)
+                (elnet-fit mtcars-rows mpg #:lambda 0.1))
+    (define without (elnet-fit mtcars-rows mpg #:lambda 0.1 #:intercept? #f))
+    (define with (elnet-fit mtcars-rows mpg #:lambda 0.1))
+    (for ([f (list (mpg . ~ . wt + hp + (- 0)) (~ mpg wt hp (- 0)) (mpg . ~ . - 0 + wt + hp))])
+      (check-same (formula-fit f mtcars #:lambda 0.1) with))
+    (for ([f (list (mpg . ~ . wt + hp - (- 0)) (~ mpg (- (+ wt hp) (- 0))))])
+      (check-same (formula-fit f mtcars #:lambda 0.1) without)))
+
+  (define-syntax (intercept-formula stx)
+    (syntax-parse stx
+      [(_ keep?:boolean)
+       #:with n (datum->syntax #'keep? (if (syntax-e #'keep?) 1 0))
+       #'(~ mpg n wt hp)]))
+  (define-syntax (intercept-formula/borrowed stx)
+    (syntax-parse stx
+      [(_ keep?:boolean)
+       #:with n (datum->syntax #'keep? (if (syntax-e #'keep?) 1 0) #'keep?)
+       #'(~ mpg n wt hp)]))
+
+  (test-case "a 0 or 1 that a macro builds has a location of its own, or none"
+    (check-equal? (intercept-formula #f) (~ mpg 0 wt hp))
+    (check-equal? (intercept-formula #t) (~ mpg 1 wt hp))
+    (check-exn #rx"~: 0 is written with more than its digit"
+               (lambda () (convert-compile-time-error (intercept-formula/borrowed #f)))))
+
+  (test-case "an #:intercept? that contradicts the formula's 1, 0 or - 1 blames the caller"
+    (check-exn (blame-matching
+                #rx"^formula-fit: contract violation;\n the intercept\\? argument contradicts the formula's intercept\n  expected: #f, since the formula \\(~ mpg 0 wt hp\\) has no intercept\n  given: #t")
+               (lambda () (formula-fit (~ mpg 0 wt hp) mtcars #:lambda 0.1 #:intercept? #t)))
+    (check-exn (blame-matching
+                #rx"^formula-path: .*expected: #t, since the formula \\(~ mpg 1 \\+ wt\\) has an intercept term\n  given: #f")
+               (lambda () (formula-path (~ mpg 1 + wt) mtcars #:intercept? #f)))
+    (check-exn (blame-matching #rx"^formula-cv: .*in: the intercept\\? argument")
+               (lambda () (formula-cv (mpg . ~ . wt - 1) mtcars #:intercept? #t)))
+    (check-exn (blame-matching #rx"expected: boolean\\?")
+               (lambda () (formula-fit (~ mpg wt) mtcars #:lambda 0.1 #:intercept? 'yes))))
+
+  (test-case "the Cox family accepts intercept terms and ignores them"
+    (define fit (formula-fit (~ (surv time status) karno age) veteran #:family 'cox #:lambda 0.05))
+    (check-same (formula-fit (~ (surv time status) 0 karno age) veteran #:family 'cox #:lambda 0.05)
+                (formula-model-fit fit))
+    (check-same (formula-fit (~ (surv time status) 1 + karno + age) veteran #:family 'cox
+                             #:lambda 0.05 #:intercept? #f)
+                (formula-model-fit fit)))
+
+  (test-case "a formula without predictors is an error when it is fitted"
+    (check-equal? (formula-predictor-names (~ mpg 1) mtcars) '())
+    (check-equal? (formula-predictor-names (~ mpg) mtcars) '())
+    (for ([f (list (~ mpg) (~ mpg 1) (~ mpg 0) (mpg . ~ . - 1) (~ mpg (- wt wt)) (~ mpg (: 1 wt)))])
+      (check-exn #rx"^formula-fit: the formula has no predictors, and glmnet needs at least one\n  formula: "
+                 (lambda () (formula-fit f mtcars #:lambda 0.1))))
+    (check-exn #rx"^formula-cv: the formula has no predictors"
+               (lambda () (formula-cv (~ y (- all a b c d)) letters)))
+    (check-exn #rx"^formula-design-matrix: the formula has no predictors"
+               (lambda () (formula-design-matrix (~ mpg 1) mtcars))))
+
+  ;; --- the response on the right-hand side ---------------------------------------------
+
+  (define (glmnet-warnings thunk)
+    (define receiver (make-log-receiver (current-logger) 'warning 'glmnet))
+    (define result (thunk))
+    (values result
+            (let loop ()
+              (match (sync/timeout 0 receiver)
+                [#f '()]
+                [(vector _ message _ _) (cons message (loop))]))))
+
+  (test-case "a response column alone on the right-hand side is dropped with a warning, as in R"
+    (define-values (names warnings)
+      (glmnet-warnings (lambda () (mtcars-names (mpg . ~ . 1 + wt + mpg + (* wt mpg))))))
+    ;; R: mpg ~ 1 + wt + mpg + wt*mpg gives the columns wt and mpg:wt.
+    (check-equal? names '("wt" "mpg:wt"))
+    (check-equal? warnings
+                  '("glmnet: formula-predictor-names: the response column \"mpg\" appeared on the right-hand side and was dropped"))
+    (define-values (fit fit-warnings)
+      (glmnet-warnings (lambda () (formula-fit (~ mpg wt hp mpg) mtcars #:lambda 0.1))))
+    (check-equal? (formula-model-predictor-names fit) '("wt" "hp"))
+    (check-regexp-match #rx"^glmnet: formula-fit: the response column \"mpg\"" (car fit-warnings))
+    (check-same fit (elnet-fit mtcars-rows mpg #:lambda 0.1))
+    (define-values (none none-warnings) (glmnet-warnings (lambda () (mtcars-names (~ mpg all)))))
+    (check-equal? none-warnings '())
+    (check-exn #rx"formula-fit: the formula has no predictors"
+               (lambda () (formula-fit (~ mpg mpg) mtcars #:lambda 0.1))))
+
+  (test-case "every column of a Cox or multi-response response is dropped in the same way"
+    (define-values (names warnings)
+      (glmnet-warnings
+       (lambda () (formula-predictor-names (~ (surv a b) c b (: b d)) letters))))
+    (check-equal? names '("c" "b:d"))
+    (check-equal? (length warnings) 1)
+    (check-equal? (formula-predictor-names (~ (y d) a y d) letters) '("a")))
+
+  ;; --- the grammar -----------------------------------------------------------------------
+
+  (test-case "a column named after a word of the language is written as a string"
+    (define t (list (cons "all" '(1 2 3)) (cons "surv" '(3 1 2)) (cons "+" '(0 1 0))
+                    (cons "a:b" '(1 1 0))))
+    (check-equal? (formula-predictor-names (~ "all" "surv" "+") t) '("surv" "+"))
+    (check-equal? (formula-predictor-names (~ "all" all) t) '("surv" "+" "a:b"))
+    (check-equal? (formula-predictor-names (~ "all" "a:b" * "+") t) '("a:b" "+" "a:b:+"))
+    (check-exn #rx"~: all is a word of the formula language; write a column with this name as a string, \"all\""
+               (lambda () (convert-compile-time-error (~ all x))))
+    (check-exn #rx"~: surv is a word of the formula language.*\"surv\""
+               (lambda () (convert-compile-time-error (~ y a surv))))
+    (check-exn #rx"~: [+] is a word of the formula language.*\"[+]\""
+               (lambda () (convert-compile-time-error (~ + x)))))
+
+  (test-case "an operator written without spaces is a syntax error that says so"
+    (check-exn #rx"~: wt:hp reads as one name; put spaces around an operator, as in wt : hp, or write a column with this name as a string, \"wt:hp\"\n  at: wt:hp"
+               (lambda () (convert-compile-time-error (~ mpg wt:hp))))
+    (check-exn #rx"~: x\\^2 reads as one name"
+               (lambda () (convert-compile-time-error (~ y x^2))))
+    (check-exn #rx"~: a\\*b reads as one name"
+               (lambda () (convert-compile-time-error (~ y (+ c a*b)))))
+    (check-exn #rx"~: -wt reads as one name"
+               (lambda () (convert-compile-time-error (~ mpg -wt + hp))))
+    (check-equal? (formula-response (~ blood-pressure age)) 'blood-pressure))
+
+  (test-case "R's operators that the language lacks are errors that say so"
+    (check-exn #rx"~: / is an operator of R's formulas that this formula language does not have\n  at: /"
+               (lambda () (convert-compile-time-error (y . ~ . a / b))))
+    (check-exn #rx"~: %in% is an operator of R's formulas"
+               (lambda () (convert-compile-time-error (~ y (a %in% b)))))
+    (check-exn #rx"~: / is an operator"
+               (lambda () (convert-compile-time-error (~ y a /))))
+    (check-exn #rx"~: / is an operator of R's formulas that this formula language does not have\n  at: /"
+               (lambda () (convert-compile-time-error (~ y (/ a b)))))
+    (check-exn #rx"~: %in% is an operator of R's formulas that this formula language does not have\n  at: %in%"
+               (lambda () (convert-compile-time-error (~ y a (+ b (%in% a b))))))
+    (check-exn #rx"~: a/b reads as one name"
+               (lambda () (convert-compile-time-error (~ y a/b))))
+    (check-exn exn:fail:contract? (lambda () (make-formula 'y 'a '/ 'b))))
+
+  (test-case "a malformed term is an error at the form that is wrong"
+    (define (message-of thunk)
+      (with-handlers ([exn:fail:syntax? exn-message]) (thunk) #f))
+    (check-regexp-match
+     #rx"~: \\(1 x \\(sqr x\\)\\) is not a term: a group of terms starts with an operator, as \\(\\+ x z\\) does, or has operators between its terms, as \\(x \\+ z\\) does\n  at: \\(1 x \\(sqr x\\)\\)"
+     (message-of (lambda () (convert-compile-time-error (y . ~ . (+ (1 x (sqr x))))))))
+    (check-regexp-match
+     #rx"~: \\(sqr x\\) is a function call, a transform, which the formula language does not support yet\n  at: \\(sqr x\\)"
+     (message-of (lambda () (convert-compile-time-error (~ y x (sqr x))))))
+    (check-regexp-match #rx"~: \\(I \\(\\* x x\\)\\) is a function call"
+                        (message-of (lambda () (convert-compile-time-error (~ y (+ x (I (* x x))))))))
+    (check-regexp-match #rx"~: expected an infix operator \\(\\+, -, \\*, : or \\^\\) between two terms\n  at: b"
+                        (message-of (lambda () (convert-compile-time-error (~ y a b + c)))))
+    (check-regexp-match #rx"~: expected a power, an exact integer of at least 2\n  at: 1"
+                        (message-of (lambda () (convert-compile-time-error (~ y (^ (+ a b) 1))))))
+    (check-regexp-match #rx"~: expected a power.*\n  at: z"
+                        (message-of (lambda () (convert-compile-time-error (~ y x ^ z)))))
+    (check-regexp-match #rx"~: expected more terms"
+                        (message-of (lambda () (convert-compile-time-error (~ y (* a))))))
+    (check-regexp-match #rx"~: expected a term.*\n  at: \\+"
+                        (message-of (lambda () (convert-compile-time-error (~ y x * + z)))))
+    (check-regexp-match #rx"~: 3 is not a term; a formula's numbers are 1, 0 and a power after \\^\n  at: 3"
+                        (message-of (lambda () (convert-compile-time-error (~ y 3)))))
+    (check-regexp-match #rx"~: -1 is a number; to remove a term, put a space after the sign, as in - 1\n  at: -1"
+                        (message-of (lambda () (convert-compile-time-error (y . ~ . -1 + x)))))
+    (check-regexp-match #rx"~: a power cannot be raised again; R reads x \\^ 2 \\^ 3 as x \\^ \\(2 \\^ 3\\), which is not a power\n  at: \\^"
+                        (message-of (lambda () (convert-compile-time-error (y . ~ . (a + b) ^ 2 ^ 3)))))
+    (check-equal? (format "~a" (y . ~ . ((a + b) ^ 2) ^ 3)) "(~ y ((a + b) ^ 2) ^ 3)")
+    (check-regexp-match #rx"~: the right-hand side of a formula is a list of terms, and this one has a dot before hp\n  at: hp"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg wt . hp)))))
+    (check-regexp-match #rx"~: the right-hand side .* a dot before hp\n"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg wt + . hp)))))
+    (check-regexp-match #rx"~: the right-hand side .* a dot before hp\n"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg . hp)))))
+    (check-regexp-match #rx"~: expected a term.*\n  at: \\(wt \\. hp\\)"
+                        (message-of (lambda () (convert-compile-time-error (~ mpg (wt . hp))))))
+    (check-regexp-match #rx"~: expected more terms starting with a column name"
+                        (message-of (lambda () (convert-compile-time-error (~ (surv t) all))))))
+
+  (test-case "make-formula takes the same data, and its contract checks it"
+    (check-equal? (make-formula 'y '(* a b)) (~ y (* a b)))
+    (check-equal? (make-formula 'y) (~ y))
+    (check-equal? (make-formula 'y '- 1 '+ '(a + b) '^ 2) (~ y - 1 + (a + b) ^ 2))
+    (check-equal? (make-formula 'y '(- 1 + a)) (~ y (- 1 + a)))
+    (for ([bad (list '((* a)) '(a b + c) '((^ a 1)) '(a ^ b) '((sqr x)) '(a:b) '(3) '(+)
+                     '(a +) '((1 x)) '(()) '(a ^ 2 ^ 3) '(-a) '(-1 + a) '(a / b))])
+      (check-exn (blame-matching #rx"make-formula: contract violation.*expected: formula-rhs/c")
+                 (lambda () (apply make-formula 'y bad))
+                 (format "~s" bad)))
+    (check-exn exn:fail:contract? (lambda () (make-formula 'all 'x)))
+    (check-exn exn:fail:contract? (lambda () (make-formula '(surv t) 'x))))
 
   (test-case "the form of the response must suit #:family, a contract on the formula"
     (check-exn (blame-matching
@@ -370,6 +715,28 @@
     (check-equal? (predict (formula-model-fit gfit)
                            (table->design-matrix longley (take (column-names longley) 6)))
                   (predict gfit longley)))
+
+  (test-case "predict rebuilds the design matrix of the fitted terms from a new table"
+    (define f (mpg . ~ . (wt + hp + qsec) ^ 2 - wt : hp))
+    (define path (formula-path f mtcars #:lambda '(1.0 0.1)))
+    (define x (formula-design-matrix f mtcars))
+    (define expected (predict (formula-model-fit path) x #:lambda 0.3))
+    (check-equal? (predict path mtcars #:lambda 0.3) expected)
+    (check-equal? (predict path (reverse mtcars) #:lambda 0.3) expected)
+    (define needed (for/list ([name '("qsec" "hp" "wt")]) (assoc name mtcars)))
+    (check-equal? (predict path needed #:lambda 0.3) expected)
+    (check-equal? (predict path (cons (cons "name" (make-list 32 "car")) needed) #:lambda 0.3)
+                  expected)
+    (check-exn #rx"^predict: the table has no columns with these names\n  columns: '\\(\"wt\" \"qsec\"\\)"
+               (lambda () (predict path (list (assoc "hp" mtcars)))))
+    (check-exn #rx"^predict: the table has no column with this name\n  column: \"qsec\""
+               (lambda () (predict path (list (assoc "hp" mtcars) (assoc "wt" mtcars))))))
+
+  (test-case "a model fitted with all keeps the columns all stood for"
+    (define m (formula-fit (~ mpg (- all cyl)) mtcars #:lambda 0.1))
+    (define extra (cons (cons "extra" (make-list 32 1.0)) (reverse mtcars)))
+    (check-equal? (predict m extra) (predict m mtcars))
+    (check-equal? (length (formula-model-predictor-names m)) 9))
 
   ;; A model that gives its fit the predictor and response names it holds.
   (struct named (fit predictors responses)

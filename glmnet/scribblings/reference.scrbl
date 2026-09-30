@@ -281,6 +281,27 @@ that is wrong. The guide's @secref["formulas"] chapter shows tables in use.
   (eval:error (table->design-matrix patients))
   (eval:error (table->design-matrix patients '("age" "weight")))]}
 
+@subsection[#:tag "ref-mtcars"]{Example data}
+
+@defmodule[glmnet/examples/data/mtcars]
+
+The formula examples and tests use R's @tt{mtcars}, which this module
+provides. @racketmodname[glmnet] does not re-export it.
+
+@defthing[mtcars table?]{
+  R's @tt{datasets::mtcars}, from the 1974 Motor Trend road tests of 32 cars,
+  as an association list from each of R's eleven column names to its column:
+  @racket["mpg"], @racket["cyl"], @racket["disp"], @racket["hp"],
+  @racket["drat"], @racket["wt"], @racket["qsec"], @racket["vs"],
+  @racket["am"], @racket["gear"] and @racket["carb"], in R's order, with the
+  cars in R's order, from the Mazda RX4 to the Volvo 142E. Each value is the
+  shortest decimal that R reads as the same double as its own copy holds.
+
+  @examples[#:eval ev
+  (require glmnet/examples/data/mtcars)
+  (table-column-names mtcars)
+  (cdr (assoc "wt" mtcars))]}
+
 @section[#:tag "ref-gaussian"]{Gaussian models}
 
 The @tech{Gaussian family}. The four named models are @racket[elnet-fit] with a
@@ -1201,89 +1222,193 @@ carry the signal:
 @section[#:tag "ref-formula"]{Formulas}
 
 The formula front end fits any family from a @tech{table} (see
-@secref["ref-tables"]). A @tech{formula} names the response and selects the
-predictors among the table's columns; @racket[formula-fit],
-@racket[formula-path] and @racket[formula-cv] then call the fit procedure,
-path fitter or cross-validation procedure of the family that
-@racket[#:family] names, on those columns, and return a
-@racket[formula-model]. The model keeps the formula and the names of the
-predictors, so that @racket[coef] keys the coefficients by name and
-@racket[predict] reads a table by name (see @secref["ref-model"]).
-@secref["formulas"] works through examples.
+@secref["ref-tables"]). A @tech{formula} names the response and, in R's formula
+algebra, the predictor terms. @racket[formula-fit], @racket[formula-path] and
+@racket[formula-cv] expand the terms against the table, as R's @tt{terms}
+does, build their design matrix, as R's @tt{model.matrix} does, and call the
+fit procedure, path fitter or cross-validation procedure of the family that
+@racket[#:family] names on it. They return a @racket[formula-model], which
+keeps the formula, the names of the design matrix's columns and the expanded
+terms, so that @racket[coef] keys the coefficients by name and
+@racket[predict] builds the design matrix of a new table (see
+@secref["ref-model"]). @secref["formulas"] works through examples, and
+@secref["formulas-algebra"] explains the algebra.
 
-A formula selects its columns from a table as follows:
+The terms of a formula expand as R's @tt{terms} expands them:
 
 @itemlist[
- @item{The response columns must be columns of the table, and distinct.}
- @item{A column name adds that column. It must be a column of the table, and
-       must not be a response column.}
- @item{@racket[all] adds every column of the table that is not a response
-       column, in the table's order.}
- @item{@racket[(+ term ...)] adds the columns of each term in turn, and several
-       terms after the response are joined in the same way.}
- @item{@racket[(- term excluded ...)] adds the columns of @racket[term] that
-       are not columns of the @racket[excluded] terms. An excluded term may name
-       a response column.}
- @item{A column added twice counts once, where it was first added. At least
-       one column must be selected.}
+ @item{A column name is a term of one variable, that column. @racket[all]
+       is a term for each column of the table that is not a response column,
+       in the table's order, as R's @tt{.} is.}
+ @item{@racket[(+ a b)], or @racket[a + b], is the terms of @racket[a], then
+       those of @racket[b]. Terms written side by side after the response are
+       joined in the same way.}
+ @item{@racket[(- a b)], or @racket[a - b], is the terms of @racket[a] except
+       those equal to a term of @racket[b]. A term of @racket[b] that
+       @racket[a] does not have is ignored. @racket[(- a)] removes @racket[a]
+       from nothing.}
+ @item{@racket[(: a b)], or @racket[a : b], is every term of @racket[a]
+       combined with every term of @racket[b]: an interaction, whose variables
+       are those of both.}
+ @item{@racket[(* a b)], or @racket[a * b], crosses them: the terms of
+       @racket[a + b + a : b]. When @racket[a] has no terms, as @racket[1] and
+       @racket[0] have none, neither has @racket[a * b], as in R, whose
+       @tt{y ~ 0*x + z} is @tt{y ~ z - 1}.}
+ @item{@racket[(^ a n)], or @racket[a ^ n], crosses @racket[a] with itself:
+       every interaction of at most @racket[n] of the terms of @racket[a], for
+       an exact integer @racket[n] of at least 2. A variable crossed with
+       itself is itself, so @racket[(^ x 2)] is @racket[x], as @tt{x^2} is in
+       R.}
+ @item{@racket[1] keeps the intercept and @racket[0] removes it, so
+       @racket[- 1] removes it too. Inside the removed operand of @racket[-]
+       their meanings swap, and the last one written wins, as in R. A formula
+       without them has an intercept.}
 ]
 
-Names are compared as strings. A column whose name is @racket[all],
-@racket[surv], @racket[+] or @racket[-] is written as a string, such as
-@racket["all"]; written as an identifier, the name is a syntax error that
-says so.
+A term is a set of variables, so @racket[(: wt hp)] and @racket[(: hp wt)] are
+the same term. Each operation drops the terms it repeats, keeping the first.
+The terms are then ordered by degree, the main effects first and then the
+interactions of two variables, of three, and so on, each degree in the order
+the terms first appear; the variables of a term are in the order they first
+appear in the formula. The prefix forms with more operands are the infix forms
+folded from the left: @racket[(* a b c)] is @racket[a * b * c].
 
-The examples in this section use the 60 observations of
-@secref["ref-cv"] as a table, with the response @racket["y"] and the
-predictors @racket["x1"] to @racket["x8"]:
+The design matrix, which @racket[formula-design-matrix] returns, has one
+column per term: a column of the table, or for an interaction the product of
+its variables' columns, named by joining their names with colons, as R names
+them: @racket["wt:hp"]. A column of the table keeps its name, where R puts
+backticks around a name that R's syntax does not allow, such as
+@racket["blood pressure"]. It has no intercept column, since the family's
+procedure fits the intercept. Every column the formula names, even one that it
+removes, must be a column of the table, and so must the response columns, which
+must be distinct. Names are compared as strings. The design matrix's column
+names must be distinct, and none can be @racket["(Intercept)"], since
+@racket[coef] keys the coefficients by them and the intercept by
+@racket["(Intercept)"]; the formula procedures raise an error that names the
+column otherwise.
+
+A response column that stands alone as a term on the right-hand side is
+dropped from it, and a warning naming the procedure called is logged on the
+@racket['glmnet] topic, as R's @tt{model.matrix} warns. An interaction with a
+response column is kept, as in R. The columns of a @racket[(surv time status)]
+or multi-column response are each treated in the same way.
+
+The intercept of the fit is the formula's: without @racket[#:intercept?], the
+fit procedures fit an intercept unless the formula has @racket[0] or
+@racket[- 1]. An explicit @racket[#:intercept?] must agree with a formula
+that writes @racket[1], @racket[0] or @racket[- 1], which its contract checks,
+naming both; with a formula that writes none, it decides. The Cox family has
+no intercept, and accepts intercept terms and ignores them. A formula whose
+terms leave no predictors, such as @racket[(~ y 1)], cannot be fitted: glmnet
+needs at least one predictor.
+
+The examples in this section use R's @tt{mtcars}, 32 cars of the 1974 Motor
+Trend road tests, which @racketmodname[glmnet/examples/data/mtcars] provides
+as a table:
 
 @examples[#:eval ev #:label #f
-(define T60
-  (cons (cons "y" y60)
-        (for/list ([j (in-range 8)])
-          (cons (format "x~a" (add1 j))
-                (for/list ([row (in-list X60)]) (list-ref row j))))))
-(table-column-names T60)
+(require glmnet/examples/data/mtcars)
+(table-column-names mtcars)
 ]
 
-@defform[#:literals (all surv + -)
-         (~ response term ...+)
-         #:grammar
-         [(response column
-                    (surv time-column status-column)
-                    (column ...+))
-          (term column
-                all
-                (+ term ...+)
-                (- term excluded-term ...+))
-          (column identifier
-                  string)]]{
-  A @tech{formula}: the @racket[response], then the predictor terms. The body is
-  quoted, as by @racket[quote], and its shape is checked when the form is
-  expanded; the result is @racket[(make-formula 'response 'term ...)]. A
-  column is written as an identifier or a string.
+@defform*[#:literals (all surv + - * : ^)
+          [(~ response term ...)
+           (~ response maybe-sign term operation ...)]
+          #:grammar
+          [(response column
+                     (surv time-column status-column)
+                     (column ...+))
+           (term column
+                 all
+                 1
+                 0
+                 (+ term ...+)
+                 (- term ...+)
+                 (* term term ...+)
+                 (: term term ...+)
+                 (^ term power)
+                 (maybe-sign term operation ...+))
+           (operation (code:line + term)
+                      (code:line - term)
+                      (code:line * term)
+                      (code:line : term)
+                      (code:line ^ power))
+           (maybe-sign (code:line) + -)
+           (column identifier
+                   string)]]{
+  A @tech{formula}: the @racket[response], then the right-hand side, either
+  terms side by side, which are joined as by @racket[+], or terms with infix
+  operators between them. The infix operators have R's precedence: @racket[^]
+  binds tightest, then a leading sign, then @racket[:], then @racket[*], then
+  @racket[+] and @racket[-]; each groups from the left, except that a power
+  cannot be raised again, which R does not allow either. A parenthesized group
+  is a prefix form when it starts with an operator and has no operators
+  between its terms, and an infix one otherwise. A @racket[power] is an exact
+  integer of at least 2. The Racket reader's infix dots make
+  @racketfont{(y . ~ . x + z)} the same as @racket[(~ y x + z)], so a formula can
+  read as R writes it.
+
+  The body is quoted, as by @racket[quote], and the result is
+  @racket[(make-formula 'response 'rhs ...)], with the elements of the
+  right-hand side as written. A column is written as an identifier or a
+  string, and as a string when its name is a word of the formula language
+  (@racket[all], @racket[surv], the operators, and R's @tt{/} and
+  @tt{%in%}, which it does not have), starts with @litchar{-}, or contains
+  @litchar{:}, @litchar{*}, @litchar{^}, @litchar{/} or @litchar{+}. The reader
+  reads @tt{wt:hp} and @tt{-wt} as one name, so an operator needs spaces
+  around it; written as an identifier, such a name is a syntax error that says
+  so. So is a number other than @racket[0] and @racket[1]; a @racket[0] or
+  @racket[1] written with more than its digit, such as @tt{-0} or @tt{+0},
+  since the reader reads both as @racket[0] and drops the sign that R reads as
+  an operator, so that R's @tt{-0} is written @racket[(- 0)] and its @tt{+0}
+  @racket[(+ 0)]; a group headed by R's @tt{/} or @tt{%in%}; a group that is
+  neither a prefix nor an infix form, such as @racket[(1 x z)]; and a function
+  call such as @racket[(log x)], which the formula language does not support
+  yet. The error points at the form that is wrong.
+
+  Whether a @racket[0] or @racket[1] is written with more than its digit is
+  read from its source location, the only trace of its spelling. A macro that
+  builds one into a formula therefore gives it a location of its own, or none:
+  a @racket[0] made by @racket[datum->syntax] with the location of a longer
+  form, such as the @racket[#f] option it stands for, counts as written with
+  more than its digit, and is a syntax error.
 
   The response is one column, @racket[(surv time-column status-column)] for
   the Cox family, or a list of columns for the multi-response Gaussian family.
 
   @examples[#:eval ev
-  (~ y all)
-  (~ y (- all x7 x8))
+  (~ mpg (* wt hp))
+  (mpg . ~ . wt * hp)
+  (formula-predictor-names (mpg . ~ . wt * hp) mtcars)
+  (formula-predictor-names (~ mpg (^ (+ wt hp qsec) 2)) mtcars)
+  (formula-predictor-names (mpg . ~ . (wt + hp + qsec) ^ 2 - wt : hp) mtcars)
+  (formula-predictor-names (mpg . ~ . 0 + wt + hp) mtcars)
+  (formula-predictor-names (~ mpg (- all cyl disp)) mtcars)
   (~ (surv time status) age "blood pressure")
-  (formula? (~ y x1 x2))
-  (eval:error (~ y))
-  (eval:error (~ y (* x1 x2)))
-  (eval:error (~ y x1 surv))]}
+  (eval:error (~ mpg wt:hp))]}
 
 @defthing[formula-term/c flat-contract?]{
-  Accepts a predictor term as data, as @racket[~] quotes it: a column name
-  (a string, or a symbol other than @racket['all], @racket['surv], @racket['+]
-  and @racket['-]), @racket['all], a list of @racket['+] and one or more terms,
-  or a list of @racket['-] and two or more terms.
+  Accepts a term as data, as @racket[~] quotes it: a column name (a string,
+  or a symbol that @racket[~] accepts as a column name), @racket['all],
+  @racket[0], @racket[1], a prefix form, or a group of terms with infix
+  operators between them.
 
   @examples[#:eval ev
-  (formula-term/c '(- all x7))
-  (formula-term/c '(* x1 x2))]}
+  (formula-term/c '(* wt hp))
+  (formula-term/c '(wt + hp))
+  (formula-term/c '(^ (+ wt hp) 2))
+  (formula-term/c '(log wt))]}
+
+@defthing[formula-rhs/c flat-contract?]{
+  Accepts the right-hand side of a formula as data, as @racket[~] takes it: a
+  list of terms, joined as by @racket[+], or an infix sequence, a term with a
+  leading sign or with infix operators and terms after it. The empty list is
+  the right-hand side of a formula without predictors.
+
+  @examples[#:eval ev
+  (formula-rhs/c '(wt hp (: wt hp)))
+  (formula-rhs/c '(- 1 + wt * hp))
+  (formula-rhs/c '(wt hp + qsec))]}
 
 @defthing[formula-response/c flat-contract?]{
   Accepts a response as data: a column name, a list of @racket['surv] and two
@@ -1293,42 +1418,67 @@ predictors @racket["x1"] to @racket["x8"]:
   (formula-response/c '(surv time status))
   (formula-response/c '(surv time))]}
 
-@defproc[(make-formula [response formula-response/c] [term formula-term/c] ...+)
+@defproc[(make-formula [response formula-response/c] [rhs any/c] ...)
          formula?]{
-  The formula with @racket[response] and the @racket[term]s, which is what
-  @racket[~] expands to. It builds a formula from names computed at run time.
+  The formula with @racket[response] and right-hand side @racket[rhs]s, which
+  is what @racket[~] expands to. The list of the @racket[rhs]s must satisfy
+  @racket[formula-rhs/c]. It builds a formula from names or terms computed at
+  run time.
 
   @examples[#:eval ev
-  (define chosen '("x1" "x2" "x3"))
-  (apply make-formula "y" chosen)
-  (equal? (make-formula 'y '(- all x8)) (~ y (- all x8)))]}
+  (define chosen '("wt" "hp" "qsec"))
+  (apply make-formula "mpg" chosen)
+  (make-formula 'mpg `(^ (+ ,@chosen) 2))
+  (make-formula 'mpg 'wt '* 'hp)
+  (equal? (make-formula 'mpg 'wt '* 'hp) (mpg . ~ . wt * hp))]}
 
 @defproc[(formula? [v any/c]) boolean?]{
   Returns @racket[#t] if @racket[v] is a formula. Two formulas are
-  @racket[equal?] when their responses and terms are, and a formula prints as
-  the @racket[~] form that makes it.
+  @racket[equal?] when their responses and right-hand sides are, as written,
+  so @racket[(~ mpg (* wt hp))] and @racket[(~ mpg wt * hp)] are different
+  formulas with the same terms. A formula prints as the @racket[~] form that
+  makes it.
 
   @examples[#:eval ev
-  (formula? (~ y all))
-  (formula? '(~ y all))]}
+  (formula? (~ mpg all))
+  (formula? '(~ mpg all))
+  (equal? (~ mpg wt * hp) (mpg . ~ . wt * hp))]}
 
 @deftogether[(@defproc[(formula-response [f formula?]) formula-response/c]
-              @defproc[(formula-terms [f formula?]) (listof formula-term/c)])]{
-  The response and the predictor terms of @racket[f], as written.
+              @defproc[(formula-terms [f formula?]) formula-rhs/c])]{
+  The response and the right-hand side of @racket[f], as written: its terms,
+  and the infix operators between them.
 
   @examples[#:eval ev
   (formula-response (~ (surv time status) age))
-  (formula-terms (~ y x1 (- all x1 x2)))]}
+  (formula-terms (mpg . ~ . 1 + wt * hp))
+  (formula-terms (~ mpg wt (- all cyl)))]}
 
 @defproc[(formula-predictor-names [f formula?] [table table?]) (listof string?)]{
-  The names of the predictor columns that @racket[f] selects from
-  @racket[table], in the order of the model's coefficients.
+  The names of the columns of @racket[f]'s design matrix on @racket[table],
+  which are the names of the model's coefficients, in their order, as R's
+  @tt{colnames(model.matrix(f, table))} without @tt{(Intercept)}. It is empty
+  for a formula without predictors.
 
   @examples[#:eval ev
-  (formula-predictor-names (~ y all) T60)
-  (formula-predictor-names (~ y (- all x2 x4) x2) T60)
-  (eval:error (formula-predictor-names (~ y x1 x9) T60))
-  (eval:error (formula-predictor-names (~ y x1 y) T60))]}
+  (formula-predictor-names (~ mpg wt hp (: wt hp qsec)) mtcars)
+  (formula-predictor-names (mpg . ~ . wt * hp * qsec - wt : hp : qsec) mtcars)
+  (formula-predictor-names (~ mpg (: all wt)) mtcars)
+  (formula-predictor-names (~ mpg 1) mtcars)]}
+
+@defproc[(formula-design-matrix [f formula?] [table table?]) design-matrix?]{
+  The design matrix of @racket[f] on @racket[table], with one named column per
+  predictor, which is what the formula procedures fit: R's
+  @tt{model.matrix(f, table)} without its @tt{(Intercept)} column. The
+  formula must have at least one predictor. The name is not
+  @racketidfont{formula-model-matrix}, which would read as an accessor of a
+  @racket[formula-model].
+
+  @examples[#:eval ev
+  (define X (formula-design-matrix (~ mpg (* wt hp)) mtcars))
+  X
+  (design-matrix-column-names X)
+  (design-matrix->rows (design-matrix-select-rows X '(0 1 2)))]}
 
 @defstruct*[formula-model ([formula formula?]
                            [predictor-names (listof string?)]
@@ -1337,26 +1487,31 @@ predictors @racket["x1"] to @racket["x8"]:
             #:omit-constructor]{
   A model fitted from a formula. @racket[fit] is the result of the family's
   procedure: a single fit, a @racket[glmnet-path] or a @racket[glmnet-cv].
-  @racket[predictor-names] names its predictors, in the order of its
-  coefficients. Only @racket[formula-fit], @racket[formula-path] and
-  @racket[formula-cv] make a formula model, since only they know that its
-  names are those of the columns its fit was fitted to; the constructor is not
-  exported.
+  @racket[predictor-names] names its predictors, the columns of the design
+  matrix, in the order of its coefficients. Only @racket[formula-fit],
+  @racket[formula-path] and @racket[formula-cv] make a formula model, since
+  only they know that its names are those of the columns its fit was fitted
+  to; the constructor is not exported. The model also keeps the terms it was
+  fitted with, expanded, which are internal.
 
   A formula model implements @racket[gen:glmnet-model] through @racket[fit]:
   @racket[predict], @racket[coef] and @racket[deviance-ratio] give what they
   give for @racket[fit], except that @racket[coef] keys the coefficients by
-  name and @racket[predict] reads the predictors from a table by name.
+  name and @racket[predict] takes a table, from whose columns it builds the
+  design matrix of the fitted terms. It does not expand the formula again, so
+  @racket[all] stands for the columns it stood for in the fit, and the new
+  table's columns can come in any order.
   @racket[glmnet-model-predictor-names] returns @racket[predictor-names], and
   @racket[glmnet-model-response-names] the formula's response columns. A
   formula model prints as @racket[fit] does, with the formula after the
   family.
 
   @examples[#:eval ev
-  (define m (formula-fit (~ y all) T60 #:lambda 0.2))
+  (define m (formula-fit (mpg . ~ . wt * hp) mtcars #:lambda 0.1))
   m
   (formula-model-predictor-names m)
-  (formula-model-fit m)]}
+  (formula-model-fit m)
+  (predict m (list (cons "hp" '(100 200)) (cons "wt" '(2.5 3.5))))]}
 
 @defproc[(formula-fit [f formula?]
                       [table table?]
@@ -1366,15 +1521,17 @@ predictors @racket["x1"] to @racket["x8"]:
                                 'gaussian]
                       [#:alpha alpha (real-in 0 1) 1.0]
                       [#:standardize? standardize? boolean? #t]
-                      [#:intercept? intercept? boolean? #t]
+                      [#:intercept? intercept? boolean? @#,elem{the formula's}]
                       [#:thresh thresh (>/c 0) 1e-7]
                       [#:max-iters max-iters exact-positive-integer? 100000])
          formula-model?]{
   Fits @racket[f] to @racket[table] at a single @math{λ}, with the fit
   procedure of @racket[family]: @racket[elnet-fit], @racket[logistic-fit],
   @racket[multinomial-fit], @racket[poisson-fit], @racket[cox-fit] or
-  @racket[mgaussian-fit]. The keywords are passed on to it; the Cox family has
-  no intercept, so @racket[intercept?] does not apply to it.
+  @racket[mgaussian-fit], on the design matrix of @racket[f]. The keywords are
+  passed on to it. @racket[intercept?] defaults to the formula's intercept and
+  must agree with a formula's @racket[1], @racket[0] or @racket[- 1]; the Cox
+  family has no intercept, so it does not apply to it.
 
   The response of @racket[f] must suit @racket[family], which the contract on
   @racket[f] checks: @racket[(surv time status)] for the Cox family, one or
@@ -1384,28 +1541,15 @@ predictors @racket["x1"] to @racket["x8"]:
   multinomial family, non-negative for the Poisson family, and for the Cox
   family positive times and 0/1 statuses. An error names the column, and
   either the row of a value the family does not model or the missing class
-  label.
-  An error that the family's procedure raises names @racket[formula-fit].
+  label. An error that the family's procedure raises names
+  @racket[formula-fit].
 
   @examples[#:eval ev
-  (define fit (formula-fit (~ y all) T60 #:lambda 0.2 #:alpha 0.5))
+  (define fit (formula-fit (mpg . ~ . wt * hp) mtcars #:lambda 0.1))
   (coef fit)
-  (define new-row
-    (for/list ([j (in-range 1 9)])
-      (cons (format "x~a" j) '(0.5))))
-  (predict fit new-row)
-  (define T60b
-    (cons (cons "positive" (for/list ([v (in-list y60)]) (if (> v 1) 1 0)))
-          T60))
-  (formula-fit (~ positive (- all y)) T60b
-               #:family 'binomial #:lambda 0.05)
-  (eval:error (formula-fit (~ y all) T60 #:family 'binomial #:lambda 0.05))
-  (eval:error (formula-fit (~ y all) T60 #:family 'cox #:lambda 0.05))
-  (define T60c
-    (cons (cons "class" (for/list ([v (in-list y60)]) (if (> v 1) 2 0)))
-          T60))
-  (eval:error (formula-fit (~ class (- all y)) T60c
-                           #:family 'multinomial #:lambda 0.05))]}
+  (coef (formula-fit (mpg . ~ . 0 + wt * hp) mtcars #:lambda 0.1))
+  (formula-fit (am . ~ . wt + hp) mtcars #:family 'binomial #:lambda 0.05)
+  (eval:error (formula-fit (~ mpg 1) mtcars #:lambda 0.1))]}
 
 @defproc[(formula-path [f formula?]
                        [table table?]
@@ -1417,18 +1561,19 @@ predictors @racket["x1"] to @racket["x8"]:
                        [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>=/c 0) (</c 1))) #f]
                        [#:alpha alpha (real-in 0 1) 1.0]
                        [#:standardize? standardize? boolean? #t]
-                       [#:intercept? intercept? boolean? #t]
+                       [#:intercept? intercept? boolean? @#,elem{the formula's}]
                        [#:thresh thresh (>/c 0) 1e-7]
                        [#:max-iters max-iters exact-positive-integer? 100000])
          formula-model?]{
   Fits the @tech{regularization path} of @racket[f] on @racket[table], with the
   path fitter of @racket[family], such as @racket[elnet-path], to which the
-  keywords are passed. The response is as for @racket[formula-fit], and an
-  error that the path fitter raises names @racket[formula-path].
+  keywords are passed. The response and the intercept are as for
+  @racket[formula-fit], and an error that the path fitter raises names
+  @racket[formula-path].
 
   @examples[#:eval ev
   (define path
-    (formula-path (~ y x1 x2 x3) T60 #:lambda '(1.0 0.1 0.01)))
+    (formula-path (~ mpg (^ (+ wt hp qsec) 2)) mtcars #:lambda '(1.0 0.5 0.1)))
   path
   (coef path #:lambda 0.1)]}
 
@@ -1446,7 +1591,7 @@ predictors @racket["x1"] to @racket["x8"]:
                      [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>=/c 0) (</c 1))) #f]
                      [#:alpha alpha (real-in 0 1) 1.0]
                      [#:standardize? standardize? boolean? #t]
-                     [#:intercept? intercept? boolean? #t]
+                     [#:intercept? intercept? boolean? @#,elem{the formula's}]
                      [#:thresh thresh (>/c 0) 1e-7]
                      [#:max-iters max-iters exact-positive-integer? 100000])
          formula-model?]{
@@ -1455,15 +1600,15 @@ predictors @racket["x1"] to @racket["x8"]:
   which the keywords are passed. @racket[type-measure] must be one of the
   family's measures (see @secref["ref-cv"]), which the contract on it checks;
   @racket[#f], the default, is the family's default. @racket[fold-ids] needs
-  one entry per row of @racket[table]. The response is as for
-  @racket[formula-fit], and an error that the cross-validation procedure
+  one entry per row of @racket[table]. The response and the intercept are as
+  for @racket[formula-fit], and an error that the cross-validation procedure
   raises names @racket[formula-cv].
 
   @examples[#:eval ev
-  (define cv-model (formula-cv (~ y all) T60 #:nfolds 5))
+  (define folds (for/list ([i (in-range 32)]) (modulo i 4)))
+  (define cv-model (formula-cv (mpg . ~ . wt * hp) mtcars #:fold-ids folds))
   cv-model
-  (coef cv-model)
-  (eval:error (formula-cv (~ y all) T60 #:type-measure 'auc))]}
+  (coef cv-model)]}
 
 @section[#:tag "ref-model"]{Generic model interface}
 
@@ -1499,7 +1644,8 @@ as R's @tt{s} accepts @tt{"lambda.min"} and @tt{"lambda.1se"}.
 A model can also name its predictors, as a @racket[formula-model] does. Then
 @racket[coef] keys its coefficients by name, as R's @tt{coef} names its rows,
 and @racket[predict] takes a @tech{table} and reads the predictors from it by
-name.
+name, or, for a formula model, builds them from the table's columns, as its
+formula's terms say.
 
 @racket[predict], @racket[coef] and @racket[glmnet-model-default-lambda] need
 a model with at least one fitted @math{λ}. A @racket[glmnet-path] built by
@@ -1604,9 +1750,11 @@ family:
   or @racket[#f] if it does not name them. A @racket[formula-model] names them;
   the results of the family procedures do not. When a model names its
   predictors, @racket[coef] keys its coefficients by these names and
-  @racket[predict] reads the columns with these names from a table. The names
-  must be distinct, one per predictor of the model's path; @racket[coef] and
-  @racket[predict] raise an error for a model whose names are not.
+  @racket[predict] reads the columns with these names from a table, except
+  that a formula model builds its predictors, such as the interaction
+  @racket["a:b"], from the table's columns. The names must be distinct, one
+  per predictor of the model's path; @racket[coef] and @racket[predict] raise
+  an error for a model whose names are not.
 
   @examples[#:eval ev
   (define named-model
@@ -1651,7 +1799,10 @@ family:
   coefficient, in the order of the coefficients. For a model that names its
   predictors (see @racket[glmnet-model-predictor-names]), @racket[X] is instead
   a @tech{table} with a column of each of those names, in any order; its other
-  columns are ignored, and a missing one is an error that names it. A model
+  columns are ignored, and a missing one is an error that names it. For a
+  @racket[formula-model], the table needs the columns that the formula's terms
+  read, from which @racket[predict] builds the design matrix as
+  @racket[formula-design-matrix] does; an error names the missing ones. A model
   that does not name its predictors reads @racket[X] by position, and so does
   not take an association list or a hash. @racket[type] chooses what is
   predicted:

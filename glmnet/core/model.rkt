@@ -82,7 +82,16 @@
 (module* support #f
   (provide single-fit-path
            write-fit
-           predict-as))
+           predict-as
+           prop:predictor-matrix))
+
+;; How a model that names its predictors builds their design matrix from a
+;; table for `predict`: a procedure of the model, the table and the name of the
+;; procedure called. A formula model (#53) has it, since its predictors, such
+;; as the interaction "x:z", are computed from the table's columns. Without it,
+;; `predict` reads the columns with the predictors' names.
+(define-values (prop:predictor-matrix predictor-matrix? predictor-matrix-ref)
+  (make-struct-type-property 'predictor-matrix))
 
 ;; --- single fits -------------------------------------------------------------
 
@@ -308,9 +317,9 @@
           (transform (linear-predictor x i a0 beta))))))
 
 ;; The new data X as a design matrix with one column per predictor of the
-;; model's path p: for a model with named predictors, the columns of the table
-;; X with those names, in the model's order; otherwise X itself, column for
-;; column.
+;; model's path p: for a model with named predictors, the design matrix that
+;; the model builds from the table X, or the columns of X with those names, in
+;; the model's order; otherwise X itself, column for column.
 (define (model-matrix who model X p)
   (define names (model-predictor-names who model p))
   (cond
@@ -318,7 +327,9 @@
      (unless (table? X)
        (raise-arguments-error who "the model's predictors are named, so X must be a table"
                               "predictors" names "X" X))
-     (select-table-columns X names who)]
+     (if (predictor-matrix? model)
+         ((predictor-matrix-ref model) model X who)
+         (select-table-columns X names who))]
     [(and (table? X) (not (design-matrix? X)))
      (raise-arguments-error who "the model's predictors are not named, so X must be a design matrix"
                             "X" X)]

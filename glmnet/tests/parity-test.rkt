@@ -13,7 +13,10 @@
 ;; "cv", #27) hold R's cv.glmnet on fold ids recorded in the golden. Every
 ;; fixture is also fitted through the formula front end (#26), from the
 ;; dataset as a table with the CSV's column names, and its name-keyed `coef`
-;; checked against R's coef, names and values.
+;; checked against R's coef, names and values. Formula goldens (kind
+;; "formula", #53) hold R's terms() and model.matrix() for a formula on mtcars
+;; or longley and glmnet fitted on that matrix; each Racket spelling of the
+;; formula must expand to R's terms, build R's matrix and fit R's path.
 ;;
 ;; Goldens are generated on demand, never committed: the Nix `checks.parity` gate
 ;; regenerates them with the pinned R glmnet and points GLMNET_PARITY_GOLDENS at
@@ -29,6 +32,10 @@
            racket/match
            racket/runtime-path
            glmnet
+           glmnet/examples/data/mtcars
+           (only-in (file "../core/terms.rkt")
+                    expand-terms model-terms-labels model-terms-intercept? model-terms-terms
+                    model-terms-codings term-variables variable-label)
            (file "../private/demo-utils.rkt"))
 
   (define-runtime-path committed-goldens "../../scripts/r-parity/goldens")
@@ -306,6 +313,71 @@
       (check-named-coef (list (coef fcv #:lambda 'lambda-min)) (list (hash-ref g 'coef_min))
                         (hash-ref g 'coef_names) ctol)))
 
+  ;; This module's namespace, in which `~` expands the formula goldens' Racket
+  ;; sources to formulas of this module's instance of glmnet.
+  (define-namespace-anchor anchor)
+  (define formula-namespace (namespace-anchor->namespace anchor))
+
+  ;; The messages that `thunk` logs at level warning on the glmnet topic, and
+  ;; its value.
+  (define (glmnet-warnings thunk)
+    (define receiver (make-log-receiver (current-logger) 'warning 'glmnet))
+    (define result (thunk))
+    (values result
+            (let loop ()
+              (match (sync/timeout 0 receiver)
+                [#f '()]
+                [(vector _ message _ _) (cons message (loop))]))))
+
+  ;; The formula algebra (#53): for each Racket spelling of the golden's
+  ;; formula, `~` and make-formula agree; the expansion has R's term labels,
+  ;; intercept and factors; formula-design-matrix is R's model.matrix without
+  ;; its intercept column, names and values, and warns where R does; and the
+  ;; path fitted from the formula is R's glmnet on that matrix.
+  (define (run-formula-golden g)
+    (define id     (hash-ref g 'id))
+    (define tols   (hash-ref (hash-ref g 'meta) 'tolerances))
+    (define gen    (hash-ref g 'generic))
+    (define table
+      (match (hash-ref g 'dataset)
+        ["mtcars" mtcars]
+        [name (load-table name)]))
+    (define response-dropped?
+      (member "the response appeared on the right-hand side and was dropped"
+              (hash-ref g 'warnings)))
+    (for ([source (in-list (hash-ref g 'rkt))])
+      (test-case (format "~a ~a" id source)
+        (define datum (read (open-input-string source)))
+        (define f (apply make-formula (cdr datum)))
+        (check-equal? (eval datum formula-namespace) f "~ and make-formula")
+        (define mt (expand-terms (formula-terms f) (list (format "~a" (formula-response f)))
+                                 (table-column-names table)))
+        (check-equal? (model-terms-labels mt) (hash-ref g 'term_labels) "term labels")
+        (check-equal? (model-terms-intercept? mt) (hash-ref g 'intercept) "intercept")
+        (check-equal? (for/list ([term (in-list (model-terms-terms mt))]
+                                 [coding (in-list (model-terms-codings mt))])
+                        (for/hasheq ([v (in-list (term-variables mt term))] [c (in-list coding)])
+                          (values (string->symbol (variable-label v)) c)))
+                      (hash-ref g 'factors)
+                      "factors")
+        (define-values (dm warnings)
+          (glmnet-warnings (lambda () (formula-design-matrix f table))))
+        (check-equal? (design-matrix-column-names dm) (hash-ref g 'column_names) "column names")
+        (check-equal? (formula-predictor-names f table) (hash-ref g 'column_names))
+        (check-mat-close (design-matrix->columns dm) (hash-ref g 'columns) 1e-12 "design matrix")
+        (check-equal? (and (pair? warnings) #t) (and response-dropped? #t)
+                      (format "a warning where R warns: ~s" warnings))
+        (when response-dropped?
+          (check-regexp-match #rx"^glmnet: formula-design-matrix: the response column \"[^\"]+\" appeared on the right-hand side and was dropped$"
+                              (car warnings)))
+        (define fp (formula-path f table #:lambda (hash-ref g 'lambda_user)
+                                 #:alpha (hash-ref g 'alpha) #:thresh (hash-ref g 'thresh)))
+        (check-named-coef (coef fp #:lambda (hash-ref gen 's)) (hash-ref gen 'coef_s)
+                          (hash-ref gen 'coef_names) (hash-ref tols 'coef))
+        (check-nested-close (predict fp table #:lambda (hash-ref gen 's))
+                            (hash-ref (hash-ref gen 'predict_s) 'link) (hash-ref tols 'pred)
+                            "formula predict"))))
+
   (define (run-golden g)
     (define id     (hash-ref g 'id))
     (define family (hash-ref g 'family))
@@ -432,6 +504,7 @@
          [("path")    (run-path-golden g)]
          [("predict") (run-predict-golden g)]
          [("cv")      (run-cv-golden g)]
+         [("formula") (run-formula-golden g)]
          [else        (run-golden g)]))]
     [explicit-goldens?
      ;; The CI gate sets GLMNET_PARITY_GOLDENS; an empty dir there means R
