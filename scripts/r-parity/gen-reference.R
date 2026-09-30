@@ -842,7 +842,10 @@ for (name in names(frames)) {
 ## --- CSV cells (#61) ----------------------------------------------------------
 ## glmnet/data/csv types each cell as R's read.csv types a column that holds
 ## only that cell. Each token below, as a bare cell and in quotes, and how R
-## reads it: its class, and its value, a number as C's %a.
+## reads it: its class, and its value, a number as C's %a. The tokens test
+## types, not rounding: no decimal has more digits than R_strtod reads
+## exactly, since beyond that its result depends on the platform's long double
+## (macOS's R reads 123456789012345678901234567890 one double away from Linux's).
 
 csv_cell_tokens <- c(
   "T", "F", "TRUE", "FALSE", "true", "false", "True", "False", "t", " TRUE", "TRUE ", "\tT",
@@ -856,7 +859,7 @@ csv_cell_tokens <- c(
   "1", "-1", "+1", "1.", ".5", ".", "-.", "+", "-", "1e5", "1E5", "1e", "1e+", "1e-", "1e+5",
   "1.e5", ".e5", "1 ", " 1", " 1 ", "\t1\t", "\f1", "1\v", "1 2", "1_000", "1/2", "1d5", "#e1.5",
   "1e999", "-1e999", "1e-400", "1e99999999", "0e99999", "00012", "-0", "-0.0", "+.5e-3",
-  "1.5.2", "--1", "+-1", "1e5.5", "0.1", "2.5", "-300", "123456789012345678901234567890",
+  "1.5.2", "--1", "+-1", "1e5.5", "0.1", "2.5", "-300", "1234567890123456",
   "4.9e-324", "1 ", " 1", "1 ",
   "x", "a b", "é", "TRUE1", "1TRUE", "1L", "0b1", "1i", "", "  ")
 

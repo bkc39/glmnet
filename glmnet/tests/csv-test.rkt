@@ -44,6 +44,14 @@
     (check-equal? (read-csv "n\nNAN\nInfin\n0x1p\n0xg\n")
                   '(("n" . #("NAN" "Infin" "0x1p" "0xg")))))
 
+  (test-case "a decimal is read correctly rounded, however long it is"
+    (for ([text (in-list '("123456789012345678901234567890" "0.30000000000000004"
+                           "2.4703282292062328e-324" "1.7976931348623158e308"
+                           "0.1000000000000000055511151231257827021181583404541015625"))])
+      (check-eqv? (vector-ref (cdr (car (read-csv (string-append "x\n" text "\n")))) 0)
+                  (real->double-flonum (string->number text 10 'number-or-false 'decimal-as-exact))
+                  text)))
+
   (test-case "T, F, TRUE and FALSE are logicals, and no other spelling"
     (check-equal? (read-csv "b\nT\nF\nTRUE\nFALSE\ntrue\nFalse\n")
                   '(("b" . #(#t #f #t #f "true" "False")))))
