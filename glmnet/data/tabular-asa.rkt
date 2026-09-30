@@ -11,7 +11,7 @@
          (prefix-in asa: tabular-asa)
          "../data.rkt"
          (only-in (submod "../data.rkt" support)
-                  design-matrix-data column-name->string select-table-values
+                  design-matrix-data column-name->string table-names select-table-values
                   flvectors->design-matrix))
 
 (provide
@@ -34,7 +34,7 @@
         [result asa:table?])]
   [table->tabular-asa
    (->i ([t table?])
-        ([columns (t) (column-list-of/c (table-column-names t))])
+        ([columns (t) (column-list-of/c (table-names t 'table->tabular-asa))])
         [result asa:table?])]))
 
 ;; --- contracts -----------------------------------------------------------------
@@ -162,9 +162,9 @@
     (element->flonum x name i who)
     x))
 
-(define (tabular-asa->table df [columns (tabular-asa-names df)])
+(define (tabular-asa->table df [columns (asa:table-header df)])
   (define who 'tabular-asa->table)
-  (define names (map column-name->string columns))
+  (define names (map table-name->string columns))
   (define index (asa:table-index df))
   (for/list ([data (in-list (column-data df names who))]
              [name (in-list names)])
@@ -177,7 +177,6 @@
 (define (name->symbol name)
   (if (symbol? name) name (string->symbol name)))
 
-;; R's as.data.frame names the columns of a matrix without names V1, V2, ...
 (define (default-column-names dm)
   (or (design-matrix-column-names dm)
       (for/list ([j (in-range (design-matrix-ncols dm))])
@@ -194,7 +193,7 @@
                      (for/vector #:length no ([i (in-range no)])
                        (f64vector-ref v (+ start i)))))))
 
-(define (table->tabular-asa t [columns (table-column-names t)])
+(define (table->tabular-asa t [columns (table-names t 'table->tabular-asa)])
   (define who 'table->tabular-asa)
   (define names (map column-name->string columns))
   (cond

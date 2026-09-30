@@ -69,10 +69,12 @@
           # output is the same on every platform, and the package cache, the
           # one part that is not reproducible, is dropped. When the catalog's
           # versions of these packages change, so does the hash: build
-          # .#racket and take the hash that Nix reports.
+          # .#racket and take the hash that Nix reports. The output is a tree
+          # for one version of Racket, so that version is in the name, and a
+          # new Racket builds it afresh instead of reusing an old tree.
           catalogDeps = pkgs.stdenvNoCC.mkDerivation {
             pname = "glmnet-catalog-deps";
-            version = "tabular-asa-0.4.5";
+            version = "tabular-asa-0.4.5-racket-${pkgs.racket.version}";
             dontUnpack = true;
             nativeBuildInputs = [ pkgs.racket pkgs.cacert ];
             buildCommand = ''

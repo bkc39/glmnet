@@ -343,11 +343,13 @@ manual gives tabular-asa's bindings the prefix @racketidfont{asa:}, as
 
 A tabular-asa table holds each column as a vector, and its index selects and
 orders the rows. Every conversion reads the rows in the index's order, so a
-filtered, sorted or reversed table converts as it prints, and the row an error
-names is the table's row, counting from 0. The table must have at least one
+filtered, sorted or reversed table converts in the order it prints. The row
+that an error names is the row's position in that order, counting from 0, as
+@racket[asa:table-row] counts, and not the index label that
+@racket[asa:display-table] prints beside it. The table must have at least one
 row and one column, which is what @racket[(not/c asa:table-empty?)] requires.
 Column names are compared as strings, so @racket['x] and @racket["x"] name the
-same column.
+same column, and a table with two columns of the same name is an error.
 
 tabular-asa writes a missing value as @racket[#f], and its CSV reader reads an
 empty cell, @racket["na"] and a few other spellings as one. A missing value in

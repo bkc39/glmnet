@@ -147,9 +147,13 @@
                  #rx"column: \"a\"" #rx"row: 1")
     (check-equal? (tabular-asa->table na '(c)) (list (cons "c" #("x" "y" "z")))))
 
-  (test-case "the row is the row of the table, not the position in its data"
-    (check-error (lambda () (tabular-asa->design-matrix (asa:table-reverse na) '(a)))
-                 #rx"column: \"a\"" #rx"row: 1")
+  (test-case "the row is the position in the table's order, not in its data"
+    (define first-missing (asa:table-read/csv (open-input-string "a,b\nna,x\n2,y\n3,z\n")))
+    (define reversed (asa:table-reverse first-missing))
+    (check-error (lambda () (tabular-asa->design-matrix reversed '(a)))
+                 #rx"column: \"a\"" #rx"row: 2")
+    (check-error (lambda () (tabular-asa->response reversed 'a)) #rx"row: 2")
+    (check-error (lambda () (tabular-asa->table reversed)) #rx"row: 2")
     (check-error (lambda () (tabular-asa->design-matrix (asa:table-tail na 2) '(a)))
                  #rx"row: 0"))
 
@@ -200,10 +204,20 @@
                  #rx"no column named \"speed\"")
     (check-blame (lambda () (table->tabular-asa '((1 2)))) #rx"table\\?"))
 
-  (test-case "two columns of the same name are an error"
+  (test-case "two columns of the same name are an error, naming the procedure called"
     (define twice (asa:table #(0) (list (cons 'a #(1)) (cons "a" #(2)))))
     (check-error (lambda () (tabular-asa->design-matrix twice '(a)))
-                 #rx"two columns with the same name"))
+                 #rx"^tabular-asa->design-matrix: the table has two columns with the same name")
+    (check-error (lambda () (tabular-asa->table twice))
+                 #rx"^tabular-asa->table: the table has two columns with the same name")
+    (check-error (lambda () (table->tabular-asa (list (cons "a" '(1 2)) (cons 'a '(3 4)))))
+                 #rx"^table->tabular-asa: the table has two columns with the same name")
+    (check-error (lambda () (table->tabular-asa (hash "a" '(1) 'a '(2)) '(a)))
+                 #rx"^table->tabular-asa: the table has two columns with the same name"))
+
+  (test-case "a column named by neither a string nor a symbol converts by default"
+    (define numbered (asa:table-read/columns '((1 2) (3 4)) '(1 b)))
+    (check-equal? (tabular-asa->table numbered) (list (cons "1" #(1 2)) (cons "b" #(3 4)))))
 
   ;; --- the same fits as the list path --------------------------------------------------
 
@@ -312,6 +326,21 @@
     (check-equal? (predict model (tabular-asa->table (asa:table-head cars 3)) #:type 'response)
                   (predict model (for/list ([c (in-list mtcars)]) (cons (car c) (take (cdr c) 3)))
                            #:type 'response)))
+
+  (test-case "every family's formula fit is the same through tabular-asa as through the list"
+    (define (same fit df name)
+      (check-equal? (fit (tabular-asa->table df)) (fit (load-table name))))
+    (same (lambda (t) (formula-fit (~ Employed all) t #:lambda 0.1)) longley "longley")
+    (same (lambda (t) (formula-fit (~ diagnosis all) t #:family 'binomial #:lambda 0.02))
+          wdbc "wdbc")
+    (same (lambda (t) (formula-fit (~ class all) t #:family 'multinomial #:lambda 0.01))
+          iris "iris")
+    (same (lambda (t) (formula-fit (~ (surv time status) all) t #:family 'cox #:lambda 0.05))
+          veteran "veteran")
+    (same (lambda (t) (formula-fit (~ breaks all) t #:family 'poisson #:lambda 0.1))
+          warpbreaks "warpbreaks")
+    (same (lambda (t) (formula-fit (~ (weight waist pulse) all) t #:family 'mgaussian #:lambda 1.0))
+          linnerud "linnerud"))
 
   (test-case "string columns are factors"
     (define flowers (table->tabular-asa iris-species))
