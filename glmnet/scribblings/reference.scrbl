@@ -1461,29 +1461,30 @@ Trend road tests, and R's @tt{iris}, 150 irises of three species, which
   is a prefix form when it starts with an operator and has no operators
   between its terms, a factor when it starts with @racket[factor], a
   transform when it starts with @racket[I] or another identifier that is not
-  a word of the formula language, and an infix one otherwise. A @racket[power] is an exact integer of at least 2. The Racket
-  reader's infix dots make @racketfont{(y . ~ . x + z)} the same as
-  @racket[(~ y x + z)], so a formula can read as R writes it.
+  a word of the formula language, and an infix one otherwise. A
+  @racket[power] is an exact integer of at least 2. The Racket reader's infix
+  dots make @racketfont{(y . ~ . x + z)} the same as @racket[(~ y x + z)], so
+  a formula can read as R writes it.
 
   The body is quoted, as by @racket[quote], except for its transforms, and the
   result is @racket[(make-formula 'response rhs ...)], with the elements of the
   right-hand side as written. Each transform becomes a
   @racket[transform-term?] value that computes it, whose name is its source,
-  the datum as @racket[write] writes it with @racket[print-reader-abbreviations]
-  on, so that quoted data is written @racket['x] and not
-  @racketfont{(quote x)}. A transform's
-  @racket[proc-id] must be bound where the formula is written: in a module,
-  anywhere in it; at the top level, as in the REPL, by a definition evaluated
-  before the formula, since a later one cannot be seen there. A name in
-  argument position is read when the transform runs, so at the top level it
-  can be defined after the formula. An @racket[arg-expr] or the @racket[expr]
-  of @racket[I] is any Racket expression, checked as it is expanded, where
-  the names bound in it are known: @racket[^], R's power, is a syntax error
-  that says to write @racket[expt] unless it is bound, and so is R's infix
+  the datum as @racket[write] writes it with
+  @racket[print-reader-abbreviations] on, so that quoted data is written
+  @racket['x] and not @racketfont{(quote x)}. A transform's @racket[proc-id]
+  must be bound where the formula is written: in a module, anywhere in it; at
+  the top level, as in the REPL, by a definition evaluated before the
+  formula, since a later one cannot be seen there. A name in argument
+  position is read when the transform runs, so at the top level it can be
+  defined after the formula. An @racket[arg-expr] or the @racket[expr] of
+  @racket[I] is any Racket expression, checked as it is expanded, where the
+  names bound in it are known: @racket[^], R's power, is a syntax error that
+  says to write @racket[expt] unless it is bound, and so is R's infix
   arithmetic, such as @racket[(hp * wt)], whose first name is not bound,
-  which says to write @racket[(* hp wt)]. A column is
-  written as an identifier or a string, and as a string when its name is a
-  word of the formula language (@racket[all], @racket[surv], the operators,
+  which says to write @racket[(* hp wt)]. A column is written as an
+  identifier or a string, and as a string when its name is a word of the
+  formula language (@racket[all], @racket[surv], the operators,
   and R's @tt{/} and @tt{%in%}, which it does not have), starts with
   @litchar{-}, or contains @litchar{:}, @litchar{*}, @litchar{^}, @litchar{/}
   or @litchar{+}. The reader reads @tt{wt:hp} and @tt{-wt} as one name, so an
