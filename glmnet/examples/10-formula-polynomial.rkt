@@ -3,7 +3,7 @@
 @(require (for-label racket/base
                      racket/math
                      glmnet
-                     glmnet/examples/data/mtcars))
+                     glmnet/datasets))
 
 @section[#:tag "ex-formula-polynomial"]{Formula transforms}
 
@@ -22,13 +22,13 @@ A transform can be any function: R's @tt{mpg ~ log(hp) + wt}, the logarithm of
 horsepower and the weight, is @racketfont{(mpg . ~ . (log hp) + wt)}.
 
 The data are R's @tt{mtcars}, which
-@racketmodname[glmnet/examples/data/mtcars] provides as a table.
+@racketmodname[glmnet/datasets] provides as a table.
 @racket[sqr] is @racketmodname[racket/math]'s.
 
 @chunk[<require>
 (require racket/math
          glmnet
-         glmnet/examples/data/mtcars)]
+         glmnet/datasets)]
 
 @chunk[<provide>
 (provide run-example)]

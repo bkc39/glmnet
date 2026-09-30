@@ -1,13 +1,16 @@
 #lang racket/base
 
-;; Every binding exported by `(require glmnet)`, `(require glmnet/data/nested)`
-;; or `(require glmnet/plot)` has a reference entry: a defproc, defproc*,
-;; defstruct, defstruct*, defthing, defform, defform*, defidform or defparam in
-;; the manual (deftogether is searched through). The manual is
-;; glmnet/scribblings/glmnet.scrbl and every file it reaches through
-;; include-section; a .scrbl file that nothing includes does not count, and
-;; neither does a definition form inside code (racketblock, examples, ...). A
-;; defstruct covers the struct's constructor, predicate, field accessors and
+;; Every binding exported by `(require glmnet)`, `(require glmnet/plot)`,
+;; `(require glmnet/datasets)` or any module under glmnet/data/ has a reference
+;; entry: a defproc, defproc*, defstruct, defstruct*, defthing,
+;; defform, defform*, defidform or defparam in the manual (deftogether is
+;; searched through). The modules under glmnet/data/ are found by listing the
+;; directory, so a new data format is checked without editing this file. The
+;; manual is glmnet/scribblings/glmnet.scrbl and every
+;; file it reaches through include-section; a .scrbl file that nothing includes
+;; does not count, and neither does a definition form inside code (racketblock,
+;; examples, ...) or one with #:link-target? #f. A defstruct covers the struct's
+;; constructor, unless it has #:omit-constructor, predicate, field accessors and
 ;; struct-type binding. The .scrbl sources are read with Scribble's @-reader,
 ;; not rendered.
 
@@ -21,12 +24,24 @@
            racket/set
            scribble/reader
            (only-in glmnet)
-           (only-in glmnet/data/nested)
-           (only-in glmnet/plot))
+           (only-in glmnet/plot)
+           (only-in glmnet/datasets))
 
   (define-runtime-path scribblings-dir "../scribblings")
+  (define-runtime-path data-dir "../data")
+
+  ;; glmnet/data/<name> for each <name>.rkt in glmnet/data/.
+  (define data-modules
+    (sort (for/list ([file (in-list (directory-list data-dir))]
+                     #:when (path-has-extension? file #".rkt"))
+            (string->symbol (format "glmnet/data/~a" (path-replace-extension file #""))))
+          symbol<?))
+
+  (define checked-modules (append '(glmnet glmnet/plot glmnet/datasets) data-modules))
 
   (define (exported mod)
+    (unless (module-declared? mod #t)
+      (error 'docs-coverage "~a is not a module" mod))
     (define-values (variables syntaxes) (module->exports mod))
     (for*/set ([exports (in-list (list variables syntaxes))]
                [phase+names (in-list exports)]
@@ -75,12 +90,21 @@
             (define datum (read-scrbl file))
             (loop (append (included-files file datum) rest) (hash-set seen file datum))])])))
 
-  ;; The value of keyword option kw among a form's leading options, or #f.
-  (define (option forms kw)
+  ;; The value of keyword option kw among a form's leading options, or
+  ;; `default`.
+  (define (option forms kw [default #f])
     (match forms
       [(list* (== kw) value _) value]
-      [(list* (? keyword?) _ more) (option more kw)]
-      [_ #f]))
+      [(list* (? keyword?) _ more) (option more kw default)]
+      [_ default]))
+
+  ;; The value of keyword option kw anywhere among forms, or `default`: a
+  ;; struct's options follow its fields.
+  (define (trailing-option forms kw [default #f])
+    (match forms
+      [(list* (== kw) value _) value]
+      [(cons _ more) (trailing-option more kw default)]
+      [_ default]))
 
   ;; The forms after any leading keyword options, as in (defproc #:kind "..." (f x) ...).
   (define (drop-options forms)
@@ -92,14 +116,23 @@
   (define (spec-head spec)
     (if (pair? spec) (spec-head (car spec)) spec))
 
-  (define (struct-bindings name fields constructor?)
+  ;; The bindings a defstruct (make-name? = #t) or defstruct* documents, given
+  ;; the options after its fields.
+  (define (struct-bindings name fields options make-name?)
     (define field-names
       (for/list ([field (in-list fields)])
         (if (pair? field) (car field) field)))
-    (append (list name
-                  (string->symbol (format "~a?" name))
+    (define constructors
+      (cond
+        [(memq '#:omit-constructor options) '()]
+        [else
+         (append (list (trailing-option options '#:constructor-name name))
+                 (if make-name? (list (string->symbol (format "make-~a" name))) '())
+                 (let ([extra (trailing-option options '#:extra-constructor-name)])
+                   (if extra (list extra) '())))]))
+    (append constructors
+            (list (string->symbol (format "~a?" name))
                   (string->symbol (format "struct:~a" name)))
-            (if constructor? (list (string->symbol (format "make-~a" name))) '())
             (for/list ([field (in-list field-names)])
               (string->symbol (format "~a-~a" name field)))))
 
@@ -109,6 +142,7 @@
     (define id (option args '#:id))
     (define names
       (cond
+        [(not (option args '#:link-target? #t)) '()]
         [(and id (memq head '(defproc defform defthing defidform)))
          (list (spec-head id))]
         [(null? forms) '()]
@@ -119,7 +153,8 @@
            [(defproc* defform*)
             (if (list? (car forms)) (map spec-head (car forms)) '())]
            [(defstruct defstruct*)
-            (struct-bindings (spec-head (car forms)) (cadr forms) (eq? head 'defstruct))]
+            (struct-bindings (spec-head (car forms)) (cadr forms) (cddr forms)
+                             (eq? head 'defstruct))]
            [else '()])]))
     (filter symbol? names))
 
@@ -152,6 +187,24 @@
     (check-equal? (list->set
                    (documented-names (read-string-inside "@defstruct*[s ([a any/c])]{}")))
                   (set 's 's? 'struct:s 's-a))
+    (check-equal? (list->set
+                   (documented-names
+                    (read-string-inside "@defstruct*[s ([a any/c]) #:omit-constructor]{}")))
+                  (set 's? 'struct:s 's-a))
+    (check-equal? (list->set
+                   (documented-names
+                    (read-string-inside "@defstruct*[s ([a any/c]) #:constructor-name new-s]{}")))
+                  (set 'new-s 's? 'struct:s 's-a))
+    (check-equal? (list->set
+                   (documented-names
+                    (read-string-inside "@defstruct[s ([a any/c]) #:extra-constructor-name mk]{}")))
+                  (set 's 'make-s 'mk 's? 'struct:s 's-a))
+    (check-equal? (documented-names
+                   (read-string-inside "@defproc[#:link-target? #f (f) any]{} @defproc[(g) any]{}"))
+                  '(g))
+    (check-equal? (documented-names
+                   (read-string-inside "@defstruct*[#:link-target? #f s ([a any/c])]{}"))
+                  '())
     (check-equal? (documented-names
                    (read-string-inside
                     "@deftogether[(@defproc[(f) any] @defproc[(g) any])]{@examples[(defproc (h) any)]}"))
@@ -196,9 +249,11 @@
     (check-true (set-member? (exported 'glmnet) 'elnet-fit))
     (check-true (set-member? (exported 'glmnet) 'rows->design-matrix))
     (check-true (set-member? (exported 'glmnet/plot) 'plot-coefficient-path))
-    (check-true (set-member? (exported 'glmnet/data/nested) 'nested->design-matrix)))
+    (check-not-false (memq 'glmnet/data/csv data-modules))
+    (check-not-false (memq 'glmnet/data/nested data-modules))
+    (check-true (set-member? (exported 'glmnet/data/csv) 'csv->table)))
 
-  (for ([mod (in-list '(glmnet glmnet/data/nested glmnet/plot))])
+  (for ([mod (in-list checked-modules)])
     (test-case (format "every export of ~a has a reference entry" mod)
       (define missing
         (sort (set->list (set-subtract (exported mod) documented)) symbol<?))

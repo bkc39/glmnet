@@ -191,7 +191,8 @@ or a design matrix with column names. A @deftech{formula}, written with
 
 The model keys its coefficients by name, and predicts from a table by
 matching its columns by name. @secref["formulas"] covers tables, formulas and
-the models fitted from them.
+the models fitted from them, and @secref["data"] where data comes from: R
+glmnet's example datasets and CSV files.
 
 @section[#:tag "concepts-penalty"]{The penalty: @math{α} and @math{λ}}
 
@@ -545,10 +546,11 @@ signal, with @math{y = 1 + 3x₁ − 2x₂ + x₃} plus noise:
 cv
 ]
 
-The result is a @racket[glmnet-cv]. It prints as R prints one: the measure,
-then a row for each of the two choices, with its @math{λ}, its index among the
-candidates (counting from 0), the cross-validated error, its standard error and
-the number of nonzero coefficients.
+The result is a @racket[glmnet-cv]. It prints like R's @tt{print.cv.glmnet},
+with the index counted from 0: the measure, then a row for each of the two
+choices, with its @math{λ}, its index among the candidates, the
+cross-validated error, its standard error and the number of nonzero
+coefficients (see @secref["ref-model-printing"]).
 
 @subsection[#:tag "concepts-cv-choice"]{Reading lambda-min and lambda-1se}
 

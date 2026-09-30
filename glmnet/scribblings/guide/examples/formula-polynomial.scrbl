@@ -16,13 +16,13 @@ writes @racketfont{(mpg . ~ . hp + (sqr hp))}, where @racket[(sqr hp)] is a
 
 @section[#:tag "ex-formula-polynomial-data"]{The data}
 
-@racketmodname[glmnet/examples/data/mtcars] provides R's @tt{mtcars}: 32 cars
-from the 1974 Motor Trend road tests, among them their miles per gallon
+@racketmodname[glmnet/datasets] provides R's @tt{mtcars}: 32 cars from the
+1974 Motor Trend road tests, among them their miles per gallon
 (@racket["mpg"]), horsepower (@racket["hp"]) and weight in thousands of pounds
 (@racket["wt"]). @racket[sqr] is @racketmodname[racket/math]'s:
 
 @examples[#:eval ev #:label #f
-(require racket/math glmnet/examples/data/mtcars)
+(require racket/math glmnet/datasets)
 (table-column-names mtcars)
 ]
 

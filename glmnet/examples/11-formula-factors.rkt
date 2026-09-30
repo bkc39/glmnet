@@ -2,8 +2,7 @@
 
 @(require (for-label racket/base
                      glmnet
-                     glmnet/examples/data/mtcars
-                     glmnet/examples/data/iris))
+                     glmnet/datasets))
 
 @section[#:tag "ex-formula-factors"]{Formula factors}
 
@@ -23,13 +22,11 @@ each flower's species, and @racketfont{(~ Species all)} fits a multinomial
 model whose classes are the three species.
 
 The data are R's @tt{mtcars} and @tt{iris}, which
-@racketmodname[glmnet/examples/data/mtcars] and
-@racketmodname[glmnet/examples/data/iris] provide as tables.
+@racketmodname[glmnet/datasets] provides as tables.
 
 @chunk[<require>
 (require glmnet
-         glmnet/examples/data/mtcars
-         glmnet/examples/data/iris)]
+         glmnet/datasets)]
 
 @chunk[<provide>
 (provide run-example)]
