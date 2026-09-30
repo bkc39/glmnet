@@ -10,6 +10,7 @@
 ;; linear predictors); `multinomial-predict` takes the argmax.
 
 (require racket/contract
+         racket/flonum
          ffi/vector
          "marshal.rkt"
          "model.rkt"
@@ -87,20 +88,22 @@
 ;; A class label 0..K-1, exact or, as in an flvector, inexact.
 (define class-label/c (and/c integer? (>=/c 0)))
 
-;; The labels of a response the fitter has converted with `as-response`, as
-;; exact integers.
+;; The labels of a response the fitter has converted with `as-response`, as a
+;; vector of exact integers.
 (define (response-labels yv)
-  (map inexact->exact (response-values yv)))
+  (for/vector #:length (f64vector-length yv) ([k (in-range (f64vector-length yv))])
+    (fl->exact-integer (f64vector-ref yv k))))
 
-;; Validate the labels cover 0..K-1 with every class present; return K (>= 2).
-;; With n labels a class at or below n is missing whenever K > n, so only
-;; min(K, n + 1) classes are tallied: a stray huge label costs no memory.
+;; Validate the labels, a vector of exact integers, cover 0..K-1 with every
+;; class present; return K (>= 2). With n labels a class at or below n is
+;; missing whenever K > n, so only min(K, n + 1) classes are tallied: a stray
+;; huge label costs no memory.
 (define (labels->num-classes y who)
-  (define k (add1 (apply max y)))
+  (define k (add1 (for/fold ([m 0]) ([v (in-vector y)]) (max m v))))
   (when (< k 2)
     (error who "multinomial needs at least 2 classes, got ~a" k))
-  (define present (make-vector (min k (add1 (length y))) #f))
-  (for ([v (in-list y)] #:when (< v (vector-length present)))
+  (define present (make-vector (min k (add1 (vector-length y))) #f))
+  (for ([v (in-vector y)] #:when (< v (vector-length present)))
     (vector-set! present v #t))
   (for ([c (in-range (vector-length present))])
     (unless (vector-ref present c)
@@ -146,7 +149,7 @@
   (define x (as-design-matrix X 'multinomial-fit "X"))
   (define no (design-matrix-nrows x))
   (define ni (design-matrix-ncols x))
-  (define yv (as-response y no 'multinomial-fit "y"))
+  (define yv (as-response y no 'multinomial-fit "y" class-label/c))
   (define nc (labels->num-classes (response-labels yv) 'multinomial-fit))
   (define intercepts (make-f64vector nc 0.0))
   (define beta (make-f64vector (* ni nc) 0.0))
@@ -190,7 +193,7 @@
   (define x (as-design-matrix X 'multinomial-path "X"))
   (define no (design-matrix-nrows x))
   (define ni (design-matrix-ncols x))
-  (define yv (as-response y no 'multinomial-path "y"))
+  (define yv (as-response y no 'multinomial-path "y" class-label/c))
   (define k (labels->num-classes (response-labels yv) 'multinomial-path))
   (define-values (nlam flmin ulam)
     (path-lambdas lambda nlambda lambda-min-ratio no ni))
@@ -228,9 +231,9 @@
                         #:thresh [thresh 1e-7]
                         #:max-iters [max-iters 100000])
   (define x (as-design-matrix X 'multinomial-cv "X"))
-  (define ys (response-labels (as-response y (design-matrix-nrows x) 'multinomial-cv "y")))
-  (labels->num-classes ys 'multinomial-cv)
-  (define labels (list->vector ys))
+  (define labels
+    (response-labels (as-response y (design-matrix-nrows x) 'multinomial-cv "y" class-label/c)))
+  (labels->num-classes labels 'multinomial-cv)
   (define (fit x y)
     (multinomial-path x y
                       #:lambda lambda #:nlambda nlambda #:lambda-min-ratio lambda-min-ratio

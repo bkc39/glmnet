@@ -77,8 +77,16 @@ names:
 - the Concepts section `concepts-data` holds only what every fitter accepts:
   the design matrix, the response forms and named data.
 
-`tests/docs-coverage-test.rkt` lists `glmnet/data/` itself, so a new format's
-exports are checked without editing the test. The datasets are CSV files that
+A format builds its design matrix, and reports bad data, with the one support
+set in `data.rkt`'s `support` submodule, which documents each procedure:
+`flat->design-matrix` (a flat flvector or f64vector, column- or row-major,
+copied or adopted, its length checked by contract), `element-error` and
+`missing-error` (the two error shapes, "<what> has an element that is not a
+real number / not finite" and "<what> has a missing value", with the fields
+column, row and element, or position), `->finite-flonum` and
+`default-column-names` (R's `V1` ... `Vn`). Column names are strings in every
+design matrix. `tests/docs-coverage-test.rkt` lists `glmnet/data/` itself, so
+a new format's exports are checked without editing the test. The datasets are CSV files that
 `scripts/export-datasets.R` writes from the pinned R; the `dataset-*` parity
 goldens check every number of every file against R's, bit for bit, the
 `vignette-*` goldens the vignette's calls on each dataset, and the

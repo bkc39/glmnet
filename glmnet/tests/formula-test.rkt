@@ -300,6 +300,17 @@
     (check-true (same? (~ mpg (wt + hp) : qsec) (~ mpg (: (+ wt hp) qsec))))
     (check-true (same? (~ mpg (- 1 + wt)) (~ mpg 0 wt))))
 
+  (test-case "a model predicts from tables keyed by symbols, whose names become strings"
+    (define m (formula-fit (mpg . ~ . wt + hp) mtcars #:lambda 0.1))
+    (define symbols (for/list ([column (in-list mtcars)])
+                      (cons (string->symbol (car column)) (cdr column))))
+    (check-equal? (predict m symbols) (predict m mtcars))
+    (define named (rows->design-matrix (rows-of mtcars '("hp" "wt")) #:column-names '(hp wt)))
+    (check-equal? (design-matrix-column-names named) '("hp" "wt"))
+    (check-equal? (predict m named) (predict m mtcars))
+    (check-equal? (formula-model-fit (formula-fit (mpg . ~ . wt + hp) symbols #:lambda 0.1))
+                  (formula-model-fit m)))
+
   (test-case "a symbol table's names and a formula's strings match"
     (define symbols (for/list ([column (in-list mtcars)])
                       (cons (string->symbol (car column)) (cdr column))))

@@ -214,11 +214,29 @@
                (lambda () (poisson-fit '((1.0) (2.0)) (list 0 (expt 10 -400)) #:lambda 0.1))))
 
   (test-case "non-finite entries and mismatched lengths in vectors are errors"
-    (check-exn #rx"^ols: X has an element that is not finite\n  row: 1\n  column: 1"
+    (check-exn #rx"^ols: X has an element that is not finite\n  column: 1\n  row: 1"
                (lambda () (ols (vector #(1.0 2.0) (vector 2.0 +nan.0) #(3.0 1.0)) '(1.0 2.0 3.0))))
     (check-exn #rx"^ols: y has an element that is not finite\n  position: 2"
                (lambda () (ols (vector-of-vectors Xg) (as-flvector (list-set yg 2 +inf.0)))))
     (check-exn #rx"y does not have one entry per row of X\n  length of y: 2\n  rows of X: 16"
                (lambda () (ols (vector-of-vectors Xg) (f64vector 1.0 2.0))))
     (check-exn #rx"statuses does not have one entry per row of X"
-               (lambda () (cox-fit Xc tc (vector 1 0) #:lambda 0.05)))))
+               (lambda () (cox-fit Xc tc (vector 1 0) #:lambda 0.05))))
+
+  (test-case "a response is checked again on its copy, which the caller cannot change"
+    ;; A vector whose entries read as 2 once the contract has read each of them.
+    (define reads 0)
+    (define labels
+      (impersonate-vector (vector 0 1 0 1 1 0)
+                          (lambda (v i x) (set! reads (add1 reads)) (if (> reads 6) 2 x))
+                          (lambda (v i x) x)))
+    (check-exn #rx"^logistic-fit: y has an element that is not \\(or/c 0 1\\) as a flonum\n  position: 0\n  element: 2$"
+               (lambda () (logistic-fit '((1.0) (2.0) (3.0) (4.0) (5.0) (6.0)) labels #:lambda 0.1))))
+
+  (test-case "a positive Cox time that rounds to 0.0 is an error"
+    (check-exn #rx"^cox-fit: times has an element that is not \\(>/c 0\\) as a flonum\n  position: 1\n"
+               (lambda () (cox-fit '((1.0 0.0) (0.0 1.0) (1.0 1.0) (0.0 0.0))
+                                   (list 1 (expt 10 -400) 3 4) '(1 1 0 1) #:lambda 0.1)))
+    (check-exn #rx"^cox-path: times has an element that is not \\(>/c 0\\) as a flonum"
+               (lambda () (cox-path '((1.0 0.0) (0.0 1.0) (1.0 1.0) (0.0 0.0))
+                                    (vector 1 2 (expt 10 -400) 4) '(1 1 0 1))))))

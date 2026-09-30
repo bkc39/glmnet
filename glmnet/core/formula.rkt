@@ -23,7 +23,7 @@
          (submod "path.rkt" support)
          "cv.rkt"
          (only-in (submod "cv.rkt" support)
-                  nfolds/c fold-ids/c cv-lambda-sequence/c write-cv)
+                  nfolds/c cv-lambda-sequence/c write-cv)
          "elnet.rkt"
          "lognet.rkt"
          "multinomial.rkt"
@@ -34,7 +34,7 @@
                   design-matrix->columns)
          (only-in (submod "../data.rkt" support)
                   design-matrix-nrows column-name->string table-names select-table-columns
-                  select-table-values))
+                  select-table-values one-dimensional-length))
 
 (define family/c (or/c 'gaussian 'binomial 'multinomial 'poisson 'cox 'mgaussian))
 
@@ -892,9 +892,9 @@
   (define spec (hash-ref families family-name))
   (define-values (mt x responses classes) (model-frame who f table family-name))
   (define fold-ids (cond [(assq '#:fold-ids options) => cdr] [else #f]))
-  (when (and fold-ids (not (= (length fold-ids) (design-matrix-nrows x))))
+  (when (and fold-ids (not (= (one-dimensional-length fold-ids) (design-matrix-nrows x))))
     (raise-arguments-error who "fold-ids does not have one entry per row of the table"
-                           "length of fold-ids" (length fold-ids)
+                           "length of fold-ids" (one-dimensional-length fold-ids)
                            "rows of the table" (design-matrix-nrows x)))
   (define kws
     (sort (for/list ([kw (in-list options)]

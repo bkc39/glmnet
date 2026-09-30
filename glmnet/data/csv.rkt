@@ -8,7 +8,7 @@
          racket/string
          racket/vector
          "../data.rkt"
-         (only-in (submod "../data.rkt" support) table-names select-table-values))
+         (only-in (submod "../data.rkt" support) table-names select-table-values missing-error))
 
 (define exists/c (or/c 'error 'replace 'truncate 'truncate/replace))
 
@@ -347,8 +347,8 @@
        (for ([j (in-range ncols)])
          (define v (field-value (vector-ref fields* j)))
          (when (eq? v missing)
-           (raise-input-error who where "the input has a missing value"
-                              "column" (vector-ref name-vector j) "row" row "line" line))
+           (missing-error who "the input" #:row row #:column (vector-ref name-vector j)
+                          #:details (list* "line" line where)))
          (vector-set! (vector-ref columns* j) row v))
        (loop next next-line (fx+ row 1) capacity* columns* fields*)])))
 

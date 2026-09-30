@@ -8,13 +8,14 @@
 ;; on top of `check-jerr`.
 
 (require racket/contract
+         racket/flonum
          ffi/vector
          (only-in "../data.rkt" design-matrix/c response/c)
          (submod "../data.rkt" support))
 
 (provide design-matrix/c response/c
          design-matrix-data design-matrix-nrows design-matrix-ncols
-         as-design-matrix as-response response-values
+         as-design-matrix as-response response->vector
          prediction-matrix linear-predictor
          check-response-varies
          check-jerr)
@@ -22,9 +23,10 @@
 ;; --- responses ---------------------------------------------------------------
 
 ;; The entries of a response the fitter has converted with `as-response`, as a
-;; list: what its checks read, whatever form the caller passed.
-(define (response-values yv)
-  (f64vector->list yv))
+;; vector, which cross-validation selects folds from.
+(define (response->vector yv)
+  (for/vector #:length (f64vector-length yv) ([k (in-range (f64vector-length yv))])
+    (f64vector-ref yv k)))
 
 ;; --- prediction ------------------------------------------------------------
 
@@ -47,13 +49,14 @@
     (+ acc (* b (f64vector-ref v (+ i (* j no)))))))
 
 ;; R's Gaussian wrapper stops when the null deviance is zero: the response is
-;; constant or, without an intercept, all zero. `columns` holds one response per
-;; list; for mgaussian that is every column of Y, all of which must be constant
-;; for the null deviance to be zero.
-(define (check-response-varies columns intercept? who)
-  (when (for/and ([ys (in-list columns)])
-          (define center (if intercept? (car ys) 0))
-          (for/and ([v (in-list ys)]) (= v center)))
+;; constant or, without an intercept, all zero. `data` holds ncols responses of
+;; nrows entries, column-major, as converted for the Fortran; for mgaussian
+;; every column of Y must be constant for the null deviance to be zero.
+(define (check-response-varies data nrows ncols intercept? who)
+  (when (for/and ([j (in-range ncols)])
+          (define start (* j nrows))
+          (define center (if intercept? (f64vector-ref data start) 0.0))
+          (for/and ([i (in-range nrows)]) (fl= (f64vector-ref data (+ start i)) center)))
     (error who "y is constant; gaussian glmnet fails at standardization step")))
 
 ;; --- error handling --------------------------------------------------------

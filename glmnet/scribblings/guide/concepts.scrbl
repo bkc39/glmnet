@@ -19,7 +19,7 @@ of two forms:
 
 @itemlist[
  @item{a non-empty list or vector of rows, each a list or vector of reals of
-       the same length (see @secref["concepts-nested"]); or}
+       the same length; or}
  @item{a @racket[design-matrix?] value, which holds the matrix in the layout
        the Fortran reads.}
 ]
@@ -118,8 +118,6 @@ per row of the design matrix:
 (eval:error (ols X '(1.0 2.0)))
 ]
 
-@subsection[#:tag "concepts-nested"]{Vectors}
-
 The rows of a design matrix, and the entries of a response, can be vectors as
 well as lists. A design matrix comes in four nestings, whose outer sequence
 always holds the rows, and a response in four one-dimensional forms:
@@ -155,20 +153,8 @@ Xv
 (elnet-predict (ols Xv (list->vector y)) (vector #(6.0 5.0) '(0.0 1.0)))
 ]
 
-@racketmodname[glmnet/data/nested] converts any of the nestings to a
-@racket[design-matrix?] value, by rows or by columns, and a design matrix back
-to any of them:
-
-@examples[#:eval ev #:label #f
-(require glmnet/data/nested)
-(define Dv (nested->design-matrix Xv))
-(equal? Dv (rows->design-matrix X))
-(define columns (vector #(1.0 2.0 3.0 4.0 5.0) #(2.0 1.0 4.0 3.0 6.0)))
-(equal? (nested->design-matrix columns #:by 'columns) Dv)
-(elnet-result-coefficients (lasso Dv (list->vector y) #:lambda 0.1))
-(design-matrix->nested Dv #:outer 'vector #:inner 'vector)
-(design-matrix->nested Dv #:by 'columns #:outer 'vector #:inner 'vector)
-]
+@racketmodname[glmnet/data/nested] converts the nestings to a
+@racket[design-matrix?] value and back (see @secref["data-nested"]).
 
 The Fortran reads a response as an @racket[f64vector], and every form of a
 response is copied into a fresh one. An @racket[flvector] holds the same

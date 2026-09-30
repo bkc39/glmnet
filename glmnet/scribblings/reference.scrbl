@@ -114,9 +114,14 @@ matrix can be passed to any number of fits.
   @racket[(or/c 0 1)] compares with @racket[=], which the complex number
   @racket[1.0+0.0i] passes. The fit procedures use it for their
   responses, for example @racket[(response/c (or/c 0 1))] for the labels of
-  @racket[logistic-fit]. A violation names the accepted shapes, or the
-  position of the first element that fails @racket[elem], counting from 0.
-  Like @racket[design-matrix/c], it never wraps a vector.
+  @racket[logistic-fit], and check @racket[elem] again on the flonums they
+  convert the response to, so that a positive time too small for a flonum,
+  which becomes @racket[0.0], is an error. A violation names the accepted
+  shapes, or the position of the first element that fails @racket[elem],
+  counting from 0. Like @racket[design-matrix/c], it never wraps a vector.
+  Two @racket[response/c] contracts are @racket[contract-equivalent?] when
+  their element contracts are, and one is @racket[contract-stronger?] than
+  another when its element contract is.
 
   @examples[#:eval ev
   (require racket/flonum)
@@ -129,7 +134,8 @@ matrix can be passed to any number of fits.
     (-> (response/c (or/c 0 1)) exact-nonnegative-integer?)
     (for/sum ([s statuses]) (if (= s 1) 1 0)))
   (events (vector 1 0 1))
-  (eval:error (events (flvector 1.0 0.0 0.5)))]}
+  (eval:error (events (flvector 1.0 0.0 0.5)))
+  (contract-equivalent? (response/c (>/c 0)) (response/c (>/c 0)))]}
 
 @defproc[(rows->design-matrix [rows (listof list?)]
                               [#:column-names column-names
@@ -140,8 +146,10 @@ matrix can be passed to any number of fits.
   must have the same length, and every entry must be a real, finite number.
   @racket[column-names], when given, names the columns: one distinct string or
   symbol per column. Names are compared as strings, so @racket["x"] and
-  @racket['x] are the same name. For rows that are vectors, or a vector of
-  rows, see @racket[nested->design-matrix].
+  @racket['x] are the same name, and the design matrix keeps each as a
+  string, so that the same data named with symbols or with strings gives
+  @racket[equal?] design matrices, whatever it was converted from. For rows
+  that are vectors, or a vector of rows, see @racket[nested->design-matrix].
 
   @examples[#:eval ev
   (define named (rows->design-matrix '((1 2) (3 4)) #:column-names '(age dose)))
@@ -194,8 +202,9 @@ matrix can be passed to any number of fits.
   (design-matrix-ncols D)]}
 
 @defproc[(design-matrix-column-names [dm design-matrix?])
-         (or/c #f (listof (or/c string? symbol?)))]{
-  The column names @racket[dm] was built with, or @racket[#f] if it has none.
+         (or/c #f (listof string?))]{
+  The column names @racket[dm] was built with, as strings, or @racket[#f] if it
+  has none.
   A design matrix with column names is a @tech{table}, from which the formula
   front end fits by name; the fits from a matrix do not use the names.
 
@@ -203,7 +212,7 @@ matrix can be passed to any number of fits.
   (design-matrix-column-names D)
   (define cols '((1 2) (3 4)))
   (design-matrix-column-names
-   (columns->design-matrix cols #:column-names '("x1" "x2")))]}
+   (columns->design-matrix cols #:column-names '("x1" x2)))]}
 
 @defproc[(design-matrix-ref [dm design-matrix?]
                             [i exact-nonnegative-integer?]
@@ -268,9 +277,9 @@ matrix can be passed to any number of fits.
 
 A @tech{table} holds named columns, and is what the formula front end
 (@secref["ref-formula"]) fits from. A column name is a string or a symbol, and
-names are compared as strings; a column is a list or vector of reals, or of
-strings, symbols or booleans, which the formula front end reads as a factor. A
-table is one of:
+names are compared as strings; a column is a list, vector, @racket[flvector]
+or @racket[f64vector] of reals, or a list or vector of strings, symbols or
+booleans, which the formula front end reads as a factor. A table is one of:
 
 @itemlist[
  @item{a non-empty association list of @racket[(name . column)] pairs, whose
@@ -289,9 +298,9 @@ tables in use.
 
 @defproc[(table? [v any/c]) boolean?]{
   Returns @racket[#t] if @racket[v] is a @tech{table}: an association list or
-  hash whose names are strings or symbols and whose columns are lists or
-  vectors, or a design matrix with column names. The entries of the columns are
-  not checked.
+  hash whose names are strings or symbols and whose columns are lists,
+  vectors, @racket[flvector]s or @racket[f64vector]s, or a design matrix with
+  column names. The entries of the columns are not checked.
 
   @examples[#:eval ev
   (define patients
@@ -356,7 +365,8 @@ and so do the fits and predictions on them.
          design-matrix?]{
   Builds a design matrix from @racket[xss], whose elements are the rows of the
   matrix when @racket[by] is @racket['rows] and its columns when @racket[by]
-  is @racket['columns]. A list and a vector can be mixed at either level. The
+  is @racket['columns]. @racket[xss] is one list or one vector, and its rows
+  (or columns) can be any mix of lists and vectors. The
   rules are those of @racket[rows->design-matrix]: at least one row and one
   column, every row (or column) of the same length, every entry a real, finite
   number, and @racket[column-names], when given, one distinct name per column.
@@ -1245,8 +1255,10 @@ it passes on to each fit, and these:
        from @racket[current-pseudo-random-generator]. It is ignored when
        @racket[#:fold-ids] is given.}
  @item{@racket[#:fold-ids], R's @tt{foldid}, assigns the observations to folds:
-       one fold id per row of @racket[X], counting from 0. Every id from 0 to
-       the largest must appear, and there must be at least 3.}
+       one fold id per row of @racket[X], counting from 0, in a list, vector,
+       @racket[flvector] or @racket[f64vector], as a response can be. Every id
+       from 0 to the largest must appear, and there must be at least 3 (see
+       @racket[fold-ids/c]).}
  @item{@racket[#:grouped?], R's @tt{grouped}, computes the error and its
        standard error from the per-fold means when true, and from the
        per-observation losses otherwise. When the folds average fewer than 3
@@ -1362,7 +1374,7 @@ carry the signal:
                    [y (response/c real?)]
                    [#:type-measure type-measure (or/c 'mse 'deviance 'mae) 'mse]
                    [#:nfolds nfolds (and/c exact-integer? (>=/c 3)) 10]
-                   [#:fold-ids fold-ids (or/c #f (and/c (listof exact-nonnegative-integer?) pair?)) #f]
+                   [#:fold-ids fold-ids fold-ids/c #f]
                    [#:grouped? grouped? boolean? #t]
                    [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) (property/c length (>=/c 2)))) #f]
                    [#:nlambda nlambda exact-positive-integer? 100]
@@ -1386,7 +1398,7 @@ carry the signal:
                       [y (response/c (or/c 0 1))]
                       [#:type-measure type-measure (or/c 'deviance 'class 'auc 'mse 'mae) 'deviance]
                       [#:nfolds nfolds (and/c exact-integer? (>=/c 3)) 10]
-                      [#:fold-ids fold-ids (or/c #f (and/c (listof exact-nonnegative-integer?) pair?)) #f]
+                      [#:fold-ids fold-ids fold-ids/c #f]
                       [#:grouped? grouped? boolean? #t]
                       [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) (property/c length (>=/c 2)))) #f]
                       [#:nlambda nlambda exact-positive-integer? 100]
@@ -1414,7 +1426,7 @@ carry the signal:
                          [y (response/c (and/c integer? (>=/c 0)))]
                          [#:type-measure type-measure (or/c 'deviance 'class 'mse 'mae) 'deviance]
                          [#:nfolds nfolds (and/c exact-integer? (>=/c 3)) 10]
-                         [#:fold-ids fold-ids (or/c #f (and/c (listof exact-nonnegative-integer?) pair?)) #f]
+                         [#:fold-ids fold-ids fold-ids/c #f]
                          [#:grouped? grouped? boolean? #t]
                          [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) (property/c length (>=/c 2)))) #f]
                          [#:nlambda nlambda exact-positive-integer? 100]
@@ -1440,7 +1452,7 @@ carry the signal:
                  [statuses (response/c (or/c 0 1))]
                  [#:type-measure type-measure (or/c 'deviance 'C) 'deviance]
                  [#:nfolds nfolds (and/c exact-integer? (>=/c 3)) 10]
-                 [#:fold-ids fold-ids (or/c #f (and/c (listof exact-nonnegative-integer?) pair?)) #f]
+                 [#:fold-ids fold-ids fold-ids/c #f]
                  [#:grouped? grouped? boolean? #t]
                  [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) (property/c length (>=/c 2)))) #f]
                  [#:nlambda nlambda exact-positive-integer? 100]
@@ -1480,7 +1492,7 @@ carry the signal:
                      [y (response/c (>=/c 0))]
                      [#:type-measure type-measure (or/c 'deviance 'mse 'mae) 'deviance]
                      [#:nfolds nfolds (and/c exact-integer? (>=/c 3)) 10]
-                     [#:fold-ids fold-ids (or/c #f (and/c (listof exact-nonnegative-integer?) pair?)) #f]
+                     [#:fold-ids fold-ids fold-ids/c #f]
                      [#:grouped? grouped? boolean? #t]
                      [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) (property/c length (>=/c 2)))) #f]
                      [#:nlambda nlambda exact-positive-integer? 100]
@@ -1505,7 +1517,7 @@ carry the signal:
                        [Y design-matrix/c]
                        [#:type-measure type-measure (or/c 'mse 'deviance 'mae) 'mse]
                        [#:nfolds nfolds (and/c exact-integer? (>=/c 3)) 10]
-                       [#:fold-ids fold-ids (or/c #f (and/c (listof exact-nonnegative-integer?) pair?)) #f]
+                       [#:fold-ids fold-ids fold-ids/c #f]
                        [#:grouped? grouped? boolean? #t]
                        [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) (property/c length (>=/c 2)))) #f]
                        [#:nlambda nlambda exact-positive-integer? 100]
@@ -1546,6 +1558,26 @@ carry the signal:
       (random-fold-ids 10 #:nfolds 3)))
   (equal? (draw) (draw))
   (eval:error (random-fold-ids 3 #:nfolds 5))]}
+
+@defthing[fold-ids/c flat-contract?]{
+  The contract on the @racket[#:fold-ids] argument of every cross-validation
+  procedure. It accepts @racket[#f], for folds drawn by
+  @racket[random-fold-ids], or fold ids: a non-empty list, vector,
+  @racket[flvector] or @racket[f64vector] of non-negative integers, exact or,
+  as in an @racket[flvector], inexact, that use every fold from 0 to the
+  largest id, of which there are at least 3. A violation says which fold is
+  missing. The procedures check the ids again on their own copy, with one id
+  per observation.
+
+  @examples[#:eval ev
+  (require racket/contract racket/flonum)
+  (contract-first-order-passes? fold-ids/c '(0 1 2 0 1 2))
+  (contract-first-order-passes? fold-ids/c (flvector 0.0 1.0 2.0 2.0))
+  (contract-first-order-passes? fold-ids/c #f)
+  (contract-first-order-passes? fold-ids/c '(0 1 0 1))
+  (contract-first-order-passes? fold-ids/c (vector 0 2 3 0 2 3))
+  (elnet-cv X60 y60 #:fold-ids (for/vector ([i (in-range 60)]) (modulo i 4)))
+  (eval:error (elnet-cv X60 y60 #:fold-ids (for/list ([i (in-range 60)]) (* 2 (modulo i 3)))))]}
 
 @section[#:tag "ref-formula"]{Formulas}
 
@@ -2140,7 +2172,7 @@ Trend road tests, and R's @tt{iris}, 150 irises of three species, which
                                'gaussian]
                      [#:type-measure type-measure (or/c #f 'mse 'deviance 'mae 'class 'auc 'C) #f]
                      [#:nfolds nfolds (and/c exact-integer? (>=/c 3)) 10]
-                     [#:fold-ids fold-ids (or/c #f (and/c (listof exact-nonnegative-integer?) pair?)) #f]
+                     [#:fold-ids fold-ids fold-ids/c #f]
                      [#:grouped? grouped? boolean? #t]
                      [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) (property/c length (>=/c 2)))) #f]
                      [#:nlambda nlambda exact-positive-integer? 100]

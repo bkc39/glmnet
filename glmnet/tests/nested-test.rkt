@@ -86,13 +86,13 @@
 
   (test-case "column names are carried, and must match the columns"
     (define dm (nested->design-matrix (vector #(1.0 2.0)) #:column-names '("a" b)))
-    (check-equal? (design-matrix-column-names dm) '("a" b))
+    (check-equal? (design-matrix-column-names dm) '("a" "b"))
     (check-equal? dm (rows->design-matrix '((1.0 2.0)) #:column-names '("a" b)))
     (check-true (table? dm))
     (check-equal? (design-matrix-column-names
                    (nested->design-matrix (vector #(1.0 2.0) #(3.0 4.0)) #:by 'columns
                                           #:column-names '(u v)))
-                  '(u v))
+                  '("u" "v"))
     (check-error (lambda () (nested->design-matrix (vector #(1.0 2.0)) #:column-names '(a)))
                  #rx"^nested->design-matrix: the number of column names")
     (check-error (lambda () (nested->design-matrix (vector #(1.0 2.0)) #:column-names '(a "a")))
@@ -231,10 +231,13 @@
 
   ;; --- randomized round trips ---------------------------------------------------
 
+  ;; Integers, fractions, flonums, and the flonums whose bits are easiest to
+  ;; lose: signed zeros and the smallest subnormals.
   (define (random-real)
-    (case (random 4)
+    (case (random 5)
       [(0) (- (random 2001) 1000)]
       [(1) (/ (- (random 201) 100) (add1 (random 50)))]
+      [(2) (list-ref '(-0.0 0.0 5e-324 -5e-324) (random 4))]
       [else (* 1e3 (- (random) 0.5))]))
 
   (test-case "random shapes round-trip through every nesting (seeded)"

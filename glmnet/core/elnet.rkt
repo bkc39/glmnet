@@ -118,7 +118,7 @@
   (define no (design-matrix-nrows x))
   (define ni (design-matrix-ncols x))
   (define yv (as-response y no who "y"))
-  (check-response-varies (list (response-values yv)) intercept? who)
+  (check-response-varies yv no 1 intercept? who)
   (define beta (make-f64vector ni 0.0))
   (define-values (intercept rsq lam nlp jerr)
     (glmnet-elnet-solo/raw (exact->inexact alpha) no ni (design-matrix-data x) yv
@@ -234,7 +234,7 @@
   (define no (design-matrix-nrows x))
   (define ni (design-matrix-ncols x))
   (define yv (as-response y no 'elnet-path "y"))
-  (check-response-varies (list (response-values yv)) intercept? 'elnet-path)
+  (check-response-varies yv no 1 intercept? 'elnet-path)
   (define-values (nlam flmin ulam)
     (path-lambdas lambda nlambda lambda-min-ratio no ni))
   (define a0 (make-f64vector nlam 0.0))
@@ -269,8 +269,7 @@
                   #:thresh [thresh 1e-7]
                   #:max-iters [max-iters 100000])
   (define x (as-design-matrix X 'elnet-cv "X"))
-  (define ys
-    (list->vector (f64vector->list (as-response y (design-matrix-nrows x) 'elnet-cv "y"))))
+  (define ys (response->vector (as-response y (design-matrix-nrows x) 'elnet-cv "y")))
   (define (fit x y)
     (elnet-path x y
                 #:lambda lambda #:nlambda nlambda #:lambda-min-ratio lambda-min-ratio
