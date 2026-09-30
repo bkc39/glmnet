@@ -1310,7 +1310,10 @@ call by name and skips a column: with a column @racket[max],
 in quoted data is data, and a name that Racket's forms match as a literal,
 @racket[=>], @racket[else], @racket[unquote], @racket[unquote-splicing],
 @racket[...] or @racket[_], keeps its Racket meaning; the columns a
-transform reads are the others. The
+transform reads are the others. A column named like one of these literals
+cannot be read inside a transform, where @racket[(log else)] is Racket's syntax
+error @racketerror{else: not allowed as an expression}; write it as an
+ordinary term, or rename it in the table. The
 expression is evaluated once for each row, with each column name standing for
 the row's value, so a transform is elementwise. A name that is neither a
 column nor bound is an error, naming it, when the transform is evaluated, not

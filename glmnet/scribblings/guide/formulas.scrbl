@@ -475,8 +475,12 @@ function by name and skips a column: with a column @racket[max],
 @racket[lambda] or @racket[for/sum], are its own, and so are not read from the
 table, and neither are the names in quoted data, nor the names that Racket's
 forms match as literals, such as @racket[cond]'s @racket[=>] and @racket[else]
-and @racket[quasiquote]'s @racket[unquote]; @racket[predict] needs only the
-columns that a transform reads. A name that is neither a column nor bound
+and @racket[quasiquote]'s @racket[unquote]. A column named like one of these
+literals, such as @racket[else] or @racket[_], cannot be read inside a
+transform, where @racket[(log else)] is Racket's syntax error
+@racketerror{else: not allowed as an expression}; write it as an ordinary
+term, or rename it in the table. @racket[predict] needs only the columns that
+a transform reads. A name that is neither a column nor bound
 is an error when the formula is fitted, which names it:
 
 @examples[#:eval ev #:label #f
