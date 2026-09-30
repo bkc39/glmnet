@@ -119,6 +119,18 @@
     (check-error (lambda () (nested->design-matrix (vector #(1.0 2.0) #(3.0)) #:by 'columns))
                  #rx"columns of different lengths" #rx"column: 1" #rx"length of column 0: 2"))
 
+  (test-case "a list row and a vector row with the same entries give the same error"
+    (for* ([bad (in-list '((x 3.0 4.0) (x 3.0) (1.0 2.0 x) (1.0)))]
+           [outer (in-list (list values list->vector))])
+      (define (message row)
+        (with-handlers ([exn:fail:contract? exn-message])
+          (nested->design-matrix (outer (list '(1.0 2.0) row)))))
+      (check-equal? (message (list->vector bad)) (message bad) (format "~a" bad)))
+    (check-error (lambda () (nested->design-matrix (vector #(1.0 2.0) #(x 3.0 4.0))))
+                 #rx"not a real number" #rx"row: 1" #rx"column: 0")
+    (check-error (lambda () (nested->design-matrix (vector #(1.0 2.0) #(3.0 4.0 x))))
+                 #rx"rows of different lengths" #rx"row: 1" #rx"length: 3"))
+
   (test-case "a bad entry is named by its row and column, in either orientation"
     (check-error (lambda () (nested->design-matrix (vector #(1.0 2.0) #(3.0 x))))
                  #rx"not a real number" #rx"row: 1" #rx"column: 1" #rx"element: 'x")
@@ -182,7 +194,8 @@
                  #rx"not a real number" #rx"position: 1")
     (for ([y (in-list (list '() (vector) (flvector) (f64vector)))])
       (check-error (lambda () (response->f64vector y)) #rx"the response is empty"))
-    (check-blame (lambda () (response->f64vector 3.0))))
+    (check-blame (lambda () (response->f64vector 3.0))
+                 #rx"expected: \\(or/c list\\? vector\\? flvector\\? f64vector\\?\\)"))
 
   (test-case "response/c accepts each form, non-empty, with elements that pass"
     (define c (response/c (>/c 0)))
@@ -207,6 +220,14 @@
     (check-blame (lambda () (f (f64vector 0.0 1.0 2.0)))
                  #rx"expected: \\(or/c 0 1\\)" #rx"given: 2.0"
                  #rx"in: the element at position 2 of\n *the 1st argument of"))
+
+  (test-case "response/c takes only real elements, though (or/c 0 1) passes 1.0+0.0i"
+    (check-true ((flat-contract-predicate (or/c 0 1)) 1.0+0.0i))
+    (check-false (contract-first-order-passes? (response/c (or/c 0 1)) (list 0 1.0+0.0i)))
+    (define/contract (f y) (-> (response/c (or/c 0 1)) any) y)
+    (check-blame (lambda () (f (vector 0 1.0+0.0i)))
+                 #rx"expected: real\\?" #rx"given: 1.0\\+0.0i"
+                 #rx"the element at position 1 of"))
 
   ;; --- randomized round trips ---------------------------------------------------
 

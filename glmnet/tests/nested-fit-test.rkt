@@ -171,7 +171,17 @@
                  #rx"expected: \\(or/c design-matrix\\? \\(listof \\(or/c list\\? vector\\?\\)\\) \\(vectorof \\(or/c list\\? vector\\?\\)\\)\\)"
                  #rx"in: the 1st argument of")
     (check-blame (lambda () (mgaussian-fit Xr #(1.0 2.0) #:lambda 1.0))
+                 #rx"expected: \\(or/c design-matrix\\? \\(listof \\(or/c list\\? vector\\?\\)\\)"
                  #rx"in: the 2nd argument of"))
+
+  (test-case "new data of the wrong shape names the accepted shapes"
+    (define r (lasso Xg yg #:lambda 0.1))
+    (check-blame (lambda () (elnet-predict r (flvector 1.0 2.0)))
+                 #rx"^elnet-predict: contract violation"
+                 #rx"\\(vectorof \\(or/c list\\? vector\\?\\)\\)" #rx"given: \\(flvector 1.0 2.0\\)")
+    (check-blame (lambda () (predict r #(1.0 2.0)))
+                 #rx"^predict: contract violation"
+                 #rx"\\(vectorof \\(or/c list\\? vector\\?\\)\\)" #rx"table\\?"))
 
   (test-case "a response of the wrong shape names the accepted shapes"
     (check-blame (lambda () (ols Xg "y"))
@@ -187,6 +197,21 @@
                  #rx"given: -1.0" #rx"the element at position 3 of")
     (check-blame (lambda () (multinomial-fit Xm (as-flvector (list-set ym 0 1.5)) #:lambda 0.01))
                  #rx"expected: integer\\?" #rx"given: 1.5" #rx"the element at position 0 of"))
+
+  (test-case "multinomial labels are checked before the classes are tallied"
+    (check-exn #rx"y does not have one entry per row of X"
+               (lambda () (multinomial-fit Xm (vector 0 1) #:lambda 0.01)))
+    (check-exn #rx"^multinomial-fit: class 3 has no observations; labels must cover 0\\.\\.999999999"
+               (lambda () (multinomial-fit Xm (as-flvector (list-set ym 0 999999999))
+                                           #:lambda 0.01)))
+    (check-exn #rx"^multinomial-path: class 2 has no observations"
+               (lambda () (multinomial-path '((1.0) (2.0) (3.0)) (flvector 0.0 1.0 1e300)))))
+
+  (test-case "the response checks read the values the Fortran gets"
+    (check-exn #rx"y is constant"
+               (lambda () (ols '((1.0) (2.0) (3.0)) (list 1/3 (+ 1/3 (expt 10 -30)) 1/3))))
+    (check-exn #rx"no positive count"
+               (lambda () (poisson-fit '((1.0) (2.0)) (list 0 (expt 10 -400)) #:lambda 0.1))))
 
   (test-case "non-finite entries and mismatched lengths in vectors are errors"
     (check-exn #rx"^ols: X has an element that is not finite\n  row: 1\n  column: 1"

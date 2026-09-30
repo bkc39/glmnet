@@ -8,7 +8,8 @@
 @declare-exporting[glmnet]
 
 Every binding below is provided by @racketmodname[glmnet], except those of
-@secref["ref-plot"], which @racketmodname[glmnet/plot] provides. Each model
+@secref["ref-data-nested"], @secref["ref-mtcars"] and @secref["ref-plot"],
+whose sections name the modules that provide them. Each model
 family has a fit procedure, a path fitter, a cross-validation procedure, a
 transparent result struct and prediction helpers. The formula front end
 (@secref["ref-formula"]) fits any family from a @tech{table}. Every result
@@ -108,7 +109,10 @@ matrix can be passed to any number of fits.
 @defproc[(response/c [elem flat-contract?]) flat-contract?]{
   A contract for a one-dimensional input, such as a @tech{response}: a
   non-empty list, vector, @racket[flvector] or @racket[f64vector] each of whose
-  elements satisfies @racket[elem]. The fit procedures use it for their
+  elements is a real number that satisfies @racket[elem]. The elements are
+  checked with @racket[real?] first because a number contract such as
+  @racket[(or/c 0 1)] compares with @racket[=], which the complex number
+  @racket[1.0+0.0i] passes. The fit procedures use it for their
   responses, for example @racket[(response/c (or/c 0 1))] for the labels of
   @racket[logistic-fit]. A violation names the accepted shapes, or the
   position of the first element that fails @racket[elem], counting from 0.

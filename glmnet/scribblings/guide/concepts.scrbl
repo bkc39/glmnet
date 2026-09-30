@@ -142,9 +142,16 @@ read new data in any nesting:
 
 @examples[#:eval ev #:label #f
 (require racket/flonum)
+(define list-of-vectors (map list->vector X))
+(define vector-of-lists (list->vector X))
 (define Xv (list->vector (map list->vector X)))
 Xv
-(equal? (ols Xv (flvector 1.0 4.0 3.0 6.0 5.0)) (ols X y))
+(for/list ([rows (list X list-of-vectors vector-of-lists Xv)])
+  (equal? (ols rows y) (ols X y)))
+(for/list ([response (list (list->vector y)
+                           (flvector 1.0 4.0 3.0 6.0 5.0)
+                           (f64vector 1.0 4.0 3.0 6.0 5.0))])
+  (equal? (ols X response) (ols X y)))
 (elnet-predict (ols Xv (list->vector y)) (vector #(6.0 5.0) '(0.0 1.0)))
 ]
 

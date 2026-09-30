@@ -6,8 +6,8 @@
 ;; load the native library, so adapters can build on it alone. Tables (#26),
 ;; the named data that formulas read, convert into it here too. The fitters
 ;; accept rows in any nesting of lists and vectors, and responses as lists,
-;; vectors, flvectors or f64vectors (#36), so those conversions live here, and
-;; glmnet/data/nested, which builds on this module, exports them by name.
+;; vectors, flvectors or f64vectors (#36), so those conversions live here;
+;; glmnet/data/nested builds on this module to export the matrix ones by name.
 ;;
 ;; Invariant: `data` is a column-major f64vector of nrows * ncols finite
 ;; flonums, element (i, j) at index i + j*nrows. Every constructor validates
@@ -50,7 +50,7 @@
   [design-matrix->rows (-> design-matrix? (listof (listof flonum?)))]
   [design-matrix->columns (-> design-matrix? (listof (listof flonum?)))]
   [design-matrix->f64vector (-> design-matrix? f64vector?)]
-  [response->f64vector (-> (or/c list? vector? flvector? f64vector?) f64vector?)]
+  [response->f64vector (-> one-dimensional/c f64vector?)]
   [table? (-> any/c boolean?)]
   [table-column-names (-> table? (listof string?))]
   [table->design-matrix (->* (table?) (column-list/c) design-matrix?)]))
@@ -108,12 +108,15 @@
    '(or/c design-matrix? (listof (or/c list? vector?)) (vectorof (or/c list? vector?)))
    (lambda (v) (or (design-matrix? v) (nested-matrix? v)))))
 
-;; A one-dimensional input with at least one element, each satisfying `elem`.
-;; An element that fails is blamed with its position.
+;; A one-dimensional input with at least one element, each a real satisfying
+;; `elem`. An element that fails is blamed with its position. Number contracts
+;; such as (or/c 0 1) compare with =, which a complex 1.0+0.0i passes, so the
+;; elements are checked with real? first.
 (define (response/c elem)
   (define elem/c (coerce-flat-contract 'response/c elem))
   (define elem? (flat-contract-predicate elem/c))
-  (define (failure k x) (and (not (elem? x)) (cons k x)))
+  (define real/c (coerce-flat-contract 'response/c real?))
+  (define (failure k x) (and (not (and (real? x) (elem? x))) (cons k x)))
   (define (first-failure v)
     (cond
       [(list? v) (for/or ([x (in-list v)] [k (in-naturals)]) (failure k x))]
@@ -136,14 +139,19 @@
                              (contract-name elem/c) v)]
          [(first-failure v)
           => (lambda (k+x)
+               (define x (cdr k+x))
                (define elem-blame
                  (blame-add-context blame (format "the element at position ~a of" (car k+x))))
-               (((get/build-late-neg-projection elem/c) elem-blame) (cdr k+x) neg-party)
+               (((get/build-late-neg-projection (if (real? x) elem/c real/c)) elem-blame)
+                x neg-party)
                v)]
          [else v])))))
 
 (define (one-dimensional? v)
   (or (list? v) (vector? v) (flvector? v) (f64vector? v)))
+
+(define one-dimensional/c
+  (flat-named-contract '(or/c list? vector? flvector? f64vector?) one-dimensional?))
 
 (define (one-dimensional-length v)
   (cond
@@ -229,10 +237,9 @@
     (define start (* o outer-stride))
     (cond
       [(vector? xs)
-       (unless (= (vector-length xs) n-inner) (ragged o xs))
-       (for ([x (in-vector xs)]
-             [p (in-naturals)])
-         (f64vector-set! v (+ start (* p inner-stride)) (entry x o p)))]
+       (for ([p (in-range (min (vector-length xs) n-inner))])
+         (f64vector-set! v (+ start (* p inner-stride)) (entry (vector-ref xs p) o p)))
+       (unless (= (vector-length xs) n-inner) (ragged o xs))]
       [else
        (let loop ([ys xs] [p 0] [k start])
          (cond

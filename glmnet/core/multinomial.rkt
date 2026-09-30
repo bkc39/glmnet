@@ -93,13 +93,16 @@
   (map inexact->exact (response-values yv)))
 
 ;; Validate the labels cover 0..K-1 with every class present; return K (>= 2).
+;; With n labels a class at or below n is missing whenever K > n, so only
+;; min(K, n + 1) classes are tallied: a stray huge label costs no memory.
 (define (labels->num-classes y who)
   (define k (add1 (apply max y)))
   (when (< k 2)
     (error who "multinomial needs at least 2 classes, got ~a" k))
-  (define present (make-vector k #f))
-  (for ([v (in-list y)]) (vector-set! present v #t))
-  (for ([c (in-range k)])
+  (define present (make-vector (min k (add1 (length y))) #f))
+  (for ([v (in-list y)] #:when (< v (vector-length present)))
+    (vector-set! present v #t))
+  (for ([c (in-range (vector-length present))])
     (unless (vector-ref present c)
       (error who
              "class ~a has no observations; labels must cover 0..~a contiguously"
