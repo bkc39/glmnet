@@ -18,7 +18,9 @@
          as-design-matrix as-response response->vector
          prediction-matrix linear-predictor
          check-response-varies
-         check-jerr)
+         check-jerr
+         current-warning-who
+         current-warning-what)
 
 ;; --- responses ---------------------------------------------------------------
 
@@ -63,6 +65,12 @@
 
 (define-logger glmnet)
 
+;; The procedure the user called and what it was fitting, when that is not the
+;; path fitter that logs a warning: a *-cv procedure (cv.rkt's `fitting`) or a
+;; formula procedure (formula.rkt's `as-formula-procedure`).
+(define current-warning-who (make-parameter #f))
+(define current-warning-what (make-parameter #f))
+
 ;; Map glmnet's jerr flag (documented in R glmnet's R/jerr.R) to a Racket
 ;; error. Handles the codes shared across model families; family-specific
 ;; positive codes (e.g. the logistic 8000/9000 range) are intercepted by the
@@ -86,8 +94,10 @@
     [(zero? fitted)
      (error who "glmnet fitted no lambda: ~a" (stop-reason jerr))]
     [(negative? jerr)
-     (log-glmnet-warning "~a: the path stops after ~a ~a: ~a"
-                         who fitted (if (= fitted 1) "lambda" "lambdas") (stop-reason jerr))]
+     (log-glmnet-warning "~a: ~athe path stops after ~a ~a: ~a"
+                         (or (current-warning-who) who)
+                         (if (current-warning-what) (format "~a: " (current-warning-what)) "")
+                         fitted (if (= fitted 1) "lambda" "lambdas") (stop-reason jerr))]
     [else (void)]))
 
 ;; glmnet's reason for stopping, from a non-fatal jerr: -m, or -(code + m) for

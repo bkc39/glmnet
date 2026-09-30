@@ -468,6 +468,23 @@
                 [#f '()]
                 [(vector _ message _ _) (cons message (loop))]))))
 
+  (test-case "a path that stops early is logged in the formula procedure's name"
+    (define-values (path path-warnings)
+      (glmnet-warnings
+       (lambda () (formula-path (~ mpg wt hp) mtcars #:lambda '(100.0 0.1 0.001) #:max-iters 1))))
+    (check-equal? (glmnet-path-lambda (formula-model-fit path)) #(100.0))
+    (check-match path-warnings
+                 (list (regexp #rx"^glmnet: formula-path: the path stops after 1 lambda: convergence")))
+    (define-values (cv cv-warnings)
+      (glmnet-warnings
+       (lambda () (formula-cv (~ mpg wt hp) mtcars #:lambda '(100.0 0.1 0.001) #:max-iters 1
+                              #:fold-ids (for/list ([i (in-range 32)]) (modulo i 3))))))
+    (check-match cv-warnings
+                 (list (regexp #rx"^glmnet: formula-cv: fitting all the data: the path stops after 1")
+                       (regexp #rx"^glmnet: formula-cv: fitting the training data of held-out fold 0: ")
+                       (regexp #rx"^glmnet: formula-cv: fitting the training data of held-out fold 1: ")
+                       (regexp #rx"^glmnet: formula-cv: fitting the training data of held-out fold 2: "))))
+
   (test-case "a response column alone on the right-hand side is dropped with a warning, as in R"
     (define-values (names warnings)
       (glmnet-warnings (lambda () (mtcars-names (mpg . ~ . 1 + wt + mpg + (* wt mpg))))))
@@ -651,13 +668,15 @@
                (lambda () (formula-cv (~ k a b) (labelled '(0 1 0 1 1 1)) #:fold-ids '(0 1 2))))
     ;; More folds than rows, the default of 10 included, is the caller's error,
     ;; named for formula-cv; it must not blame formula.rkt.
-    (define (too-many-folds? n)
-      (lambda (e)
-        (and (exn:fail:contract? e)
-             (not (exn:fail:contract:blame? e))
-             (regexp-match?
-              (pregexp (format "^formula-cv: there are more folds than observations\n  folds: ~a\n  observations: 6" n))
-              (exn-message e)))))
+    (define ((too-many-folds? n) e)
+      (and
+       (exn:fail:contract? e)
+       (not (exn:fail:contract:blame? e))
+       (regexp-match?
+        (pregexp
+         (format "^formula-cv: there are more folds than observations\n  folds: ~a\n  observations: 6"
+                 n))
+        (exn-message e))))
     (check-exn (too-many-folds? 10) (lambda () (formula-cv (~ k a b) (labelled '(0 1 0 1 1 1)))))
     (check-exn (too-many-folds? 7)
                (lambda () (formula-cv (~ k a b) (labelled '(0 1 0 1 1 1)) #:nfolds 7)))

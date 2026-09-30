@@ -22,6 +22,7 @@
          "path.rkt"
          (submod "path.rkt" support)
          "cv.rkt"
+         (only-in "marshal.rkt" current-warning-who)
          (only-in (submod "cv.rkt" support)
                   nfolds/c cv-lambda-sequence/c write-cv)
          "elnet.rkt"
@@ -914,7 +915,8 @@
 
 ;; The value of thunk, which calls one of the family's procedures. An error
 ;; that the family's procedures raise in their own name is raised again in the
-;; name of `who`, the formula procedure that was called.
+;; name of `who`, the formula procedure that was called, and a warning that a
+;; path stops early is logged in that name.
 (define (as-formula-procedure who spec thunk)
   (define names
     (map (lambda (proc) (symbol->string (object-name proc)))
@@ -929,7 +931,8 @@
       (regexp-replace #rx"^[^ :]+: " (exn-message e) (lambda (_) (format "~a: " who))))
     ((if (exn:fail:contract? e) exn:fail:contract exn:fail) message (exn-continuation-marks e)))
   (with-handlers ([family-error? (lambda (e) (raise (rename e)))])
-    (thunk)))
+    (parameterize ([current-warning-who who])
+      (thunk))))
 
 (define (formula-fit f table
                      #:family [family-name 'gaussian]
