@@ -551,7 +551,7 @@ R's vectorized @tt{pmin} is Racket's @racket[min] here, since a transform
 sees one row at a time.
 
 A name is the source as the reader writes it, so quoted data keeps its
-abbreviation, @racket['x] and not @racket[(quote x)]. A transform reads a
+abbreviation, @racket['x] and not @racketfont{(quote x)}. A transform reads a
 column's values as flonums, so the data it compares them with are flonums
 too, @racket['(40.0 50.0)] and not @racket['(40 50)], which @racket[memv]
 would never find:

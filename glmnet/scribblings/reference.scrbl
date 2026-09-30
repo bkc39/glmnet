@@ -1390,7 +1390,7 @@ as a table:
   @racket[transform-term?] value that computes it, whose name is its source,
   the datum as @racket[write] writes it with @racket[print-reader-abbreviations]
   on, so that quoted data is written @racket['x] and not
-  @racket[(quote x)]. A transform's
+  @racketfont{(quote x)}. A transform's
   @racket[proc-id] must be bound where the formula is written: in a module,
   anywhere in it; at the top level, as in the REPL, by a definition evaluated
   before the formula, since a later one cannot be seen there. A name in
