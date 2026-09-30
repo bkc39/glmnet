@@ -1,7 +1,8 @@
 #lang racket/base
 
-;; Every binding exported by `(require glmnet)` or `(require glmnet/plot)` has
-;; a reference entry: a defproc, defproc*, defstruct, defstruct*, defthing,
+;; Every binding exported by `(require glmnet)`, `(require glmnet/plot)`,
+;; `(require glmnet/data/csv)` or `(require glmnet/datasets)` has a reference
+;; entry: a defproc, defproc*, defstruct, defstruct*, defthing,
 ;; defform, defform*, defidform or defparam in the manual (deftogether is
 ;; searched through). The manual is glmnet/scribblings/glmnet.scrbl and every
 ;; file it reaches through include-section; a .scrbl file that nothing includes
@@ -20,7 +21,9 @@
            racket/set
            scribble/reader
            (only-in glmnet)
-           (only-in glmnet/plot))
+           (only-in glmnet/plot)
+           (only-in glmnet/data/csv)
+           (only-in glmnet/datasets))
 
   (define-runtime-path scribblings-dir "../scribblings")
 
@@ -195,7 +198,7 @@
     (check-true (set-member? (exported 'glmnet) 'rows->design-matrix))
     (check-true (set-member? (exported 'glmnet/plot) 'plot-coefficient-path)))
 
-  (for ([mod (in-list '(glmnet glmnet/plot))])
+  (for ([mod (in-list '(glmnet glmnet/plot glmnet/data/csv glmnet/datasets))])
     (test-case (format "every export of ~a has a reference entry" mod)
       (define missing
         (sort (set->list (set-subtract (exported mod) documented)) symbol<?))

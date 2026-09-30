@@ -16,14 +16,14 @@ the formula front end writes @racket[(~ mpg (* wt hp))], or
 
 @section[#:tag "ex-formula-interactions-data"]{The data}
 
-@racketmodname[glmnet/examples/data/mtcars] provides R's @tt{mtcars} as a
-table: 32 cars from the 1974 Motor Trend road tests, with R's eleven columns,
+@racketmodname[glmnet/datasets] provides R's @tt{mtcars} as a table: 32 cars
+from the 1974 Motor Trend road tests, with R's eleven columns,
 among them miles per gallon (@racket["mpg"]), weight in thousands of pounds
 (@racket["wt"]), horsepower (@racket["hp"]) and the quarter-mile time in
 seconds (@racket["qsec"]):
 
 @examples[#:eval ev #:label #f
-(require glmnet/examples/data/mtcars)
+(require glmnet/datasets)
 (table-column-names mtcars)
 ]
 

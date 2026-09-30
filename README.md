@@ -22,9 +22,9 @@ penalty factors, coefficient limits and offsets (#12), and sparse predictor
 matrices (#11). See `AGENTS.md` for the development workflow.
 
 The Scribble manual (`glmnet/scribblings/`) has a user guide (getting started,
-concepts, formulas and named data, plots, one worked example per model family
-and three on formulas: interactions, transforms and factors)
-and an API reference.
+concepts, data, formulas and named data, plots, R glmnet's Quick Start on R's
+own data, one worked example per model family and three on formulas:
+interactions, transforms and factors) and an API reference.
 With the package installed, build it with
 `raco scribble --htmls glmnet/scribblings/glmnet.scrbl`.
 
@@ -63,6 +63,23 @@ levels of the fit:
 (formula-cv (~ (surv time status) (- all id)) patients #:family 'cox)
 ```
 
+## Example data and CSV files
+
+R glmnet's example datasets, the data of its vignettes, and R's `mtcars` and
+`iris` ship with the package in `glmnet/datasets`, exported from R with every
+double exact. Each loader returns its family fitter's arguments, as R's
+`data(QuickStartExample)` gives `x` and `y`. `glmnet/data/csv` reads and
+writes tables as CSV files, with no dependency:
+
+```racket
+(require glmnet glmnet/datasets glmnet/data/csv)
+(define-values (x y) (quick-start-example))   ; R's QuickStartExample, 100 x 20
+(elnet-cv x y #:fold-ids (for/list ([i 100]) (modulo i 10)))
+(call-with-values cox-example cox-path)        ; x, times and statuses
+(define t (csv-file->table "patients.csv"))    ; numbers as flonums, strings as factors
+(table->csv-file t "copy.csv")
+```
+
 ## Plots
 
 The coefficient-path and cross-validation plots of R's `plot.glmnet` and
@@ -90,7 +107,7 @@ The manual's *Plots* chapter draws every plot it describes.
 
 ```bash
 nix develop                     # builds the native lib + link-installs the package
-bash scripts/run-examples.sh    # runs all twelve examples (glmnet/examples/); prints each fit
+bash scripts/run-examples.sh    # runs all thirteen examples (glmnet/examples/); prints each fit
 raco test ./glmnet/             # full suite: unit tests + example harnesses
 ```
 

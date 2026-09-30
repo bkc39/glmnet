@@ -26,6 +26,17 @@ echo "1954875ba66f81ffe1fb24997718f65cf1ab1510546121f65a52b088ef99d177  fortran/
 
 The Gaussian no-intercept fix (#33) is part of upstream since R glmnet 3.0-3.
 
+## Example datasets (`glmnet/datasets/`)
+
+The CSV files under `glmnet/datasets/`, which `glmnet/datasets` loads (#61), are R's data, exported by `scripts/export-datasets.R` from the Nix-pinned R (`nix develop .#r-parity -c Rscript scripts/export-datasets.R`, so `flake.lock` fixes the versions):
+
+| File | Source | License |
+| --- | --- | --- |
+| `QuickStartExample.csv`, `BinomialExample.csv`, `MultinomialExample.csv`, `PoissonExample.csv`, `CoxExample.csv`, `MultiGaussianExample.csv`, `SparseExample.csv` | R glmnet **4.1-10**'s `data/*.rda`, loaded with `data()` | GPL-2 (only), R glmnet's, like the Fortran |
+| `mtcars.csv`, `iris.csv` | R 4.5.3's `datasets` package (`datasets::mtcars`, and `datasets::iris` with `Species` as strings) | part of R, GPL-2 or GPL-3 |
+
+Each glmnet dataset is one file: the columns of `x`, named `V1`, `V2`, ... as R's `coef` names the columns of these unnamed matrices, then `y`, named `y` when it is a vector or one column, by its column names (`CoxExample`'s `time` and `status`), or `y1`, `y2`, ... (`MultiGaussianExample`). `SparseExample`'s `x`, a `dgCMatrix` in R, is written dense (sparse input is #11). `mtcars.csv` leaves out R's row names, the cars' models. Every number is written with 17 significant digits (C's `%.17g`), which a correctly rounded reader reads back as R's double. Fewer digits cannot be chosen by reading them back in R, because R's reader (`R_strtod`) is not correctly rounded: it reads `-0.827587926753309` as the double `-0.82758792675330906`, where a correctly rounded reader, such as Racket's `string->number`, reads `-0.82758792675330894`, and some of the 15- and 16-digit forms of these datasets' values that R reads back as its double are another double to Racket. The parity goldens (`dataset-*`) record every number of every file as C's `%a`, R's exact double, and `parity-test.rkt` checks that `csv-file->table` reads each one back bit for bit. `CVXResults`, the CVX solution of the vignette's Appendix 2, is not exported: the appendix needs `predict(..., exact = TRUE)`, which is not reproduced.
+
 ## Behaviour R adds around the Fortran
 
 R's R-level wrappers do some work before and after calling the Fortran. What our shim (`../glmnet_capi.f90`) and the Racket side reproduce:
@@ -110,6 +121,14 @@ R's R-level wrappers do some work before and after calling the Fortran. What our
   - *Not reproduced:* `offset()`, a transformed response (`log(y) ~ x`), `.` inside a function call, and R's `specials`.
   - *A transformed response.* `(~ (log mpg) wt)` is a syntax error that says a transformed response is not supported. The response `(y1 y2)` is R's `cbind(y1, y2)`, so a response of several columns is told from a transform by its first name: a group that starts with `I`, or with a bound name and holds more than column names, is refused when the formula is compiled, and one whose first name is a procedure where the formula is written, such as `log`, when the formula is made. Columns of a response named like a procedure are written as strings.
   - *Names that R's syntax does not allow.* R's `model.matrix` puts backticks around a column name like `blood pressure` or `blood-pressure`, alone and inside an interaction: `` `blood pressure` `` and `` `blood pressure`:wt ``. The design matrix here keeps the table's name, `blood pressure` and `blood pressure:wt`, and so do `coef` and `predict`. As a consequence, a column named `wt:hp` beside the interaction of `wt` and `hp`, which R names `` `wt:hp` `` and `wt:hp`, gives two columns with the same name here, and a column named `(Intercept)`, which R names `` `(Intercept)` ``, has the name `coef` gives the intercept. Either is an error naming the column, since `coef` keys the coefficients by name.
+
+- **Example datasets (#61).** R's `data(QuickStartExample)` makes a list of `x` and `y`; `(quick-start-example)` returns them as two values, the arguments of the family's fitter, and `(cox-example)` returns three, since `cox-fit` takes the times and the statuses apart. `MultinomialExample`'s classes are 1, 2 and 3 in R and 0, 1 and 2 here, the labels `multinomial-fit` takes, and `predict` with `#:type 'class` returns those. Class labels and counts are exact integers, and `SparseExample` is dense.
+- **CSV files (#61).** `glmnet/data/csv` is not R's `read.csv` and `write.csv`, but follows them where it can: quotes do not change a cell's value (`"42"` is a number), `NA` is missing whether it is quoted or not, a quoted empty cell is the empty string, `Inf`, `-Inf` and `NaN` are numbers, and `TRUE` and `FALSE` are logicals. Where it differs:
+  - *A cell has its own type.* R's `type.convert` gives a column one type, so a column with one string is a column of strings; here each cell is read on its own, and a column that mixes numbers and strings is an error when a formula reads it, naming the column and the first value of the other kind.
+  - *Missing cells.* R reads an empty cell of a numeric column, a blank one and `NA` as `NA`, and an empty cell of a character column as `""`. Each is an error here that names the column, the row and the line, except a quoted empty cell, which is `""`, so that `table->csv` can write the empty string.
+  - *Precision.* R's `write.csv` writes 15 significant digits, so `0.1 + 0.2` becomes `0.3`. `table->csv` writes the shortest decimal that reads back as the same double, `0.30000000000000004`, and `csv->table` reads decimals correctly rounded, where R's reader is not (above).
+  - *What cannot be written.* R writes a missing value and the string `"NA"` alike and reads both back as `NA`. A table has no missing values, and `table->csv` refuses the string `"NA"`, which would read back as a missing cell, rather than write it.
+  - *Not reproduced:* `read.csv`'s other arguments: other separators, `na.strings`, `colClasses`, `skip`, comment characters, row names, and R's name mangling (`check.names`). Blank lines are not skipped; in a file of one column, a blank line is a missing cell.
 
 ## Build notes
 

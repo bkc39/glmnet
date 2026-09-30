@@ -132,7 +132,8 @@ or a design matrix with column names. A @deftech{formula}, written with
 
 The model keys its coefficients by name, and predicts from a table by
 matching its columns by name. @secref["formulas"] covers tables, formulas and
-the models fitted from them.
+the models fitted from them, and @secref["data"] where data comes from: R
+glmnet's example datasets and CSV files.
 
 @section[#:tag "concepts-penalty"]{The penalty: @math{α} and @math{λ}}
 

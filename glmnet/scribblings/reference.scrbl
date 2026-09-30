@@ -8,7 +8,9 @@
 @declare-exporting[glmnet]
 
 Every binding below is provided by @racketmodname[glmnet], except those of
-@secref["ref-plot"], which @racketmodname[glmnet/plot] provides. Each model
+@secref["ref-csv"], @secref["ref-datasets"] and @secref["ref-plot"], which
+@racketmodname[glmnet/data/csv], @racketmodname[glmnet/datasets] and
+@racketmodname[glmnet/plot] provide. Each model
 family has a fit procedure, a path fitter, a cross-validation procedure, a
 transparent result struct and prediction helpers. The formula front end
 (@secref["ref-formula"]) fits any family from a @tech{table}. Every result
@@ -283,14 +285,189 @@ tables in use.
   (eval:error (table->design-matrix patients))
   (eval:error (table->design-matrix patients '("age" "weight")))]}
 
-@subsection[#:tag "ref-mtcars"]{Example data}
+@subsection[#:tag "ref-csv"]{CSV files}
 
-The formula examples and tests use R's @tt{mtcars} and @tt{iris}, which these
-modules provide. @racketmodname[glmnet] does not re-export them.
+@defmodule[glmnet/data/csv]
 
-@subsubsection[#:tag "ref-mtcars-table"]{Motor Trend cars}
+@racketmodname[glmnet/data/csv] reads and writes @tech{tables} as CSV files,
+following @hyperlink["https://www.rfc-editor.org/rfc/rfc4180"]{RFC 4180}.
+@racketmodname[glmnet] does not re-export it. See @secref["data-csv"].
 
-@defmodule[glmnet/examples/data/mtcars]
+When reading, the first record is the header, whose cells name the columns:
+each name must be non-empty and appear once. Records end with a line feed, a
+carriage return or both, and the last one need not; a byte-order mark at the
+start is skipped. A cell in double quotes can hold commas, line breaks and
+double quotes, which are written twice. Every record must have one cell per
+column. The value of a cell does not depend on its quotes, or on the other
+cells of its column:
+
+@itemlist[
+ @item{A cell is missing when it is empty and not quoted, or holds only
+       spaces and tabs, or is R's @tt{NA}, quoted or not. A missing cell is an
+       error.}
+ @item{A decimal number, such as @tt{3}, @tt{-2.5}, @tt{.5} or
+       @tt{1e-3}, is a flonum, and so are R's @tt{Inf}, @tt{-Inf} and
+       @tt{NaN}. Spaces and tabs around a number are ignored.}
+ @item{R's @tt{TRUE} and @tt{FALSE} are @racket[#t] and @racket[#f].}
+ @item{Any other cell is a string, as written between the quotes, which
+       makes @tt{""} the empty string.}
+]
+
+The table is an association list from each name, a string, to its column, a
+list, in the header's order. An error names the procedure called, the
+column, the row, counting from 0, and the line of the input on which the row
+starts, counting from 1, and the file when there is one.
+
+When writing, the header is the table's column names, in its order, and then
+there is one line per row, each ended by a line feed. A real is written as the
+shortest decimal that reads back as the same flonum, without a trailing
+@tt{.0}, and an infinity or a NaN as R writes it; a boolean is @tt{TRUE} or
+@tt{FALSE}; and a string, or a symbol's name, is written as it is. A cell or
+a name is quoted when it holds a comma, a double quote or a line break, starts
+or ends with a space or a tab, or is empty, and a string is also quoted when
+it would read as another value, such as @racket["42"], as R's @tt{write.csv}
+quotes every string. It still reads back as that value, as it does in R. A
+string that would read back as a missing cell, @racket["NA"], cannot be
+written, nor can a value of another kind or a column without a name; an error
+names the column and the row.
+
+@defproc[(csv->table [in input-port? (current-input-port)]) table?]{
+  Reads a CSV file from @racket[in] to its end, and returns it as a table.
+
+  @examples[#:eval ev
+  (require glmnet/data/csv)
+  (csv->table (open-input-string "id,dose,treated\nA,2.5,TRUE\n\"B, 2\",5,FALSE\n"))
+  (csv->table (open-input-string "note\n\"said \"\"hi\"\"\"\n\"two\nlines\"\n"))
+  (eval:error (csv->table (open-input-string "x,y\n1,2\n3,NA\n")))]}
+
+@defproc[(csv-file->table [path path-string?]) table?]{
+  Reads the CSV file at @racket[path] as @racket[csv->table] reads a port.
+
+  @examples[#:eval ev
+  (define mtcars-file (collection-file-path "mtcars.csv" "glmnet" "datasets"))
+  (map car (csv-file->table mtcars-file))]}
+
+@defproc[(table->csv [table table?] [out output-port? (current-output-port)]) void?]{
+  Writes @racket[table] to @racket[out] as a CSV file.
+
+  @examples[#:eval ev
+  (table->csv (list (cons "x" (list 1 0.1 1/3 +inf.0))
+                    (cons "label" '("a" "b, c" "42" say))
+                    (cons "flag" '(#t #f #t #f))))
+  (define out (open-output-string))
+  (table->csv (list (cons "x" (list 0.1 (+ 0.1 0.2) 1e-300))) out)
+  (get-output-string out)
+  (csv->table (open-input-string (get-output-string out)))
+  (eval:error (table->csv (list (cons "code" '("NA" "b")))))]}
+
+@defproc[(table->csv-file [table table?]
+                          [path path-string?]
+                          [#:exists exists
+                                    (or/c 'error 'append 'update 'replace 'truncate 'truncate/replace)
+                                    'error])
+         void?]{
+  Writes @racket[table] to the file at @racket[path] as @racket[table->csv]
+  writes it to a port. @racket[exists] says what to do when the file exists, as
+  for @racket[open-output-file].
+
+  @examples[#:eval ev
+  (require racket/file)
+  (define path (make-temporary-file "table-~a.csv"))
+  (table->csv-file (list (cons "x" '(1 2)) (cons "y" '(3.5 4.5))) path #:exists 'replace)
+  (file->string path)
+  (csv-file->table path)]}
+
+@section[#:tag "ref-datasets"]{Example datasets}
+
+@defmodule[glmnet/datasets]
+
+@racketmodname[glmnet/datasets] provides the example datasets of R's glmnet
+4.1.10, which its vignettes use, and R's @tt{mtcars} and @tt{iris}, which the
+formula examples use. @racketmodname[glmnet] does not re-export it. See
+@secref["data-datasets"].
+
+A dataset is a CSV file in the package, under @filepath{glmnet/datasets/},
+which @filepath{scripts/export-datasets.R} writes from R with 17 significant
+digits, so that every number reads back as R's double. R glmnet's datasets
+have a procedure each, which reads its file on its first call and returns the
+same values on every call. The values are the arguments of the family's
+fitter, in order: the predictors as a design matrix whose columns are named
+@racket["V1"], @racket["V2"], and so on, as R's @tt{coef} names the columns
+of these unnamed matrices, and then the response, in the shape the family
+takes (see @secref["concepts-data"]). @racket[mtcars] and @racket[iris] are
+tables, read when the module is instantiated.
+
+@defproc[(quick-start-example) (values design-matrix? (listof flonum?))]{
+  R's @tt{QuickStartExample}, the data of the vignette's Quick Start: 100
+  observations of 20 predictors and a numeric response, for
+  @racket[elnet-fit] and its relatives. See @secref["ex-quick-start"].
+
+  @examples[#:eval ev
+  (require glmnet/datasets)
+  (define-values (x y) (quick-start-example))
+  x
+  (length y)
+  (lasso x y #:lambda 0.1)]}
+
+@defproc[(binomial-example) (values design-matrix? (listof (or/c 0 1)))]{
+  R's @tt{BinomialExample}: 100 observations of 30 predictors and a 0/1
+  response, for @racket[logistic-fit] and its relatives.
+
+  @examples[#:eval ev
+  (define-values (bx by) (binomial-example))
+  (list (design-matrix-nrows bx) (design-matrix-ncols bx))
+  (for/sum ([label (in-list by)]) label)]}
+
+@defproc[(multinomial-example) (values design-matrix? (listof (or/c 0 1 2)))]{
+  R's @tt{MultinomialExample}: 500 observations of 30 predictors and a class
+  label, for @racket[multinomial-fit] and its relatives. R's classes are 1, 2
+  and 3; they are 0, 1 and 2 here, the labels @racket[multinomial-fit] takes.
+
+  @examples[#:eval ev
+  (define-values (mx my) (multinomial-example))
+  (for/list ([k (in-range 3)])
+    (for/sum ([label (in-list my)]) (if (= label k) 1 0)))]}
+
+@defproc[(poisson-example) (values design-matrix? (listof exact-nonnegative-integer?))]{
+  R's @tt{PoissonExample}: 500 observations of 20 predictors and a count,
+  for @racket[poisson-fit] and its relatives.
+
+  @examples[#:eval ev
+  (define-values (px py) (poisson-example))
+  (apply max py)]}
+
+@defproc[(cox-example)
+         (values design-matrix? (listof (and/c flonum? positive?)) (listof (or/c 0 1)))]{
+  R's @tt{CoxExample}: 1000 observations of 30 predictors, and the survival
+  times and statuses, R's columns @tt{time} and @tt{status}, for
+  @racket[cox-fit] and its relatives, which take them as two arguments. A
+  status is 1 for a death and 0 for a censored time.
+
+  @examples[#:eval ev
+  (define-values (cx time status) (cox-example))
+  (for/sum ([s (in-list status)]) s)
+  (cox-path cx time status #:nlambda 5)]}
+
+@defproc[(multi-gaussian-example) (values design-matrix? design-matrix?)]{
+  R's @tt{MultiGaussianExample}: 100 observations of 20 predictors and four
+  numeric responses, for @racket[mgaussian-fit] and its relatives. The
+  responses are a design matrix whose columns are named @racket["y1"] to
+  @racket["y4"], as R's @tt{coef} names them.
+
+  @examples[#:eval ev
+  (define-values (gx gy) (multi-gaussian-example))
+  (design-matrix-column-names gy)]}
+
+@defproc[(sparse-example) (values design-matrix? (listof flonum?))]{
+  R's @tt{SparseExample}: 100 observations of 20 predictors, 84% of whose
+  entries are zero, and a numeric response. R holds the predictors as a
+  sparse matrix; here they are a dense design matrix, until sparse input is
+  supported (@hyperlink["https://github.com/bkc39/glmnet/issues/11"]{#11}).
+
+  @examples[#:eval ev
+  (define-values (sx sy) (sparse-example))
+  (for*/sum ([row (in-list (design-matrix->rows sx))] [v (in-list row)])
+    (if (zero? v) 1 0))]}
 
 @defthing[mtcars table?]{
   R's @tt{datasets::mtcars}, from the 1974 Motor Trend road tests of 32 cars,
@@ -298,17 +475,12 @@ modules provide. @racketmodname[glmnet] does not re-export them.
   @racket["mpg"], @racket["cyl"], @racket["disp"], @racket["hp"],
   @racket["drat"], @racket["wt"], @racket["qsec"], @racket["vs"],
   @racket["am"], @racket["gear"] and @racket["carb"], in R's order, with the
-  cars in R's order, from the Mazda RX4 to the Volvo 142E. Each value is the
-  shortest decimal that R reads as the same double as its own copy holds.
+  cars in R's order, from the Mazda RX4 to the Volvo 142E. R's row names, the
+  cars' models, are not a column.
 
   @examples[#:eval ev
-  (require glmnet/examples/data/mtcars)
   (table-column-names mtcars)
   (cdr (assoc "wt" mtcars))]}
-
-@subsubsection[#:tag "ref-iris"]{Iris flowers}
-
-@defmodule[glmnet/examples/data/iris]
 
 @defthing[iris table?]{
   R's @tt{datasets::iris}, Anderson's measurements of 150 irises, 50 of each
@@ -321,7 +493,6 @@ modules provide. @racketmodname[glmnet] does not re-export them.
   gives. The flowers are in R's order.
 
   @examples[#:eval ev
-  (require glmnet/examples/data/iris)
   (table-column-names iris)
   (formula-predictor-names (Sepal.Length . ~ . Petal.Width + Species) iris)]}
 
@@ -1416,11 +1587,10 @@ needs at least one predictor.
 
 The examples in this section use R's @tt{mtcars}, 32 cars of the 1974 Motor
 Trend road tests, and R's @tt{iris}, 150 irises of three species, which
-@racketmodname[glmnet/examples/data/mtcars] and
-@racketmodname[glmnet/examples/data/iris] provide as tables:
+@racketmodname[glmnet/datasets] provides as tables (see @secref["ref-datasets"]):
 
 @examples[#:eval ev #:label #f
-(require glmnet/examples/data/mtcars glmnet/examples/data/iris)
+(require glmnet/datasets)
 (table-column-names mtcars)
 (table-column-names iris)
 ]

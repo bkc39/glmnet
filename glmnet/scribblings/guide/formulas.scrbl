@@ -579,12 +579,10 @@ a species or a number of cylinders, rather than measure a quantity. R's
 @tt{model.matrix} expands a factor into indicator columns, and so does the
 formula front end. The examples in this section use R's @tt{mtcars}, whose
 @racket["cyl"] counts each car's cylinders, and R's @tt{iris}, whose
-@racket["Species"] names each flower's species as a string. The modules
-@racketmodname[glmnet/examples/data/mtcars] and
-@racketmodname[glmnet/examples/data/iris] provide them as tables:
+@racket["Species"] names each flower's species as a string. @racketmodname[glmnet/datasets] provides them as tables:
 
 @examples[#:eval ev #:label #f
-(require glmnet/examples/data/mtcars glmnet/examples/data/iris)
+(require glmnet/datasets)
 (table-column-names iris)
 (list-ref (cdr (assoc "Species" iris)) 100)
 ]

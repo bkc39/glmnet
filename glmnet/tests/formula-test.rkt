@@ -24,8 +24,7 @@
            (only-in racket/math sqr)
            (for-syntax racket/base syntax/parse)
            glmnet
-           glmnet/examples/data/mtcars
-           (only-in glmnet/examples/data/iris [iris iris-species])
+           (only-in glmnet/datasets mtcars [iris iris-species])
            (file "../private/demo-utils.rkt"))
 
   (define longley (load-table "longley"))
