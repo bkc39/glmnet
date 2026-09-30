@@ -373,7 +373,8 @@
       (define (ours)
         (vector-ref (cdr (assoc "a" (csv->table (open-input-string (string-append "a,b\n" cell ",z\n")))))
                     0))
-      (define blank? (regexp-match? #px"^\\s*$" token))
+      (define blank?
+        (regexp-match? #px"^[\\s\v\u1680\u2000-\u2006\u2008-\u200A\u2028\u2029\u205F\u3000]*$" token))
       (test-case (format "csv-cells ~s is R's ~a ~a" cell (hash-ref c 'class) (hash-ref c 'value))
         (cond
           [(and (hash-ref c 'na) (hash-ref c 'quoted) blank?) (check-equal? (ours) token)]

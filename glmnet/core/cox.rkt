@@ -80,17 +80,15 @@
 ;; (initialization numerical error) fatal codes on top of the shared cases in
 ;; `check-jerr`.
 (define (check-cox-jerr jerr who [lmu #f])
-  (cond
-    [(= jerr 8888)
-     (error who
-            "all observations are censored; Cox needs at least one event (status = 1)")]
-    [(or (= jerr 20000) (= jerr 30000))
-     (error who
-            (format (string-append
-                     "Cox initialization numerical error (jerr=~a); check the data "
-                     "or try a larger lambda")
-                    jerr))]
-    [else (check-jerr jerr who lmu)]))
+  (when (= jerr 8888)
+    (error who "all observations are censored; Cox needs at least one event (status = 1)"))
+  (when (or (= jerr 20000) (= jerr 30000))
+    (error who
+           (format (string-append
+                    "Cox initialization numerical error (jerr=~a); check the data "
+                    "or try a larger lambda")
+                   jerr)))
+  (check-jerr jerr who lmu))
 
 ;; A follow-up time is positive as a flonum, and a status is 1 for an event
 ;; and 0 for a censored time.

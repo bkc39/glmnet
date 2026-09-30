@@ -93,6 +93,18 @@
       (check-false (array-strict? A))
       (check-equal? (array->response A) (cdr A+y) (format "~a" A))))
 
+  (test-case "array-broadcast and array-lazy are lazy at the default strictness, and convert"
+    (check-true (array-strictness))
+    (for ([M (in-list (list (array-broadcast (array #[1.0 2.0 3.0]) #(2 3))
+                            (array-lazy (matrix-transpose F))))]
+          [rows (in-list '(((1.0 2.0 3.0) (1.0 2.0 3.0)) ((1.0 4.0) (2.0 5.0) (3.0 6.0))))])
+      (check-false (array-strict? M))
+      (check-equal? (matrix->design-matrix M) (rows->design-matrix rows) (format "~a" M)))
+    (for ([A (in-list (list (array-lazy (matrix-col F 2)) (array-broadcast (array 7.0) #(3))))]
+          [y (in-list '((3.0 6.0) (7.0 7.0 7.0)))])
+      (check-false (array-strict? A))
+      (check-equal? (array->response A) y (format "~a" A))))
+
   (test-case "-0.0 and the smallest subnormal convert bit for bit on every path"
     (define xs '((-0.0 5e-324) (-5e-324 0.0)))
     (define dm (rows->design-matrix xs))
