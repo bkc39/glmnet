@@ -32,8 +32,9 @@ A @tech{table} is any of these:
  @item{a @racket[design-matrix?] with column names.}
 ]
 
-A name is a string or a symbol, and a column a list or vector of reals, or
-of strings, symbols or booleans, which a formula reads as categories (see
+A name is a string or a symbol, and a column a list, vector, @racket[flvector]
+or @racket[f64vector] of reals, or a list or vector of strings, symbols or
+booleans, which a formula reads as categories (see
 @secref["formulas-factors"]). Names are compared as strings, so the symbol
 @racket['age] and the string @racket["age"] name the same column. The examples in this chapter use a table
 of 60 simulated patients: an @racket["age"], a @racket["dose"] and a

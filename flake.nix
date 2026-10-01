@@ -63,8 +63,10 @@
       # already in native-libs/, as this flake stages libglmnetcompat, and
       # without the candidates directory, so that its pre-install hook finds
       # the library staged and leaves it be: on macOS under Nix the hook's own
-      # copy left native-libs/ empty (bkc39/rkt-polars#146).
-      installPolars = system: ''
+      # copy left native-libs/ empty (bkc39/rkt-polars#146). polarsCandidate is
+      # forced first, so that a system with no library fails with its message
+      # rather than with an error from evaluating the rkt-polars input there.
+      installPolars = system: builtins.seq (polarsCandidate system) ''
         raco pkg install --batch --copy --no-docs --scope user \
           ${rkt-polars.packages.${system}.racket-deps}/*/
         cp -r ${rkt-polars}/polars "$TMPDIR/polars"

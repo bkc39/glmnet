@@ -30,8 +30,13 @@
 (define (read-dataset name)
   (csv-file->table (build-path datasets-dir (string-append name ".csv"))))
 
-(define mtcars (read-dataset "mtcars"))
-(define iris (read-dataset "iris"))
+;; Every module that requires glmnet/datasets shares these two tables.
+(define (read-shared-dataset name)
+  (for/list ([column (in-list (read-dataset name))])
+    (cons (car column) (vector->immutable-vector (cdr column)))))
+
+(define mtcars (read-shared-dataset "mtcars"))
+(define iris (read-shared-dataset "iris"))
 
 ;; The dataset's columns V1, V2, ... as a design matrix, and its other
 ;; columns, the response, as a table.

@@ -97,7 +97,9 @@ a new format's exports are checked without editing the test. The datasets are CS
 `scripts/export-datasets.R` writes from the pinned R; the `dataset-*` parity
 goldens check every number of every file against R's, bit for bit, the
 `vignette-*` goldens the vignette's calls on each dataset, and the
-`csv-cells` golden how R's `read.csv` types each spelling of a cell.
+`csv-cells` golden how R's `read.csv` types each spelling of a cell, in a
+UTF-8 `LC_CTYPE` that `gen-reference.R` sets, since white space is
+locale-dependent in R and the Nix sandbox runs R in the C locale.
 
 The library a format adapts is a real dependency in `info.rkt`, which
 `main.rkt` does not load. `glmnet/data/polars` depends on the catalog package

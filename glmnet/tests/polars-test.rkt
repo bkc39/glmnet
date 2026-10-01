@@ -237,6 +237,13 @@
     (check-exn (error-matching #rx"^table->polars: the table has a column whose values no Polars dtype holds"
                                #rx"column: \"x\"\n  row: 1\n  element: \"b\"$")
                (lambda () (table->polars (list (cons "x" '(1 "b"))))))
+    (check-exn (error-matching #rx"^table->polars: the table has an element that is not finite\n"
+                               #rx"column: \"x\"\n  row: 1\n  element: ")
+               (lambda () (table->polars (list (list "x" 0.5 (/ (expt 10 400) 3))))))
+    (check-exn (error-matching #rx"not finite" #rx"column: \"y\"\n  row: 0\n")
+               (lambda () (table->polars (list (list "y" (/ (expt -10 401) 7) 1/2)))))
+    (check-equal? (series->list (ref (table->polars (list (list "x" (/ (expt 10 300) 3)))) "x"))
+                  (list (real->double-flonum (/ (expt 10 300) 3))))
     (check-exn (blame-matching #rx"\"x\" twice")
                (lambda () (table->polars (list (cons "x" '(1 2))) '("x" x))))
     (check-exn (blame-matching #rx"\"y\", which is not a column of the table")
