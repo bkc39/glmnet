@@ -208,6 +208,15 @@
     (for ([x (in-list xs)] [b (in-vector back)])
       (check-eqv? b (real->double-flonum x) (format "~a" x))))
 
+  ;; Racket has one NaN: every flonum NaN, a negative one or one with a
+  ;; payload, is +nan.0, and eqv? to it.
+  (test-case "a NaN is written as NaN, whatever its sign and payload"
+    (define negative (floating-point-bytes->real (bytes 0 0 0 0 0 0 #xf8 #xff) #f))
+    (define payload (floating-point-bytes->real (bytes 1 0 0 0 0 0 #xf8 #x7f) #f))
+    (check-equal? (write-csv (list (list "x" +nan.0 negative payload (- +inf.0 +inf.0))))
+                  "x\nNaN\nNaN\nNaN\nNaN\n")
+    (check-true (andmap nan? (vector->list (cdr (assoc "x" (round-trip (list (list "x" negative payload)))))))))
+
   (test-case "random flonums round-trip exactly"
     (random-seed 61)
     (define xs
