@@ -17,7 +17,8 @@
          racket/match
          (only-in "../data.rkt" design-matrix-select-rows response/c)
          (only-in (submod "../data.rkt" support) one-dimensional-length one-dimensional->vector)
-         (only-in "marshal.rkt" design-matrix-nrows design-matrix-ncols linear-predictor)
+         (only-in "marshal.rkt" design-matrix-nrows design-matrix-ncols linear-predictor
+                  current-warning-who current-warning-what)
          "model.rkt"
          "path.rkt"
          (submod "path.rkt" support))
@@ -237,18 +238,17 @@
     (define from-first-event
       (for/sum ([i (in-list rows)])
         (if (fl>= (nudged-time (vector-ref response i)) first-event) 1 0)))
-    (cond
-      [(= first-event +inf.0)
-       (raise-arguments-error
-        who (string-append "a held-out fold has no event, so its deviance is undefined "
-                           "without grouping; use #:grouped? #t")
-        "held-out fold" f)]
-      [(< from-first-event 3)
-       (raise-arguments-error
-        who (string-append "the first event of a held-out fold is among its last two observations "
-                           "in time order, so its deviance is undefined without grouping; "
-                           "use #:grouped? #t")
-        "held-out fold" f)])))
+    (when (= first-event +inf.0)
+      (raise-arguments-error
+       who (string-append "a held-out fold has no event, so its deviance is undefined "
+                          "without grouping; use #:grouped? #t")
+       "held-out fold" f))
+    (when (< from-first-event 3)
+      (raise-arguments-error
+       who (string-append "the first event of a held-out fold is among its last two observations "
+                          "in time order, so its deviance is undefined without grouping; "
+                          "use #:grouped? #t")
+       "held-out fold" f))))
 
 (define (exact-round y) (inexact->exact (round y)))
 
@@ -588,7 +588,8 @@
              (vector->list folds)))
 
 ;; Calls fit, and raises a failure again under the name of the procedure the
-;; user called, with `what` in place of the path fitter's name.
+;; user called, with `what` in place of the path fitter's name; a warning that
+;; the path stops early names them too.
 (define (fitting who what fit)
   (with-handlers ([exn:fail?
                    (lambda (e)
@@ -597,7 +598,9 @@
                                (regexp-replace #rx"^[^ :\n]+-path: " (exn-message e) "")))
                      (raise ((if (exn:fail:contract? e) exn:fail:contract exn:fail)
                              message (exn-continuation-marks e))))])
-    (fit)))
+    (parameterize ([current-warning-who (or (current-warning-who) who)]
+                   [current-warning-what what])
+      (fit))))
 
 ;; Per lambda, per observation, the link prediction of the fold path that did
 ;; not see the observation, at the full-data lambdas: R's buildPredmat with

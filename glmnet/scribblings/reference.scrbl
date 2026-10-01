@@ -1438,7 +1438,10 @@ made optional:
        @math{λ}, for example by not converging within @racket[#:max-iters]
        passes: it keeps the @math{λ} before that one and logs a warning with
        the topic @racket['glmnet] (shown with
-       @tt{PLTSTDERR="warning@"@"glmnet"}), where R warns. When glmnet fails at
+       @tt{PLTSTDERR="warning@"@"glmnet"}), where R warns. The warning names
+       the procedure called: the path fitter, or the cross-validation or formula
+       procedure that called it, with the fold whose training data it was
+       fitting. When glmnet fails at
        the first @math{λ}, the fitter raises @racket[exn:fail] instead (R
        returns an empty model).}
 ]
@@ -3020,7 +3023,8 @@ cross-validated fit @racket[cv] of @secref["ref-cv"], and the formula model
   A @racket[formula-model] must hold a @racket[glmnet-cv], from
   @racket[formula-cv].
   @racket[width], @racket[height], @racket[title] and @racket[out-file] are as
-  for @racket[plot-coefficient-path].
+  for @racket[plot-coefficient-path]. As there, a @math{λ} of @racket[0] is left
+  out, and an error is raised if every @math{λ} is @racket[0].
 
   @examples[#:eval ev
   (plot-cv cv #:sign-lambda 1 #:width 400 #:height 300)]}

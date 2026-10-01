@@ -239,6 +239,12 @@
     (check-size (plot-coefficient-path p #:xvar 'norm #:label #t) 400 400)
     (check-size (plot-coefficient-path p #:xvar 'dev) 400 400))
 
+  (test-case "a CV result whose every λ is 0 has nothing to show on a log λ axis"
+    (define cv (elnet-cv X y #:lambda '(0.0 0.0) #:fold-ids folds))
+    (for ([sign-lambda (in-list '(-1 1))])
+      (check-exn #rx"^plot-cv: every λ of the path is 0, which has no place on a log λ axis"
+                 (lambda () (plot-cv cv #:sign-lambda sign-lambda)))))
+
   (test-case "a path with no nonzero coefficient cannot be plotted, as in R"
     (define p (elnet-path X y #:lambda '(1000.0 500.0)))
     (check-equal? (coefficient-path-renderers p) '())

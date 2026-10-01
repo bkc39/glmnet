@@ -722,7 +722,9 @@ Problems are reported in three ways:
        @racket[exn:fail] with glmnet's reason, naming the procedure called. R
        warns and returns an empty model instead. A @tech{regularization path}
        that fails after fitting some @math{λ} keeps those and logs a warning
-       with the topic @racket['glmnet], as R warns.}
+       with the topic @racket['glmnet], as R warns. The warning names the
+       procedure called, and for cross-validation what it was fitting: all
+       the data, or the training data of a held-out fold.}
 ]
 
 @examples[#:eval ev #:label #f
