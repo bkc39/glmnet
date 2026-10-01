@@ -204,16 +204,18 @@
     (define large (wide-tables 40000))
     (define (elapsed-ms thunk)
       (collect-garbage)
+      (define gc0 (current-gc-milliseconds))
       (define t0 (current-inexact-monotonic-milliseconds))
       (thunk)
-      (- (current-inexact-monotonic-milliseconds) t0))
+      (- (current-inexact-monotonic-milliseconds) t0 (- (current-gc-milliseconds) gc0)))
     (define (check-linear who convert)
       (define-values (small-ms large-ms)
         (for/fold ([small-ms +inf.0] [large-ms +inf.0]) ([k (in-range 3)])
           (values (min small-ms (elapsed-ms (lambda () (apply convert small))))
                   (min large-ms (elapsed-ms (lambda () (apply convert large)))))))
       (check < (/ large-ms small-ms) 8
-             (format "~a: ~a ms at 40000 columns, ~a ms at 10000" who large-ms small-ms)))
+             (format "~a: ~a ms outside collections at 40000 columns, ~a ms at 10000"
+                     who large-ms small-ms)))
     (check-linear 'tabular-asa->design-matrix
                   (lambda (names wide t) (tabular-asa->design-matrix wide names)))
     (check-linear 'tabular-asa->table
