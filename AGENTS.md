@@ -80,7 +80,13 @@ names:
   its `@defmodule`, after `ref-data` (the design-matrix layer) and before
   `ref-datasets`;
 - the Concepts section `concepts-data` holds only what every fitter accepts:
-  the design matrix, the response forms and named data.
+  the design matrix, the response forms and named data;
+- the literate example `examples/13-data-sources.rkt` (guide page
+  `guide/examples/data-sources.scrbl`, tag `ex-data-sources`) fits R's
+  `mtcars` from every format, and its harness checks that each gives the
+  same design matrix and path, and R's numbers. A new format adds its
+  source there, with a section `ex-data-sources-<format>`: the per-feature
+  workflow's example, step 1, for a format.
 
 A format builds its design matrix, and reports bad data, with the one support
 set in `data.rkt`'s `support` submodule, which documents each procedure:

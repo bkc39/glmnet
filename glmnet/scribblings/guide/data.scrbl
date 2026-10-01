@@ -10,7 +10,8 @@ front end reads a @tech{table}. This chapter is about where they come from:
 the example datasets that ship with the package, tables, Racket's own lists
 and vectors, CSV files, @racketmodname[math/matrix] matrices and Polars
 dataframes. Each data format is a module under @filepath{glmnet/data/}, which
-@racket[(require glmnet)] does not load.
+@racket[(require glmnet)] does not load. @secref["ex-data-sources"] fits one
+dataset from each of them.
 
 @local-table-of-contents[]
 
