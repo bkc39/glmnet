@@ -47,12 +47,18 @@
       # Its pre-install hook picks the candidate by OS family, which would give
       # an x86-64 library to aarch64 Linux (bkc39/rkt-polars#146), so the flake
       # picks it by system, and refuses a system with none.
+      polarsCandidates = {
+        x86_64-linux = "linux/libcompat.so";
+        aarch64-darwin = "darwin/libcompat.dylib";
+      };
       polarsCandidate = system:
-        {
-          x86_64-linux = "linux/libcompat.so";
-          aarch64-darwin = "darwin/libcompat.dylib";
-        }.${system} or (throw
+        polarsCandidates.${system} or (throw
           "glmnet: rkt-polars ships no native library for ${system}, so glmnet/data/polars cannot be installed there (bkc39/rkt-polars#146)");
+
+      # The Racket package depends on polars, so it, the default package and
+      # the parity check exist only on the systems polars has a library for;
+      # the native library builds on all four.
+      hasPolars = system: polarsCandidates ? ${system};
 
       # Installs polars (rkt-polars) and its dependency closure offline into
       # $PLTUSERHOME, before glmnet. Its Racket dependencies are installed first:
@@ -243,8 +249,10 @@
           };
         in
         {
+          inherit native copy-native-libs gen-goldens;
+        } // nixpkgs.lib.optionalAttrs (hasPolars system) {
           default = racket;
-          inherit native racket copy-native-libs gen-goldens parity;
+          inherit racket parity;
         });
 
       apps = forAllSystems (system: {
@@ -258,9 +266,12 @@
         };
       });
 
-      checks = forAllSystems (system: {
-        inherit (self.packages.${system}) native racket parity;
-      });
+      checks = forAllSystems (system:
+        {
+          inherit (self.packages.${system}) native;
+        } // nixpkgs.lib.optionalAttrs (hasPolars system) {
+          inherit (self.packages.${system}) racket parity;
+        });
 
       devShells = forAllSystems (system:
         let

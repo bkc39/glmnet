@@ -75,7 +75,9 @@ datasets <- list(longley = load_longley(), wdbc = load_wdbc(),
 ## --- the generic interface (#25) ---------------------------------------------
 ## R's coef(fit, s) and predict(fit, newx, s, type) with the default
 ## exact = FALSE, for every type the family has, as one entry per s. newx is
-## the training X. Class labels become integers (the factor levels are 0..K-1).
+## the training X. Class labels become integers (the factor levels are 0..K-1)
+## when the response was numbers; a response of strings or booleans keeps
+## its labels, whatever they spell: "0" and "1" stay strings.
 ## coef_names records how R names coef's result (#26): the row names, which
 ## are "(Intercept)" and colnames(X), and, for a list, the names of its
 ## elements (the class levels, or colnames(Y) for the multi-response family).
@@ -88,15 +90,14 @@ predict_types <- function(family)
   switch(family, binomial = , multinomial = c("link", "response", "class"),
          c("link", "response"))
 
-generic_outputs <- function(fit, family, X, s) {
+generic_outputs <- function(fit, family, X, s, numeric_classes = TRUE) {
   per_s <- function(P)               # n x |s|, or n x K x |s| (multinomial, mgaussian)
     lapply(seq_along(s), function(i)
       if (length(dim(P)) == 3) unname(P[, , i]) else unname(P[, i]))
   preds <- list()
   for (type in predict_types(family)) {
     P <- predict(fit, newx = X, s = s, type = type)
-    ## Classes that are numbers become integers; a factor's labels stay.
-    if (type == "class" && all(grepl("^[0-9]+$", P))) P <- array(as.integer(P), dim(P))
+    if (type == "class" && numeric_classes) P <- array(as.integer(P), dim(P))
     preds[[type]] <- per_s(P)
   }
   co <- coef(fit, s = s)
@@ -478,10 +479,13 @@ for (f in cv_fixtures) {
 ## rather than strings. The tables `cars` and `mixed` exist only here, and
 ## their goldens carry them (`table`).
 
-## mtcars with a string column and a logical one.
+## mtcars with string columns and a logical one; transmission and cylinders
+## are classes spelt as numbers, "0"/"1" and "4"/"6"/"8".
 cars <- transform(datasets::mtcars,
                   gearbox = ifelse(am == 1, "manual", "automatic"),
-                  heavy = wt > 3.3)
+                  heavy = wt > 3.3,
+                  transmission = as.character(am),
+                  cylinders = as.character(cyl))
 ## A string column whose levels differ in case and start with digits and _,
 ## for the order of the levels.
 mixed <- data.frame(
@@ -715,6 +719,14 @@ formula_fixtures <- list(
        rkt = c("(gearbox . ~ . wt + qsec)"), lambda = c(0.2, 0.05, 0.02, 0.01)),
   list(id = "formula-cars-binomial-logical", dataset = "cars", family = "binomial", r = "heavy ~ hp + qsec",
        rkt = c("(heavy . ~ . hp + qsec)"), lambda = c(0.2, 0.05, 0.02, 0.01)),
+  ## Classes spelt as numbers are labels, strings in R's predict.
+  list(id = "formula-cars-binomial-digit-labels", dataset = "cars", family = "binomial",
+       r = "transmission ~ wt + qsec",
+       rkt = c("(transmission . ~ . wt + qsec)"), lambda = c(0.2, 0.05, 0.02, 0.01),
+       newdata = "data.frame(wt = c(2.5, 3.5), qsec = c(17, 19))"),
+  list(id = "formula-cars-multinomial-digit-labels", dataset = "cars", family = "multinomial",
+       r = "cylinders ~ mpg + hp",
+       rkt = c("(cylinders . ~ . mpg + hp)"), lambda = c(0.2, 0.05, 0.02, 0.01)),
   ## The response in an interaction is kept, and xlevels leave it out.
   list(id = "formula-iris-response-interaction", dataset = "iris", family = "multinomial",
        r = "Species ~ Sepal.Length:Species",
@@ -789,7 +801,7 @@ for (fx in formula_fixtures) {
                  column_names = I(colnames(x)),
                  columns = unname(lapply(seq_len(ncol(x)), function(j) unname(x[, j]))),
                  warnings = I(warnings),
-                 generic = generic_outputs(fit, family, x, s),
+                 generic = generic_outputs(fit, family, x, s, numeric_classes = is.numeric(y)),
                  meta = meta)
   if (fx$dataset %in% inline_data) golden$table <- table_json(d)
   if (!is.null(fx$symbols)) golden$symbols <- I(fx$symbols)
@@ -799,7 +811,7 @@ for (fx in formula_fixtures) {
     stopifnot(identical(colnames(xn), colnames(x)))
     golden$new_table <- table_json(nd)
     golden$new_columns <- unname(lapply(seq_len(ncol(xn)), function(j) unname(xn[, j])))
-    golden$new_predict <- generic_outputs(fit, family, xn, s)$predict_s
+    golden$new_predict <- generic_outputs(fit, family, xn, s, numeric_classes = is.numeric(y))$predict_s
   }
   if (!is.null(fx$bad_newdata)) {
     nd <- eval(parse(text = fx$bad_newdata))

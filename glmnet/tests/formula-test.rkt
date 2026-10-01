@@ -263,6 +263,24 @@
                   '("wt" "cyl:wt" "disp:wt" "hp:wt" "drat:wt" "wt:qsec" "wt:vs" "wt:am" "wt:gear"
                     "wt:carb")))
 
+  ;; R crosses (a + b + c)^n n - 1 times: R 4.5.3 takes 1.7 s for terms(y ~
+  ;; (a + b + c)^1000000), whose terms are those of (a + b + c)^3. Expanding
+  ;; stops once a crossing adds nothing, so an exponent of a billion is no
+  ;; slower than one of 4; it used to cross a billion times.
+  (test-case "a power past the number of terms stops crossing, with R's terms"
+    (define result (box #f))
+    (define worker
+      (thread (lambda ()
+                (set-box! result
+                          (list (mtcars-names (~ mpg (^ (+ wt hp qsec) 1000000000)))
+                                (mtcars-names (~ mpg (^ wt 1000000000))))))))
+    (check-not-false (sync/timeout 10 worker) "expanding a power of a billion takes over 10 s")
+    (kill-thread worker)
+    (check-equal? (unbox result)
+                  (list (mtcars-names (~ mpg (^ (+ wt hp qsec) 3))) '("wt")))
+    (check-equal? (mtcars-names (~ mpg (^ (+ wt hp qsec) 3)))
+                  '("wt" "hp" "qsec" "wt:hp" "wt:qsec" "hp:qsec" "wt:hp:qsec")))
+
   (test-case "- removes terms that are equal, and ignores an absent one, as R does"
     ;; mpg ~ wt * hp - hp
     (check-equal? (mtcars-names (~ mpg (- (* wt hp) hp))) '("wt" "wt:hp"))
@@ -1026,6 +1044,34 @@
                                                                         (cons "x" '(1 2 4))))))
                   '((1.0 4.0 16.0))))
 
+  ;; R's model.frame evaluates each variable once, and model.matrix codes the
+  ;; values it holds; a factor's levels and its columns come from that one
+  ;; evaluation. It used to be evaluated twice, once for the levels.
+  (test-case "a transform is evaluated once for each row of the table it is fitted to"
+    (define t (list (cons "y" '(1.0 3.0 2.0 4.0)) (cons "x" '(1.0 2.0 3.0 4.0))))
+    (define calls 0)
+    (define (tick x) (set! calls (add1 calls)) (+ x (* 100 calls)))
+    (check-equal? (design-matrix->columns (formula-design-matrix (~ y (tick x)) t))
+                  '((101.0 202.0 303.0 404.0)))
+    (check-equal? calls 4)
+    (set! calls 0)
+    (define m (formula-fit (~ y (tick x)) t #:lambda 0))
+    (check-equal? calls 4)
+    (check-equal? (formula-model-fit m) (elnet-fit '((101.0) (202.0) (303.0) (404.0)) '(1.0 3.0 2.0 4.0)
+                                                   #:lambda 0))
+    (set! calls 0)
+    (formula-cv (~ y (tick x)) t #:fold-ids '(0 1 2 0) #:lambda '(0.1 0.01))
+    (check-equal? calls 4)
+    ;; A factor whose labels change from one evaluation to the next: the
+    ;; levels are those of the evaluation that gives the columns.
+    (define draws 0)
+    (define (draw g) (set! draws (add1 draws)) (if (<= draws 4) g (string-append g "'")))
+    (define groups (list (cons "y" '(1.0 3.0 2.0 4.0)) (cons "g" '("a" "b" "a" "b"))))
+    (define dm (formula-design-matrix (~ y (draw g)) groups))
+    (check-equal? (design-matrix-column-names dm) '("(draw g)b"))
+    (check-equal? (design-matrix->columns dm) '((0.0 1.0 0.0 1.0)))
+    (check-equal? draws 4))
+
   (test-case "a transform reads its Racket bindings each time, as R does"
     (define k 2)
     (define m (formula-fit (~ mpg (I (* k hp)) wt) mtcars #:lambda 0.1))
@@ -1197,7 +1243,7 @@
     (define seen '())
     (define peek (transform-term "peek" '(code group) (lambda (c g) (set! seen (cons (list c g) seen)) c)))
     (formula-design-matrix (make-formula 'y peek) kinds)
-    (check-equal? (take (reverse seen) 6)
+    (check-equal? (reverse seen)
                   '((3.0 "b") (1.0 "a") (2.0 "c") (1.0 "a") (3.0 "b") (2.0 "c")))
     ;; predict reads the new table's columns in the same way.
     (define m (formula-fit (~ y x (not flag)) kinds #:lambda 0.01))

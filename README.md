@@ -123,7 +123,7 @@ is the fast way to fit real data. `(require glmnet)` does not load Polars:
 
 ```bash
 nix develop                     # builds the native lib + link-installs the package
-bash scripts/run-examples.sh    # runs all thirteen examples (glmnet/examples/); prints each fit
+bash scripts/run-examples.sh    # runs all fourteen examples (glmnet/examples/); prints each fit
 raco test ./glmnet/             # full suite: unit tests + example harnesses
 ```
 

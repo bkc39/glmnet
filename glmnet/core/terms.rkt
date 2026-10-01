@@ -77,6 +77,7 @@
          term-variables
          model-terms-labels
          resolve-levels
+         resolve-levels/evaluated
          model-terms-column-names
          model-terms-factor-levels
          terms->design-matrix
@@ -571,9 +572,14 @@
       [(list '* a b)
        (let* ([l (encode-tree a)] [r (encode-tree b)])
          (if (null? l) '() (trim (append l r (interact l r)))))]
+      ;; R's PowerTerms crosses n - 1 times. A crossing that changes nothing
+      ;; leaves every later one unchanged too, so the loop stops there, and a
+      ;; huge exponent costs what one past the number of terms does.
       [(list '^ a n)
        (define l (encode-tree a))
-       (for/fold ([crossed l]) ([i (in-range 1 n)]) (interact l crossed))]
+       (let loop ([crossed l] [left (sub1 n)])
+         (define next (if (zero? left) crossed (interact l crossed)))
+         (if (equal? next crossed) crossed (loop next (sub1 left))))]
       [leaf (list (variable-term (leaf-variable leaf present)))]))
   (define terms (encode-tree (parse-rhs rhs)))
   (values (list->vector (reverse installed)) terms intercept))
@@ -690,19 +696,36 @@
 ;; levels in R's order, of which it must have two or more; and with the kind
 ;; of each column that a transform reads.
 (define (resolve-levels who mt table)
+  (define-values (resolved evaluated) (resolve-levels/evaluated who mt table))
+  resolved)
+
+;; resolve-levels, and the values it evaluated, by the variable's index, for
+;; terms->design-matrix's #:evaluated on the same table. R's model.frame
+;; evaluates each variable once and model.matrix codes those values, so a
+;; transform with side effects or randomness gives its levels and its columns
+;; from one evaluation.
+(define (resolve-levels/evaluated who mt table)
   (define variables (model-terms-variables mt))
   (define used (used-variables mt))
   (define kinds (make-hash))
   (define (record! label name kind) (hash-set! kinds name kind))
+  (define evaluated (make-hasheqv))
   (define levels
-    (if (zero? (hash-count used))
-        (make-vector (vector-length variables) #f)
-        (let-values ([(column flonums no) (table-reader who mt table)])
-          (for/vector #:length (vector-length variables) ([v (in-vector variables)]
-                                                          [i (in-naturals)])
-            (and (hash-ref used i #f)
-                 (variable-levels who v (variable-values who v column flonums no record!)))))))
-  (struct-copy model-terms mt [levels levels] [input-kinds (for/hash ([(name kind) (in-hash kinds)]) (values name kind))]))
+    (cond
+      [(zero? (hash-count used)) (make-vector (vector-length variables) #f)]
+      [else
+       (define-values (column flonums no) (table-reader who mt table))
+       (for/vector #:length (vector-length variables) ([v (in-vector variables)]
+                                                       [i (in-naturals)])
+         (cond
+           [(hash-ref used i #f)
+            (define vs (variable-values who v column flonums no record!))
+            (hash-set! evaluated i vs)
+            (variable-levels who v vs)]
+           [else #f]))]))
+  (values
+   (struct-copy model-terms mt [levels levels] [input-kinds (for/hash ([(name kind) (in-hash kinds)]) (values name kind))])
+   (for/hasheqv ([(i vs) (in-hash evaluated)]) (values i vs))))
 
 ;; A `seen` for variable-values that checks each column a transform reads
 ;; against the kind of values it had when `mt`'s levels were resolved: new
@@ -811,11 +834,13 @@
 ;; columns, named by joining the variables' column names with colons, as
 ;; model.matrix names them. The columns the terms read must be in the table,
 ;; and a factor's values must be among its levels. `mt` has its levels, and at
-;; least one term.
-(define (terms->design-matrix who mt table)
+;; least one term. `evaluated` holds the values of variables that
+;; resolve-levels/evaluated computed from this table, which are not
+;; computed again.
+(define (terms->design-matrix who mt table #:evaluated [evaluated #hasheqv()])
   (define-values (column flonums no) (table-reader who mt table))
   (define variables (model-terms-variables mt))
-  (define variable-cache (make-hasheqv))
+  (define variable-cache (hash-copy evaluated))
   (define seen (check-input-kind who mt))
   (define (values-of i)
     (hash-ref! variable-cache i

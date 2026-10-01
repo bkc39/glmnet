@@ -605,7 +605,9 @@
 ;; removes, as R's model.frame evaluates them all. A transform must read a
 ;; column, from which its rows come. The design matrix's column names must be
 ;; distinct, and none "(Intercept)", as coef keys the coefficients by them and
-;; the intercept by that name.
+;; the intercept by that name. The second value holds the variables' values,
+;; which terms->design-matrix takes as #:evaluated on the same table, so that
+;; each transform is evaluated once, as R's model.frame evaluates it.
 (define (formula-expansion who f table)
   (define columns (table-names table who))
   (define responses (response-columns f))
@@ -630,7 +632,7 @@
   (for ([v (in-list dropped)])
     (log-glmnet-warning "~a: the response column ~s appeared on the right-hand side and was dropped"
                         who (variable-label v)))
-  (define resolved (resolve-levels who kept table))
+  (define-values (resolved evaluated) (resolve-levels/evaluated who kept table))
   (define names (model-terms-column-names resolved))
   (when (member "(Intercept)" names)
     (raise-arguments-error who "a column of the formula's design matrix has the intercept's name"
@@ -639,7 +641,7 @@
   (when same-name
     (raise-arguments-error who "two columns of the formula's design matrix have the same name"
                            "name" same-name "formula" f))
-  resolved)
+  (values resolved evaluated))
 
 (define (check-predictors who f mt)
   (when (null? (model-terms-terms mt))
@@ -647,13 +649,14 @@
                            "formula" f)))
 
 (define (formula-predictor-names f table)
-  (model-terms-column-names (formula-expansion 'formula-predictor-names f table)))
+  (define-values (mt evaluated) (formula-expansion 'formula-predictor-names f table))
+  (model-terms-column-names mt))
 
 (define (formula-design-matrix f table)
   (define who 'formula-design-matrix)
-  (define mt (formula-expansion who f table))
+  (define-values (mt evaluated) (formula-expansion who f table))
   (check-predictors who f mt)
-  (terms->design-matrix who mt table))
+  (terms->design-matrix who mt table #:evaluated evaluated))
 
 ;; The intercept an explicit #:intercept? must agree with: the formula's 1, 0
 ;; or - 1, except for the Cox family, which has no intercept.
@@ -824,9 +827,9 @@
 ;; response's two is the one whose probability the model gives. Otherwise
 ;; the classes are #f.
 (define (model-frame who f table family-name)
-  (define mt (formula-expansion who f table))
+  (define-values (mt evaluated) (formula-expansion who f table))
   (check-predictors who f mt)
-  (define x (terms->design-matrix who mt table))
+  (define x (terms->design-matrix who mt table #:evaluated evaluated))
   (define responses (response-columns f))
   (define column (car responses))
   (define-values (classes indices)

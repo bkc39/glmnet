@@ -80,7 +80,13 @@ names:
   its `@defmodule`, after `ref-data` (the design-matrix layer) and before
   `ref-datasets`;
 - the Concepts section `concepts-data` holds only what every fitter accepts:
-  the design matrix, the response forms and named data.
+  the design matrix, the response forms and named data;
+- the literate example `examples/13-data-sources.rkt` (guide page
+  `guide/examples/data-sources.scrbl`, tag `ex-data-sources`) fits R's
+  `mtcars` from every format, and its harness checks that each gives the
+  same design matrix and path, and R's numbers. A new format adds its
+  source there, with a section `ex-data-sources-<format>`: the per-feature
+  workflow's example, step 1, for a format.
 
 A format builds its design matrix, and reports bad data, with the one support
 set in `data.rkt`'s `support` submodule, which documents each procedure:
@@ -103,11 +109,11 @@ The library a format adapts is a real dependency in `info.rkt`, which
 `main.rkt` does not load. `glmnet/data/polars` depends on the catalog package
 `polars` (rkt-polars, Apache-2.0 OR MIT):
 
-- **Its version is not pinned.** The adapter needs `dataframe->f64vector`, but
-  rkt-polars has not bumped its version since adding it
-  (bkc39/rkt-polars#144), so `info.rkt` cannot ask for a new enough polars;
-  `tests/polars-version-test.rkt` fails, saying so, on an older one. Add
-  `#:version` to the dependency once #144 lands.
+- **Its version is not pinned.** The adapter needs `dataframe->f64vector`
+  and `dataframe->columns`, but rkt-polars has not bumped its version since
+  adding them (bkc39/rkt-polars#144), so `info.rkt` cannot ask for a new
+  enough polars; `tests/polars-version-test.rkt` fails, saying so, on an
+  older one. Add `#:version` to the dependency once #144 lands.
 - **Platforms.** polars ships native libraries for Linux x86-64 and macOS
   arm64 only, so glmnet installs only there.
 - **Nix.** The sandbox cannot reach the catalog, so `flake.nix` installs
@@ -116,7 +122,10 @@ The library a format adapts is a real dependency in `info.rkt`, which
   installed first. The flake stages the system's own native library itself
   and throws for a system with none, because polars' pre-install hook picks
   the library by OS family and, under Nix on macOS, left it missing
-  (bkc39/rkt-polars#146).
+  (bkc39/rkt-polars#146). So the `racket` and `parity` packages and checks,
+  and `default`, exist only on `x86_64-linux` and `aarch64-darwin`, and the
+  other two systems build `native` alone; CI's `nix flake check
+  --all-systems --no-build` evaluates every system's outputs.
 - **When `racket-deps` stops matching its hash.** It runs `raco pkg install`
   against the live catalog, unpinned (#146), so an update there to gregor,
   cldr, tzinfo, tzdata, memoize or threading changes its output, and `nix

@@ -238,7 +238,7 @@
                       #:lambda lambda #:nlambda nlambda #:lambda-min-ratio lambda-min-ratio
                       #:alpha alpha #:standardize? standardize? #:intercept? intercept?
                       #:thresh thresh #:max-iters max-iters))
-  (define (fit-all) (fit x y))
+  (define (fit-all) (fit x labels))
   (define (fit-rows rows) (fit (design-matrix-select-rows x rows) (select labels rows)))
   (cross-validate 'multinomial-cv x labels fit-all fit-rows
                   #:measure measure #:nfolds nfolds #:fold-ids fold-ids #:grouped? grouped?))
