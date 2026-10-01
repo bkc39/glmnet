@@ -29,6 +29,8 @@ glmnet/                        Racket collection
   data/math.rkt                glmnet/data/math: math/matrix matrices <-> design matrices,
                                math arrays -> responses; its element loops are a Typed
                                Racket submodule; main.rkt does not load it (math-lib)
+  data/polars.rkt              glmnet/data/polars: rkt-polars dataframes to and from
+                               design matrices, responses and tables; not re-exported
   datasets.rkt                 glmnet/datasets: R glmnet's example datasets (loaders
                                returning the family fitter's arguments) and R's
                                mtcars and iris, from datasets/*.csv
@@ -96,6 +98,37 @@ goldens check every number of every file against R's, bit for bit, the
 `csv-cells` golden how R's `read.csv` types each spelling of a cell, in a
 UTF-8 `LC_CTYPE` that `gen-reference.R` sets, since white space is
 locale-dependent in R and the Nix sandbox runs R in the C locale.
+
+The library a format adapts is a real dependency in `info.rkt`, which
+`main.rkt` does not load. `glmnet/data/polars` depends on the catalog package
+`polars` (rkt-polars, Apache-2.0 OR MIT):
+
+- **Its version is not pinned.** The adapter needs `dataframe->f64vector`, but
+  rkt-polars has not bumped its version since adding it
+  (bkc39/rkt-polars#144), so `info.rkt` cannot ask for a new enough polars;
+  `tests/polars-version-test.rkt` fails, saying so, on an older one. Add
+  `#:version` to the dependency once #144 lands.
+- **Platforms.** polars ships native libraries for Linux x86-64 and macOS
+  arm64 only, so glmnet installs only there.
+- **Nix.** The sandbox cannot reach the catalog, so `flake.nix` installs
+  rkt-polars from its flake input (`nix flake update rkt-polars` moves it),
+  with its Racket dependencies from that flake's fixed-output `racket-deps`,
+  installed first. The flake stages the system's own native library itself
+  and throws for a system with none, because polars' pre-install hook picks
+  the library by OS family and, under Nix on macOS, left it missing
+  (bkc39/rkt-polars#146).
+- **When `racket-deps` stops matching its hash.** It runs `raco pkg install`
+  against the live catalog, unpinned (#146), so an update there to gregor,
+  cldr, tzinfo, tzdata, memoize or threading changes its output, and `nix
+  flake check` fails with `hash mismatch in fixed-output derivation` for
+  `racket-deps`, on a machine that does not have the old output cached (CI
+  first). To recover:
+  1. if rkt-polars' `flake.nix` already has the new `outputHash`, run `nix
+     flake update rkt-polars` and commit `flake.lock`;
+  2. otherwise set it there to the `got:` hash from the error, then do 1;
+  3. to unblock glmnet before that lands, use
+     `rkt-polars.packages.${system}.racket-deps.overrideAttrs (_: {
+     outputHash = "<got>"; })` in `installPolars`, and drop the override at 1.
 
 The formula language (#53) is R's, checked against R's `terms()` and
 `model.matrix()` by the parity goldens. A new kind of formula term, such as

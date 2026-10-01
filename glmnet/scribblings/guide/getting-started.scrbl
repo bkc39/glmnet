@@ -19,6 +19,9 @@ predict from it.
 
 The package ships a prebuilt native library, @tt{libglmnetcompat}, for Linux
 (x86-64) and macOS (arm64), and a pre-install hook stages it at install time.
+It depends on rkt-polars (the package @tt{polars}), which ships its own native
+library for the same two platforms only, so on any other the install fails
+when it reaches @tt{polars}.
 To check that it loaded:
 
 @examples[#:eval ev #:label #f

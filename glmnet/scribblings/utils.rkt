@@ -25,6 +25,10 @@
                     glmnet/plot
                     glmnet/data/csv
                     glmnet/data/math
+                    glmnet/data/polars
+                    (only-in polars
+                             dataframe? series? dataframe series read-csv ref column-names
+                             dtype polars-null dataframe->f64vector cast)
                     glmnet/datasets
                     racket/base
                     racket/contract
@@ -47,6 +51,8 @@
                                   glmnet/plot
                                   glmnet/data/csv
                                   glmnet/data/math
+                                  glmnet/data/polars
+                                  polars
                                   glmnet/datasets
                                   racket/base
                                   racket/contract

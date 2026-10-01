@@ -16,9 +16,44 @@
         "type": "github"
       }
     },
+    "nixpkgs_2": {
+      "locked": {
+        "lastModified": 1789632929,
+        "narHash": "sha256-RjR8AyvGlWuw16XRj7C1YDEw4E27ciuyPeB2nDMzgTU=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "a32edd7654519351e48e80372a928df336394670",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixpkgs-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "rkt-polars": {
+      "inputs": {
+        "nixpkgs": "nixpkgs_2"
+      },
+      "locked": {
+        "lastModified": 1790782830,
+        "narHash": "sha256-kPWCTilTDesg5ah12N+PfWjPHdUwEskobAIrJjhZWag=",
+        "owner": "bkc39",
+        "repo": "rkt-polars",
+        "rev": "9d1555e1515837b5bfd7ae7e829dfc996e81eb23",
+        "type": "github"
+      },
+      "original": {
+        "owner": "bkc39",
+        "repo": "rkt-polars",
+        "type": "github"
+      }
+    },
     "root": {
       "inputs": {
-        "nixpkgs": "nixpkgs"
+        "nixpkgs": "nixpkgs",
+        "rkt-polars": "rkt-polars"
       }
     }
   },

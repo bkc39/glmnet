@@ -95,6 +95,22 @@ not load the plot library:
 
 The manual's *Plots* chapter draws every plot it describes.
 
+## Polars dataframes
+
+`glmnet/data/polars` converts the dataframes of
+[rkt-polars](https://github.com/bkc39/rkt-polars) to design matrices,
+responses and tables, and back. Reading a file with Polars and converting it
+is the fast way to fit real data. `(require glmnet)` does not load Polars:
+
+```racket
+(require glmnet glmnet/data/polars (only-in polars read-csv))
+(define df (read-csv "iris.csv"))
+(lasso (polars->design-matrix df '("Sepal.Width" "Petal.Width"))
+       (polars->response df "Sepal.Length")
+       #:lambda 0.01)
+(formula-fit (Sepal.Length . ~ . Petal.Width + Species) (polars->table df) #:lambda 0.01)
+```
+
 ## Quick check
 
 ```racket
@@ -125,4 +141,5 @@ A local toolchain (gfortran + cmake + Racket) works too; see `AGENTS.md`.
 **GPL-2.0-or-later.** This package vendors and links the GPL-2.0 glmnet Fortran
 (R glmnet's own, under `fortran/vendor/`); see `LICENSE` and
 `fortran/vendor/NOTICE.md`. The plot library that `glmnet/plot` draws with,
-plot-lib, is Apache-2.0 or MIT.
+plot-lib, and rkt-polars, which `glmnet/data/polars` adapts, are Apache-2.0 or
+MIT.
