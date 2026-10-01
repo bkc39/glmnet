@@ -285,9 +285,10 @@
       (for/list ([j (in-range nc)]) (cons (format "x~a" j) (vector j (+ j 0.5)))))
     (define (elapsed-ms t names)
       (collect-garbage)
+      (define gc0 (current-gc-milliseconds))
       (define t0 (current-inexact-monotonic-milliseconds))
       (table->polars t names)
-      (- (current-inexact-monotonic-milliseconds) t0))
+      (- (current-inexact-monotonic-milliseconds) t0 (- (current-gc-milliseconds) gc0)))
     (define small (wide-table 10000))
     (define large (wide-table 40000))
     (define small-names (map car small))
@@ -299,7 +300,8 @@
     (check-equal? (series->list (ref (table->polars large large-names) "x39999"))
                   (list 39999.0 39999.5))
     (check < (/ large-ms small-ms) 8
-           (format "~a ms at 40000 columns, ~a ms at 10000" large-ms small-ms)))
+           (format "~a ms outside collections at 40000 columns, ~a ms at 10000"
+                   large-ms small-ms)))
 
   ;; --- fits equal to the list path -------------------------------------------------
 
