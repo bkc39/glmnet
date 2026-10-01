@@ -16,5 +16,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@v22
+      - name: Evaluate every system's outputs
+        if: runner.os == 'Linux'
+        run: nix flake check --all-systems --no-build
       - name: Build native lib + Racket package, run tests, render docs
         run: nix flake check --print-build-logs
