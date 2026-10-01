@@ -280,23 +280,26 @@
     (define dm (rows->design-matrix '((1 2) (3 4)) #:column-names '("a" "b")))
     (check-equal? (polars->design-matrix (table->polars dm) '("a" "b")) dm))
 
-  ;; The column-list contracts, the dataframe's and the table's, look names up
-  ;; in a set. Looking each up in the list of columns took 21 s here at 40000
-  ;; columns on the lab host, where it now takes about 0.3 s; the bound, 2 s of
-  ;; CPU time, is many times the linear time on a slow machine, and a tenth of
-  ;; the quadratic time on a fast one. A wide dataframe is not timed: Polars'
-  ;; own column-names is quadratic in the number of columns.
   (test-case "a wide table's column list is checked in time linear in its length"
-    (define nc 40000)
-    (define names (for/list ([j (in-range nc)]) (format "x~a" j)))
-    (define t (for/list ([name (in-list names)] [j (in-naturals)])
-                (cons name (vector j (+ j 0.5)))))
-    (collect-garbage)
-    (define t0 (current-process-milliseconds))
-    (define df (table->polars t names))
-    (define ms (- (current-process-milliseconds) t0))
-    (check-equal? (series->list (ref df (last names))) (list (- nc 1.0) (- nc 0.5)))
-    (check < ms 2000))
+    (define (wide-table nc)
+      (for/list ([j (in-range nc)]) (cons (format "x~a" j) (vector j (+ j 0.5)))))
+    (define (elapsed-ms t names)
+      (collect-garbage)
+      (define t0 (current-inexact-monotonic-milliseconds))
+      (table->polars t names)
+      (- (current-inexact-monotonic-milliseconds) t0))
+    (define small (wide-table 10000))
+    (define large (wide-table 40000))
+    (define small-names (map car small))
+    (define large-names (map car large))
+    (define-values (small-ms large-ms)
+      (for/fold ([small-ms +inf.0] [large-ms +inf.0]) ([k (in-range 3)])
+        (values (min small-ms (elapsed-ms small small-names))
+                (min large-ms (elapsed-ms large large-names)))))
+    (check-equal? (series->list (ref (table->polars large large-names) "x39999"))
+                  (list 39999.0 39999.5))
+    (check < (/ large-ms small-ms) 8
+           (format "~a ms at 40000 columns, ~a ms at 10000" large-ms small-ms)))
 
   ;; --- fits equal to the list path -------------------------------------------------
 
