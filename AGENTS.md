@@ -139,6 +139,19 @@ the sources in `catalogSources`, each pinned to what the catalog names: the git
 commit of tabular-asa, and the SHA-1 checksum of the others' zip files.
 `raco pkg catalog-show <name>` prints both when a pin moves.
 
+- **When the csv-reading zip changes.** Its pin fetches an unversioned URL,
+  `https://www.neilvandyke.org/racket/csv-reading.zip`, the catalog's own
+  source, where mcfly's and overeasy's name their versions
+  (`mcfly--2-2.zip`). A new upload there replaces the pinned file, and `nix
+  flake check` fails with a hash mismatch for it, on a machine that does not
+  have the old file cached (CI first). To recover, either:
+  1. move the pin: once `raco pkg catalog-show csv-reading` shows the new
+     checksum, review the new release and set `sha1` in `catalogSources` to
+     it; or
+  2. keep the pinned content: mirror the old zip somewhere stable, such as a
+     release asset of this repository, and point `url` at the mirror, with
+     the same `sha1`.
+
 The formula language (#53) is R's, checked against R's `terms()` and
 `model.matrix()` by the parity goldens. A new kind of formula term, such as
 another R call with a meaning of its own, adds:

@@ -129,6 +129,7 @@
                 sha1 = "f7cff9a14b313c4a51e1dcd47bb3aa4fe7d50526";
               };
             }
+            # An unversioned URL: AGENTS.md says what to do when it changes.
             {
               name = "csv-reading";
               src = pkgs.fetchurl {
