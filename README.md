@@ -142,4 +142,5 @@ A local toolchain (gfortran + cmake + Racket) works too; see `AGENTS.md`.
 (R glmnet's own, under `fortran/vendor/`); see `LICENSE` and
 `fortran/vendor/NOTICE.md`. The plot library that `glmnet/plot` draws with,
 plot-lib, and rkt-polars, which `glmnet/data/polars` adapts, are Apache-2.0 or
-MIT.
+MIT. tabular-asa, which `glmnet/data/tabular-asa` adapts, is MIT; it depends
+on csv-reading, mcfly and overeasy, which are LGPL-3.

@@ -29,6 +29,8 @@
                     (only-in polars
                              dataframe? series? dataframe series read-csv ref column-names
                              dtype polars-null dataframe->f64vector cast)
+                    glmnet/data/tabular-asa
+                    (prefix-in asa: tabular-asa)
                     glmnet/datasets
                     racket/base
                     racket/contract
@@ -53,6 +55,8 @@
                                   glmnet/data/math
                                   glmnet/data/polars
                                   polars
+                                  glmnet/data/tabular-asa
+                                  tabular-asa
                                   glmnet/datasets
                                   racket/base
                                   racket/contract

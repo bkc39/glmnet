@@ -31,6 +31,8 @@ glmnet/                        Racket collection
                                Racket submodule; main.rkt does not load it (math-lib)
   data/polars.rkt              glmnet/data/polars: rkt-polars dataframes to and from
                                design matrices, responses and tables; not re-exported
+  data/tabular-asa.rkt         glmnet/data/tabular-asa: tabular-asa tables to and from
+                               design matrices, responses and tables; not re-exported
   datasets.rkt                 glmnet/datasets: R glmnet's example datasets (loaders
                                returning the family fitter's arguments) and R's
                                mtcars and iris, from datasets/*.csv
@@ -129,6 +131,26 @@ The library a format adapts is a real dependency in `info.rkt`, which
   3. to unblock glmnet before that lands, use
      `rkt-polars.packages.${system}.racket-deps.overrideAttrs (_: {
      outputHash = "<got>"; })` in `installPolars`, and drop the override at 1.
+
+`glmnet/data/tabular-asa` depends on the catalog package `tabular-asa` (MIT),
+which depends on csv-reading, mcfly and overeasy (LGPL-3; #62 tracks the
+licence question). In the Nix sandbox, `installCatalogDeps` installs the four,
+before polars, from the sources in `catalogSources`, each pinned to what the
+catalog names: the git commit of tabular-asa, and the SHA-1 checksum of the
+others' zip files. `raco pkg catalog-show <name>` prints both when a pin moves.
+
+- **When the csv-reading zip changes.** Its pin fetches an unversioned URL,
+  `https://www.neilvandyke.org/racket/csv-reading.zip`, the catalog's own
+  source, where mcfly's and overeasy's name their versions
+  (`mcfly--2-2.zip`). A new upload there replaces the pinned file, and `nix
+  flake check` fails with a hash mismatch for it, on a machine that does not
+  have the old file cached (CI first). To recover, either:
+  1. move the pin: once `raco pkg catalog-show csv-reading` shows the new
+     checksum, review the new release and set `sha1` in `catalogSources` to
+     it; or
+  2. keep the pinned content: mirror the old zip somewhere stable, such as a
+     release asset of this repository, and point `url` at the mirror, with
+     the same `sha1`.
 
 The formula language (#53) is R's, checked against R's `terms()` and
 `model.matrix()` by the parity goldens. A new kind of formula term, such as

@@ -106,6 +106,61 @@
             '';
           };
 
+          # glmnet's dependencies that pkgs.racket does not ship: tabular-asa,
+          # for glmnet/data/tabular-asa, and what it depends on (csv-reading,
+          # mcfly, overeasy). Each is pinned to the source that the package
+          # catalog names, fetched by Nix rather than by raco from the live
+          # catalog: tabular-asa to its git commit, and the other three, which
+          # are zip files, to the catalog's checksum of each, the file's SHA-1.
+          # `raco pkg catalog-show <name>` prints both; moving a pin changes
+          # them here (and, for the git source, its hash).
+          catalogSources = [
+            {
+              name = "mcfly";
+              src = pkgs.fetchurl {
+                url = "https://www.neilvandyke.org/racket/mcfly--2-2.zip";
+                sha1 = "e670b083eefe6ac27c23cc9423bac0f31720d58c";
+              };
+            }
+            {
+              name = "overeasy";
+              src = pkgs.fetchurl {
+                url = "https://www.neilvandyke.org/racket/overeasy--4-3.zip";
+                sha1 = "f7cff9a14b313c4a51e1dcd47bb3aa4fe7d50526";
+              };
+            }
+            # An unversioned URL: AGENTS.md says what to do when it changes.
+            {
+              name = "csv-reading";
+              src = pkgs.fetchurl {
+                url = "https://www.neilvandyke.org/racket/csv-reading.zip";
+                sha1 = "069af9ad8bec03781a7cc96eb70dfce64bd71daa";
+              };
+            }
+            {
+              name = "tabular-asa";
+              src = pkgs.fetchFromGitHub {
+                owner = "massung";
+                repo = "tabular-asa";
+                rev = "6144a6c5d18c4c4beefec7a1688a625421fd4ae1";
+                hash = "sha256-XY95hqvWHD+WI5yQzSejpdjYjSFlVK2jXYkfkQAFW0M=";
+              };
+            }
+          ];
+
+          # Installs catalogSources into the user scope, each after what it
+          # depends on, so that installing glmnet with `--deps fail` finds
+          # them; `raco setup --pkgs tabular-asa` compiles them. It runs before
+          # installPolars, and neither replaces what the other installed. The
+          # copies from the store are read-only, and setup writes compiled/
+          # beside the sources.
+          installCatalogDeps = pkgs.lib.concatMapStrings (dep: ''
+            raco pkg install --batch --no-setup --copy --no-docs --scope user \
+              --deps fail --name ${dep.name} ${dep.src}
+          '') catalogSources + ''
+            chmod -R u+w "$PLTUSERHOME"
+          '';
+
           # The Racket package, with the native library injected. The manual's
           # examples draw the plots of glmnet/plot; the fonts are fixed so that
           # their text renders the same in every sandbox.
@@ -132,13 +187,16 @@
               mkdir -p ./glmnet/native-libs
               cp ${native}/lib/libglmnetcompat.* ./glmnet/native-libs/ 2>/dev/null || true
 
+              ${installCatalogDeps}
               ${installPolars system}
 
               raco pkg install --batch --deps fail --no-setup --copy --scope user \
                 --name glmnet ./glmnet
 
               # Checks the declared dependencies, as the catalog's build server
-              # does: plot-lib, pict-lib and draw-lib for glmnet/plot among them.
+              # does: plot-lib, pict-lib and draw-lib for glmnet/plot among them,
+              # and tabular-asa for glmnet/data/tabular-asa.
+              raco setup --no-docs --pkgs tabular-asa
               raco setup --no-docs --check-pkg-deps --pkgs glmnet
 
               runHook postBuild
@@ -210,10 +268,11 @@
               export GLMNET_NATIVE_LIB_PATH=${native}
               mkdir -p $PLTUSERHOME ./glmnet/native-libs
               cp ${native}/lib/libglmnetcompat.* ./glmnet/native-libs/ 2>/dev/null || true
+              ${installCatalogDeps}
               ${installPolars system}
               raco pkg install --batch --deps fail --no-setup --copy --scope user \
                 --name glmnet ./glmnet
-              raco setup --no-docs --pkgs glmnet
+              raco setup --no-docs --pkgs glmnet tabular-asa
               runHook postBuild
             '';
 
