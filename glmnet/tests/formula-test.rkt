@@ -263,6 +263,24 @@
                   '("wt" "cyl:wt" "disp:wt" "hp:wt" "drat:wt" "wt:qsec" "wt:vs" "wt:am" "wt:gear"
                     "wt:carb")))
 
+  ;; R crosses (a + b + c)^n n - 1 times: R 4.5.3 takes 1.7 s for terms(y ~
+  ;; (a + b + c)^1000000), whose terms are those of (a + b + c)^3. Expanding
+  ;; stops once a crossing adds nothing, so an exponent of a billion is no
+  ;; slower than one of 4; it used to cross a billion times.
+  (test-case "a power past the number of terms stops crossing, with R's terms"
+    (define result (box #f))
+    (define worker
+      (thread (lambda ()
+                (set-box! result
+                          (list (mtcars-names (~ mpg (^ (+ wt hp qsec) 1000000000)))
+                                (mtcars-names (~ mpg (^ wt 1000000000))))))))
+    (check-not-false (sync/timeout 10 worker) "expanding a power of a billion takes over 10 s")
+    (kill-thread worker)
+    (check-equal? (unbox result)
+                  (list (mtcars-names (~ mpg (^ (+ wt hp qsec) 3))) '("wt")))
+    (check-equal? (mtcars-names (~ mpg (^ (+ wt hp qsec) 3)))
+                  '("wt" "hp" "qsec" "wt:hp" "wt:qsec" "hp:qsec" "wt:hp:qsec")))
+
   (test-case "- removes terms that are equal, and ignores an absent one, as R does"
     ;; mpg ~ wt * hp - hp
     (check-equal? (mtcars-names (~ mpg (- (* wt hp) hp))) '("wt" "wt:hp"))

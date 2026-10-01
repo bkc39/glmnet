@@ -571,9 +571,14 @@
       [(list '* a b)
        (let* ([l (encode-tree a)] [r (encode-tree b)])
          (if (null? l) '() (trim (append l r (interact l r)))))]
+      ;; R's PowerTerms crosses n - 1 times. A crossing that changes nothing
+      ;; leaves every later one unchanged too, so the loop stops there, and a
+      ;; huge exponent costs what one past the number of terms does.
       [(list '^ a n)
        (define l (encode-tree a))
-       (for/fold ([crossed l]) ([i (in-range 1 n)]) (interact l crossed))]
+       (let loop ([crossed l] [left (sub1 n)])
+         (define next (if (zero? left) crossed (interact l crossed)))
+         (if (equal? next crossed) crossed (loop next (sub1 left))))]
       [leaf (list (variable-term (leaf-variable leaf present)))]))
   (define terms (encode-tree (parse-rhs rhs)))
   (values (list->vector (reverse installed)) terms intercept))
