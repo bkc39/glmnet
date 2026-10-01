@@ -36,6 +36,9 @@ module of their own, which @racket[(require glmnet)] does not load:
 
 @racketblock[(require glmnet/plot)]
 
+R glmnet's example datasets, such as the vignette's @tt{QuickStartExample},
+load with @racket[(require glmnet/datasets)] (see @secref["data-datasets"]).
+
 @section[#:tag "gs-first-fit"]{A first fit}
 
 The simplest form of a @tech{design matrix} is a list of rows, one per
