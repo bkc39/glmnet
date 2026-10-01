@@ -1926,10 +1926,12 @@ cannot be read inside a transform, where @racket[(log else)] is Racket's syntax
 error @racketerror{else: not allowed as an expression}; write it as an
 ordinary term, or rename it in the table. The
 expression is evaluated once for each row, with each column name standing for
-the row's value, so a transform is elementwise. A fit evaluates it once on the
-table, as R's @tt{model.frame} does, and takes a factor's levels and the
-design matrix from those values, so a transform with side effects or random
-values gives both from the same draw. A column of numbers gives its
+the row's value, so a transform is elementwise. A fit evaluates each transform
+the terms use once on the table, as R's @tt{model.frame} does, and takes a
+factor's levels and the design matrix from those values, so a transform with
+side effects or random values gives both from the same draw. A transform that
+@racket[-] removes is not evaluated, where R's @tt{model.frame} still
+evaluates it once. A column of numbers gives its
 value as a flonum, and a column of strings, symbols or booleans gives the
 value itself, as R's calls read a character or logical column, so
 @racket[(equal? Species "setosa")] is R's @tt{I(Species == "setosa")} and
