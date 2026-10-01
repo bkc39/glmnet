@@ -26,6 +26,9 @@ glmnet/                        Racket collection
   data/csv.rkt                 glmnet/data/csv: CSV files to and from tables (RFC 4180,
                                each cell typed as R's type.convert types a column of
                                that one cell); each data format is a module in data/ (#41)
+  data/math.rkt                glmnet/data/math: math/matrix matrices <-> design matrices,
+                               math arrays -> responses; its element loops are a Typed
+                               Racket submodule; main.rkt does not load it (math-lib)
   datasets.rkt                 glmnet/datasets: R glmnet's example datasets (loaders
                                returning the family fitter's arguments) and R's
                                mtcars and iris, from datasets/*.csv

@@ -8,7 +8,8 @@
 Every fit reads a @tech{design matrix} and a @tech{response}, and the formula
 front end reads a @tech{table}. This chapter is about where they come from:
 the example datasets that ship with the package, tables, Racket's own lists
-and vectors, and CSV files. Each data format is a module under
+and vectors, CSV files and @racketmodname[math/matrix] matrices. Each data
+format is a module under
 @filepath{glmnet/data/}, which @racket[(require glmnet)] does not load.
 
 @local-table-of-contents[]
@@ -217,5 +218,62 @@ as the number, as it does in R. @racket[csv-file->table] and
 @racket[csv->table] reads the whole input into memory, and each column is a
 vector. For large files, a data frame library that reads CSV files in native
 code, such as rkt-polars, is faster.
+
+@section[#:tag "data-math"]{Matrices from @racketmodname[math/matrix]}
+
+@(define math-ev (make-glmnet-eval))
+
+@racketmodname[glmnet/data/math] converts the matrices of Racket's
+@racketmodname[math/matrix] library to design matrices and back. A matrix's
+rows are the observations. A response can be a column matrix, a row matrix or
+a one-dimensional @racketmodname[math/array] array. @racket[(require glmnet)]
+does not load the module, so a program that does not use
+@racketmodname[math/matrix] does not wait for it to load.
+
+@margin-note{See @secref["ref-data-math"] in the @secref["reference"] for the
+three procedures.}
+
+The Quick Start of R's @tt{glmnet} fits @tt{glmnet(x, y)} to the 100 × 20
+matrix @tt{x} and the response vector @tt{y} of @tt{QuickStartExample}, then
+predicts at new rows @tt{nx} drawn at random. Here is the same fit, with
+@racket[x] a @racketmodname[math/matrix] matrix and @racket[y] a column
+matrix:
+
+@examples[#:eval math-ev #:label #f
+(require math/matrix math/distributions glmnet/datasets glmnet/data/math)
+(define-values (qs-x qs-y) (quick-start-example))
+(define x (design-matrix->matrix qs-x))
+(define y (->col-matrix qs-y))
+(matrix-shape x)
+(define fit (elnet-path (matrix->design-matrix x) (array->response y)))
+(coef fit #:lambda 0.1)
+(random-seed 29)
+(define nx (build-matrix 5 20 (lambda (i j) (sample (normal-dist)))))
+(predict fit (matrix->design-matrix nx) #:lambda '(0.1 0.05))
+]
+
+@racket[matrix->design-matrix] copies and checks a matrix as
+@racket[rows->design-matrix] does a list of rows, and @racket[array->response]
+gives the response as a list, so the fit is the one from the same numbers as
+lists. @racket[design-matrix->matrix] converts back, to a matrix of flonums:
+
+@examples[#:eval math-ev #:label #f
+(define X (matrix->design-matrix x))
+(equal? (elnet-path X (array->response y))
+        (elnet-path (matrix->list* x) (matrix->list y)))
+(equal? (design-matrix->matrix X) x)
+(design-matrix->matrix (rows->design-matrix '((1 2) (3 4))))
+]
+
+A flonum array, from @racket[array->flarray] or @racket[design-matrix->matrix],
+or a mutable array, from @racket[vector->matrix], is copied straight from the
+vector that holds its elements. Any other array is read one element at a time,
+through the contract that the Typed Racket library puts on each array it
+returns to untyped code, which makes a large matrix several times slower to
+convert, and a lazy one, made while @racket[array-strictness] is @racket[#f]
+or returned by @racket[array-broadcast] or @racket[array-lazy], slower still. Converting once and passing the design matrix to every fit pays
+that cost once.
+
+@(close-eval math-ev)
 
 @(close-eval ev)

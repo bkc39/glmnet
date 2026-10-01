@@ -24,6 +24,7 @@
                     glmnet/data/nested
                     glmnet/plot
                     glmnet/data/csv
+                    glmnet/data/math
                     glmnet/datasets
                     racket/base
                     racket/contract
@@ -31,6 +32,9 @@
                     racket/flonum
                     racket/match
                     ffi/vector
+                    math/array
+                    math/matrix
+                    math/distributions
                     (only-in pict pict?)
                     (only-in plot
                              plot-pict plot-width plot-height plot-title plot-font-size vrule)
@@ -42,6 +46,7 @@
                                   glmnet/data/nested
                                   glmnet/plot
                                   glmnet/data/csv
+                                  glmnet/data/math
                                   glmnet/datasets
                                   racket/base
                                   racket/contract
@@ -49,6 +54,9 @@
                                   racket/flonum
                                   racket/match
                                   ffi/vector
+                                  math/array
+                                  math/matrix
+                                  math/distributions
                                   pict
                                   plot
                                   plot/utils))
