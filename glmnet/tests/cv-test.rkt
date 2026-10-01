@@ -325,15 +325,25 @@
 
   (test-case "concordance with many ties in the times and in x"
     (define m 200)
-    (define ts (for/vector ([i (in-range m)]) (exact->inexact (modulo (* 7 i) 13))))
-    (define ds (for/vector ([i (in-range m)]) (if (zero? (modulo i 3)) 0.0 1.0)))
-    (define xs (for/vector ([i (in-range m)]) (exact->inexact (modulo (* 5 i) 4))))
+    (define ts (for/vector #:length m
+                           ([i (in-range m)])
+                 (exact->inexact (modulo (* 7 i) 13))))
+    (define ds (for/vector #:length m
+                           ([i (in-range m)])
+                 (if (zero? (modulo i 3)) 0.0 1.0)))
+    (define xs (for/vector #:length m
+                           ([i (in-range m)])
+                 (exact->inexact (modulo (* 5 i) 4))))
     (check-= (concordance ts ds xs) (brute-force-concordance ts ds xs) 1e-15))
 
   (test-case "concordance of 20000 observations: every pair concordant, discordant or tied"
     (define m 20000)
-    (define ts (for/vector ([i (in-range m)]) (exact->inexact (quotient i 2))))
-    (define ds (for/vector ([i (in-range m)]) (if (zero? (modulo i 5)) 0.0 1.0)))
+    (define ts (for/vector #:length m
+                           ([i (in-range m)])
+                 (exact->inexact (quotient i 2))))
+    (define ds (for/vector #:length m
+                           ([i (in-range m)])
+                 (if (zero? (modulo i 5)) 0.0 1.0)))
     ;; Larger for every later time, and for a censored time than for an event
     ;; at the same time.
     (define xs (for/vector ([t (in-vector ts)] [d (in-vector ds)]) (+ t (* 0.5 (- 1.0 d)))))
@@ -343,7 +353,9 @@
 
   (test-case "the Cox deviance of 20000 observations at beta = 0, two events at each time"
     (define m 20000)
-    (define response (for/vector ([i (in-range m)]) (cons (exact->inexact (quotient i 2)) 1.0)))
+    (define response (for/vector #:length m
+                                 ([i (in-range m)])
+                       (cons (exact->inexact (quotient i 2)) 1.0)))
     (define x (rows->design-matrix (for/list ([i (in-range m)]) (list (sin (exact->inexact i))))))
     (define deviance (cox-deviance x (range m) response))
     ;; At beta = 0 the risk set at the j-th time (from 0) holds m - 2j observations.
@@ -514,6 +526,36 @@
     (check-exn #rx"^cox-cv: fitting all the data: Cox initialization numerical error"
                (lambda () (cox-cv X distinct-times (for/list ([i (in-range n)]) (if (= i 29) 1 0))
                                   #:fold-ids folds))))
+
+  ;; The messages logged to the glmnet topic while thunk runs, in order.
+  (define (glmnet-warnings thunk)
+    (define receiver (make-log-receiver (current-logger) 'warning 'glmnet))
+    (define result (thunk))
+    (values result
+            (let loop ()
+              (define v (sync/timeout 0 receiver))
+              (if v (cons (vector-ref v 1) (loop)) '()))))
+
+  (test-case "a path that stops early is logged in the CV procedure's name, with the fold"
+    (define-values (cv stops)
+      (glmnet-warnings (lambda () (elnet-cv X y #:lambda '(100.0 0.1 0.001) #:max-iters 1
+                                            #:fold-ids folds))))
+    (check-equal? (glmnet-cv-lambda cv) #(100.0))
+    (check-equal? (length stops) 6)
+    (check-regexp-match
+     #rx"^glmnet: elnet-cv: fitting all the data: the path stops after 1 lambda: convergence"
+     (first stops))
+    (for ([m (in-list (rest stops))]
+          [f (in-naturals)])
+      (check-regexp-match
+       (regexp (format "^glmnet: elnet-cv: fitting the training data of held-out fold ~a: the path stops after 1 lambda" f))
+       m))
+    (define-values (path path-messages)
+      (glmnet-warnings (lambda () (elnet-path X y #:lambda '(100.0 0.1 0.001) #:max-iters 1))))
+    (check-equal? path-messages
+                  (list (string-append "glmnet: elnet-path: the path stops after 1 lambda: "
+                                       "convergence was not reached at lambda number 2 within "
+                                       "#:max-iters passes; try a larger #:max-iters (jerr=-2)"))))
 
   (test-case "a constant Gaussian response is an error naming the CV procedure, as R stops"
     (check-exn #rx"^elnet-cv: fitting all the data: y is constant; gaussian glmnet fails at standardization step"

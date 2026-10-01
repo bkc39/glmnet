@@ -552,10 +552,13 @@
                  #:title [title (plot-title)]
                  #:out-file [out-file #f])
   (define cv (model-fit 'plot-cv model glmnet-cv? "a cross-validated path"))
-  (define renderers (cv-renderers cv #:sign-lambda sign-lambda))
   (define xs
     (for/list ([l (in-vector (glmnet-cv-lambda cv))])
       (* sign-lambda (log (exact->inexact l)))))
+  (unless (ormap finite? xs)
+    (raise-arguments-error 'plot-cv "every λ of the path is 0, which has no place on a log λ axis"
+                           "λ values" (vector->list (glmnet-cv-lambda cv))))
+  (define renderers (cv-renderers cv #:sign-lambda sign-lambda))
   (define-values (x-min x-max) (padded-range xs))
   (define-values (y-min y-max)
     (padded-range (append (vector->list (glmnet-cv-cvup cv)) (vector->list (glmnet-cv-cvlo cv)))))
