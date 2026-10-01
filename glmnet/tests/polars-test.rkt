@@ -280,6 +280,29 @@
     (define dm (rows->design-matrix '((1 2) (3 4)) #:column-names '("a" "b")))
     (check-equal? (polars->design-matrix (table->polars dm) '("a" "b")) dm))
 
+  (test-case "a wide table's column list is checked in time linear in its length"
+    (define (wide-table nc)
+      (for/list ([j (in-range nc)]) (cons (format "x~a" j) (vector j (+ j 0.5)))))
+    (define (elapsed-ms t names)
+      (collect-garbage)
+      (define gc0 (current-gc-milliseconds))
+      (define t0 (current-inexact-monotonic-milliseconds))
+      (table->polars t names)
+      (- (current-inexact-monotonic-milliseconds) t0 (- (current-gc-milliseconds) gc0)))
+    (define small (wide-table 10000))
+    (define large (wide-table 40000))
+    (define small-names (map car small))
+    (define large-names (map car large))
+    (define-values (small-ms large-ms)
+      (for/fold ([small-ms +inf.0] [large-ms +inf.0]) ([k (in-range 3)])
+        (values (min small-ms (elapsed-ms small small-names))
+                (min large-ms (elapsed-ms large large-names)))))
+    (check-equal? (series->list (ref (table->polars large large-names) "x39999"))
+                  (list 39999.0 39999.5))
+    (check < (/ large-ms small-ms) 8
+           (format "~a ms outside collections at 40000 columns, ~a ms at 10000"
+                   large-ms small-ms)))
+
   ;; --- fits equal to the list path -------------------------------------------------
 
   (define-values (Xg yg) (load-longley))

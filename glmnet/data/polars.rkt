@@ -70,19 +70,24 @@
          (explain df "a dataframe with at least one row" "a dataframe with no rows")))
    #:name 'dataframe-with-rows/c))
 
+;; The column names `present`, strings, as a set to look names up in.
+(define (name-set present)
+  (for/hash ([name (in-list present)]) (values name #t)))
+
 ;; What is wrong with the column name `s` (a string) of the `what` ("dataframe"
-;; or "table") whose columns are `present`, as a string for a blame error's
-;; given: field; #f when nothing is. `problem` is #f for a column it accepts,
-;; or what is wrong with it.
-(define (column-problem s what present problem)
+;; or "table") whose columns are `present`, with the set `known`, as a string
+;; for a blame error's given: field; #f when nothing is. `problem` is #f for a
+;; column it accepts, or what is wrong with it.
+(define (column-problem s what known present problem)
   (cond
-    [(not (member s present))
+    [(not (hash-ref known s #f))
      (format "~s, which is not a column of the ~a; its columns are ~s" s what present)]
     [(problem s) => (lambda (p) (format "column ~s, ~a" s p))]
     [else #f]))
 
 ;; A non-empty list of distinct column names, each without a problem.
 (define (column-list/c expected what present problem)
+  (define known (name-set present))
   (flat-contract-with-explanation
    (lambda (names)
      (define given
@@ -93,7 +98,7 @@
           => (lambda (name) (format "~s twice" (column-name->string name)))]
          [else
           (for/or ([name (in-list names)])
-            (column-problem (column-name->string name) what present problem))]))
+            (column-problem (column-name->string name) what known present problem))]))
      (or (not given) (explain names "~a" "~a" expected given)))
    #:name '(and/c (listof (or/c string? symbol?)) pair?)))
 
@@ -113,11 +118,12 @@
 (define (frame-column/c df accepts? kind)
   (define expected (format "the name of a ~a column of the dataframe" kind))
   (define present (column-names df))
+  (define known (name-set present))
   (flat-contract-with-explanation
    (lambda (name)
      (define given
        (if (column-name/c name)
-           (column-problem (column-name->string name) "dataframe" present
+           (column-problem (column-name->string name) "dataframe" known present
                            (dtype-problem df accepts?))
            (format "~e" name)))
      (or (not given) (explain name "~a" "~a" expected given)))
