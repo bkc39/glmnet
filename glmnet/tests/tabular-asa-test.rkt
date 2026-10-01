@@ -192,33 +192,41 @@
     (check-error (lambda () (table->tabular-asa (list (cons "x" '()) (cons "y" '(1)))))
                  #rx"different lengths" #rx"column: \"y\""))
 
-  ;; The column checks look names up in a set. Looking each up in the list of
-  ;; the table's columns took 5 s at 20000 columns on the lab host, where these
-  ;; conversions now take about 50 ms. At 40000 columns the bound, 2 s of CPU
-  ;; time each, is many times the linear time on a slow machine, and a tenth of
-  ;; the quadratic time on a fast one.
   (test-case "a wide table converts in time linear in its number of columns"
-    (define nc 40000)
-    (define names (for/list ([j (in-range nc)]) (string->symbol (format "x~a" j))))
-    (define columns (for/list ([j (in-range nc)]) (vector j (+ j 0.5))))
-    (define wide (asa:table #(0 1) (map cons names columns)))
-    (define t (for/list ([name (in-list names)] [column (in-list columns)])
-                (cons (symbol->string name) column)))
-    (define (cpu-ms thunk)
+    (define (wide-tables nc)
+      (define names (for/list ([j (in-range nc)]) (string->symbol (format "x~a" j))))
+      (define columns (for/list ([j (in-range nc)]) (vector j (+ j 0.5))))
+      (list names
+            (asa:table #(0 1) (map cons names columns))
+            (for/list ([name (in-list names)] [column (in-list columns)])
+              (cons (symbol->string name) column))))
+    (define small (wide-tables 10000))
+    (define large (wide-tables 40000))
+    (define (elapsed-ms thunk)
       (collect-garbage)
-      (define t0 (current-process-milliseconds))
-      (define v (thunk))
-      (values v (- (current-process-milliseconds) t0)))
-    (define-values (dm dm-ms) (cpu-ms (lambda () (tabular-asa->design-matrix wide names))))
-    (check-equal? (design-matrix-ncols dm) nc)
-    (check-eqv? (design-matrix-ref dm 1 (sub1 nc)) (+ (sub1 nc) 0.5))
-    (check < dm-ms 2000)
-    (define-values (back table-ms) (cpu-ms (lambda () (tabular-asa->table wide (reverse names)))))
-    (check-equal? (car back) (cons (format "x~a" (sub1 nc)) (vector (sub1 nc) (+ (sub1 nc) 0.5))))
-    (check < table-ms 2000)
-    (define-values (df df-ms) (cpu-ms (lambda () (table->tabular-asa t names))))
-    (check-equal? (asa:table-header df) names)
-    (check < df-ms 2000))
+      (define t0 (current-inexact-monotonic-milliseconds))
+      (thunk)
+      (- (current-inexact-monotonic-milliseconds) t0))
+    (define (check-linear who convert)
+      (define-values (small-ms large-ms)
+        (for/fold ([small-ms +inf.0] [large-ms +inf.0]) ([k (in-range 3)])
+          (values (min small-ms (elapsed-ms (lambda () (apply convert small))))
+                  (min large-ms (elapsed-ms (lambda () (apply convert large)))))))
+      (check < (/ large-ms small-ms) 8
+             (format "~a: ~a ms at 40000 columns, ~a ms at 10000" who large-ms small-ms)))
+    (check-linear 'tabular-asa->design-matrix
+                  (lambda (names wide t) (tabular-asa->design-matrix wide names)))
+    (check-linear 'tabular-asa->table
+                  (lambda (names wide t) (tabular-asa->table wide (reverse names))))
+    (check-linear 'table->tabular-asa
+                  (lambda (names wide t) (table->tabular-asa t names)))
+    (define-values (names wide t) (apply values large))
+    (define dm (tabular-asa->design-matrix wide names))
+    (check-equal? (design-matrix-ncols dm) 40000)
+    (check-eqv? (design-matrix-ref dm 1 39999) 39999.5)
+    (check-equal? (car (tabular-asa->table wide (reverse names)))
+                  (cons "x39999" (vector 39999 39999.5)))
+    (check-equal? (asa:table-header (table->tabular-asa t names)) names))
 
   (test-case "arguments are checked by contracts that blame the caller"
     (check-blame (lambda () (tabular-asa->design-matrix df '(x1 z)))
