@@ -593,4 +593,33 @@
                           #rx"a fold has no observations; fold ids must cover 0 to 4")
     (check-true (contract-first-order-passes? fold-ids/c #f))
     (check-true (contract-first-order-passes? fold-ids/c (f64vector 0.0 1.0 2.0)))
-    (check-false (contract-first-order-passes? fold-ids/c (f64vector 0.0 2.0 2.0)))))
+    (check-false (contract-first-order-passes? fold-ids/c (f64vector 0.0 2.0 2.0))))
+
+  ;; A response vector whose elements read as themselves twice, by the
+  ;; contract and by the conversion, and as (change x) after that, as a
+  ;; vector another thread writes to, or an impersonator, can.
+  (define (changing-response xs change)
+    (define reads (make-vector (length xs) 0))
+    (impersonate-vector (list->vector xs)
+                        (lambda (v i x)
+                          (vector-set! reads i (add1 (vector-ref reads i)))
+                          (if (<= (vector-ref reads i) 2) x (change x)))
+                        (lambda (v i x) x)))
+
+  ;; The full-data path used to be fitted from the argument, read again, and
+  ;; the folds from its conversion.
+  (test-case "a CV procedure fits the full-data path to the response its folds hold out"
+    (check-equal? (elnet-cv X (changing-response y (lambda (x) (* 10 x))) #:fold-ids folds)
+                  (elnet-cv X y #:fold-ids folds))
+    (check-equal? (logistic-cv X (changing-response labels (lambda (x) (- 1 x))) #:fold-ids folds)
+                  (logistic-cv X labels #:fold-ids folds))
+    (check-equal? (multinomial-cv X (changing-response classes (lambda (x) (modulo (add1 x) 3)))
+                                  #:fold-ids folds)
+                  (multinomial-cv X classes #:fold-ids folds))
+    (check-equal? (poisson-cv X (changing-response counts (lambda (x) (* 3 x))) #:fold-ids folds)
+                  (poisson-cv X counts #:fold-ids folds))
+    (check-equal? (cox-cv X
+                          (changing-response times (lambda (x) (/ 1.0 x)))
+                          (changing-response statuses (lambda (x) (- 1 x)))
+                          #:fold-ids folds)
+                  (cox-cv X times statuses #:fold-ids folds))))

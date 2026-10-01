@@ -194,7 +194,7 @@
               #:lambda lambda #:nlambda nlambda #:lambda-min-ratio lambda-min-ratio
               #:alpha alpha #:standardize? standardize?
               #:thresh thresh #:max-iters max-iters))
-  (define (fit-all) (fit x times statuses))
+  (define (fit-all) (fit x ts ds))
   (define (fit-rows rows)
     (fit (design-matrix-select-rows x rows) (select ts rows) (select ds rows)))
   (cross-validate 'cox-cv x (for/vector ([t (in-vector ts)] [d (in-vector ds)]) (cons t d))
