@@ -27,7 +27,7 @@
  (struct-out logistic-result)
  (contract-out
   [logistic-fit
-   (->* (design-matrix/c binary-response/c #:lambda (>=/c 0))
+   (->* (design-matrix/c (response/c label/c) #:lambda (>=/c 0))
         (#:alpha (real-in 0 1)
          #:standardize? boolean?
          #:intercept? boolean?
@@ -43,7 +43,7 @@
 (provide
  (contract-out
   [logistic-path
-   (->* (design-matrix/c binary-response/c)
+   (->* (design-matrix/c (response/c label/c))
            (#:lambda lambda-sequence/c
             #:nlambda exact-positive-integer?
             #:lambda-min-ratio lambda-min-ratio/c
@@ -54,7 +54,7 @@
             #:max-iters exact-positive-integer?)
         glmnet-path?)]
   [logistic-cv
-   (->* (design-matrix/c binary-response/c)
+   (->* (design-matrix/c (response/c label/c))
         (#:type-measure (or/c 'deviance 'class 'auc 'mse 'mae)
          #:nfolds nfolds/c
          #:fold-ids fold-ids/c
@@ -83,35 +83,31 @@
                       (logistic-result-coefficients r) (logistic-result-dev-ratio r)
                       (logistic-result-num-passes r)))])
 
-;; --- input contract --------------------------------------------------------
-
-;; The response is a non-empty list of 0/1 class labels (exact or inexact).
-(define (binary-label? v) (and (real? v) (or (= v 0) (= v 1))))
-(define binary-response/c (and/c (listof binary-label?) pair?))
+;; A class label, 0 or 1.
+(define label/c (or/c 0 1))
 
 ;; Cross-validation fits every fold to data with both classes, so the data must
 ;; have both.
-(define (check-both-classes y who)
+(define (check-both-classes ys who)
   (for ([c (in-list '(0 1))])
-    (unless (for/or ([v (in-list y)]) (= v c))
+    (unless (for/or ([v (in-vector ys)]) (= v c))
       (error who "class ~a has no observations; y needs both 0 and 1" c))))
 
 ;; Logistic adds the 8000/9000 (a class probability collapsed -- e.g. perfect
 ;; separation) and 90000 (coefficient-bound non-convergence) fatal codes on top
 ;; of the shared cases in `check-jerr`.
 (define (check-logistic-jerr jerr who [lmu #f])
-  (cond
-    [(and (>= jerr 8000) (< jerr 9000))
-     (error who
-            (format (string-append
-                     "a class probability collapsed (perfect separation or a "
-                     "degenerate class); try a larger lambda (jerr=~a)")
-                    jerr))]
-    [(and (>= jerr 9000) (< jerr 10000))
-     (error who (format "a class has a degenerate null probability (jerr=~a)" jerr))]
-    [(= jerr 90000)
-     (error who "coefficient-bound adjustment failed to converge (jerr=90000)")]
-    [else (check-jerr jerr who lmu)]))
+  (when (and (>= jerr 8000) (< jerr 9000))
+    (error who
+           (format (string-append
+                    "a class probability collapsed (perfect separation or a "
+                    "degenerate class); try a larger lambda (jerr=~a)")
+                   jerr)))
+  (when (and (>= jerr 9000) (< jerr 10000))
+    (error who (format "a class has a degenerate null probability (jerr=~a)" jerr)))
+  (when (= jerr 90000)
+    (error who "coefficient-bound adjustment failed to converge (jerr=90000)"))
+  (check-jerr jerr who lmu))
 
 ;; --- public API ------------------------------------------------------------
 
@@ -125,7 +121,7 @@
   (define x (as-design-matrix X 'logistic-fit "X"))
   (define no (design-matrix-nrows x))
   (define ni (design-matrix-ncols x))
-  (define yv (as-response y no 'logistic-fit "y"))
+  (define yv (as-response y no 'logistic-fit "y" label/c))
   (define beta (make-f64vector ni 0.0))
   (define-values (intercept dev-ratio lam nlp jerr)
     (glmnet-lognet-solo/raw (exact->inexact alpha) no ni (design-matrix-data x) yv
@@ -163,7 +159,7 @@
   (define x (as-design-matrix X 'logistic-path "X"))
   (define no (design-matrix-nrows x))
   (define ni (design-matrix-ncols x))
-  (define yv (as-response y no 'logistic-path "y"))
+  (define yv (as-response y no 'logistic-path "y" label/c))
   (define-values (nlam flmin ulam)
     (path-lambdas lambda nlambda lambda-min-ratio no ni))
   (define a0 (make-f64vector nlam 0.0))
@@ -199,8 +195,8 @@
                      #:max-iters [max-iters 100000])
   (define x (as-design-matrix X 'logistic-cv "X"))
   (define ys
-    (list->vector (f64vector->list (as-response y (design-matrix-nrows x) 'logistic-cv "y"))))
-  (check-both-classes y 'logistic-cv)
+    (response->vector (as-response y (design-matrix-nrows x) 'logistic-cv "y" label/c)))
+  (check-both-classes ys 'logistic-cv)
   (define (fit x y)
     (logistic-path x y
                    #:lambda lambda #:nlambda nlambda #:lambda-min-ratio lambda-min-ratio

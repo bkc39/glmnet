@@ -250,6 +250,7 @@
     (check-true (set-member? (exported 'glmnet) 'rows->design-matrix))
     (check-true (set-member? (exported 'glmnet/plot) 'plot-coefficient-path))
     (check-not-false (memq 'glmnet/data/csv data-modules))
+    (check-not-false (memq 'glmnet/data/nested data-modules))
     (check-true (set-member? (exported 'glmnet/data/csv) 'csv->table)))
 
   (for ([mod (in-list checked-modules)])

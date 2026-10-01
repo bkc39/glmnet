@@ -7,6 +7,8 @@
 
 (module+ test
   (require rackunit
+           racket/flonum
+           ffi/vector
            glmnet/data)
 
   (define alist
@@ -74,4 +76,24 @@
     (check-exn #rx"a column is named twice"
                (lambda () (table->design-matrix alist '("y" y))))
     (check-exn exn:fail:contract? (lambda () (table->design-matrix '((1 2) (3 4)))))
-    (check-exn exn:fail:contract? (lambda () (table->design-matrix alist '())))))
+    (check-exn exn:fail:contract? (lambda () (table->design-matrix alist '()))))
+
+  (test-case "a column can be an flvector or an f64vector"
+    (define t (list (cons "a" (flvector 1.0 2.0 3.0))
+                    (cons 'b (f64vector 4.0 5.0 6.0))
+                    (cons "g" '("x" "y" "x"))))
+    (check-true (table? t))
+    (check-true (table? (hash "a" (flvector 1.0))))
+    (check-equal? (table->design-matrix t '("a" "b"))
+                  (table->design-matrix (list (cons "a" '(1.0 2.0 3.0)) (cons "b" #(4 5 6)))))
+    (check-exn #rx"the table has an element that is not finite\n  column: \"a\"\n  row: 1"
+               (lambda () (table->design-matrix (list (cons "a" (flvector 1.0 +nan.0))))))
+    (check-exn #rx"different lengths"
+               (lambda () (table->design-matrix (list (cons "a" (flvector 1.0))
+                                                      (cons "b" (f64vector 1.0 2.0)))))))
+
+  (test-case "a design matrix's column names are strings, whatever the names given"
+    (check-equal? (design-matrix-column-names (table->design-matrix alist '(x1 "x2")))
+                  '("x1" "x2"))
+    (check-equal? (rows->design-matrix '((1 2)) #:column-names '(a b))
+                  (rows->design-matrix '((1 2)) #:column-names '("a" "b")))))

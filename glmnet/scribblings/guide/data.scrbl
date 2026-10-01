@@ -7,9 +7,9 @@
 
 Every fit reads a @tech{design matrix} and a @tech{response}, and the formula
 front end reads a @tech{table}. This chapter is about where they come from:
-the example datasets that ship with the package, tables, and CSV files. Each
-data format is a module under @filepath{glmnet/data/}, which
-@racket[(require glmnet)] does not load.
+the example datasets that ship with the package, tables, Racket's own lists
+and vectors, and CSV files. Each data format is a module under
+@filepath{glmnet/data/}, which @racket[(require glmnet)] does not load.
 
 @local-table-of-contents[]
 
@@ -100,7 +100,8 @@ them against R's own. They can be read like any other CSV file:
 
 A @tech{table} is named columns. It can be an association list from names to
 columns, a hash, or a design matrix with column names, and a column can be a
-list or a vector (see @secref["ref-tables"]). A column of numbers is a
+list, a vector, an @racket[flvector] or an @racket[f64vector] (see
+@secref["ref-tables"]). A column of numbers is a
 predictor or a numeric response, and a column of strings, symbols or booleans
 is a factor, as R's character and logical columns are (see
 @secref["formulas-factors"]). The formula front end fits from a table, and
@@ -116,6 +117,36 @@ is a factor, as R's character and logical columns are (see
 (design-matrix->rows (table->design-matrix patients '("age" "dose")))
 (coef (formula-fit (response . ~ . age + dose + site) patients #:lambda 0.1))
 ]
+
+@section[#:tag "data-nested"]{Lists and vectors}
+
+Racket's own data needs no conversion: every fit and prediction procedure
+takes rows as a list or a vector of lists or vectors, and a response as a
+list, vector, @racket[flvector] or @racket[f64vector] (see
+@secref["concepts-data"]). @racketmodname[glmnet/data/nested] converts the
+nestings to a @racket[design-matrix?] value, by rows or by columns, to check
+the data once and fit it many times or to name its columns, and converts a
+design matrix back to any of them:
+
+@margin-note{See @secref["ref-data-nested"] in the @secref["reference"] for
+the two procedures.}
+
+@examples[#:eval ev #:label #f
+(require glmnet/data/nested)
+(define rows (vector #(1.0 2.0) #(2.0 1.0) #(3.0 4.0) #(4.0 3.0) #(5.0 6.0)))
+(define D (nested->design-matrix rows #:column-names '(x1 x2)))
+(design-matrix-column-names D)
+(define by-column (vector #(1.0 2.0 3.0 4.0 5.0) #(2.0 1.0 4.0 3.0 6.0)))
+(equal? (nested->design-matrix by-column #:by 'columns #:column-names '("x1" "x2")) D)
+(elnet-result-coefficients (lasso D (vector 1.0 4.0 3.0 6.0 5.0) #:lambda 0.1))
+(design-matrix->nested D #:outer 'vector #:inner 'vector)
+(design-matrix->nested D #:by 'columns #:outer 'vector #:inner 'vector)
+]
+
+The column names are kept as strings, whether they were given as strings or
+symbols, so the same data named either way gives @racket[equal?] design
+matrices. A design matrix with column names is a @tech{table}, from which a
+formula fits by name.
 
 @section[#:tag "data-csv"]{CSV files}
 

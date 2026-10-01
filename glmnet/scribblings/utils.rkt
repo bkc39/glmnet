@@ -21,12 +21,14 @@
          (for-syntax racket/base))
 
 (require (for-label glmnet
+                    glmnet/data/nested
                     glmnet/plot
                     glmnet/data/csv
                     glmnet/datasets
                     racket/base
                     racket/contract
                     racket/file
+                    racket/flonum
                     racket/match
                     ffi/vector
                     (only-in pict pict?)
@@ -37,12 +39,14 @@
 (provide (all-from-out scribble/manual)
          (all-from-out scribble/example)
          (for-label (all-from-out glmnet
+                                  glmnet/data/nested
                                   glmnet/plot
                                   glmnet/data/csv
                                   glmnet/datasets
                                   racket/base
                                   racket/contract
                                   racket/file
+                                  racket/flonum
                                   racket/match
                                   ffi/vector
                                   pict
