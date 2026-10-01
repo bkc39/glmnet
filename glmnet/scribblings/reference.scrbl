@@ -823,9 +823,9 @@ The examples in this section use this table:
   The values of @racket[df]'s column @racket[column], in the table's order, as
   a @tech{response}: a list, which the fit procedures accept. Every value must
   be a real, finite number. The values are returned as they are, so class
-  labels that are exact integers stay exact, as @racket[multinomial-fit]
-  requires. For a Cox model, convert the times and the statuses separately;
-  for a multi-response model, whose response is a matrix, use
+  labels such as those of @racket[multinomial-fit] stay exact integers. For a
+  Cox model, convert the times and the statuses separately; for a
+  multi-response model, whose response is a matrix, use
   @racket[tabular-asa->design-matrix].
 
   @examples[#:eval ev
@@ -876,7 +876,8 @@ The examples in this section use this table:
          asa:table?]{
   A tabular-asa table of the columns of @racket[table] that @racket[columns]
   names, every column by default, in that order, with their names as symbols
-  and their values as they are. The columns must have the same length. Since
+  and their values as they are. The columns must have the same length, which
+  may be 0: a table with no rows makes a tabular-asa table with no rows. Since
   tabular-asa reads @racket[#f] as a missing value, a @racket[#f] in a column
   is an error, which names the column and the row; convert a column of
   booleans to strings, or to @racket[0] and @racket[1], first.

@@ -6,7 +6,8 @@
 (module+ test
   (require rackunit
            racket/runtime-path
-           (only-in racket/contract exn:fail:contract:blame?)
+           (only-in racket/contract exn:fail:contract:blame? value-contract contract-name)
+           (only-in racket/list last)
            glmnet
            glmnet/data/tabular-asa
            (prefix-in asa: tabular-asa)
@@ -181,6 +182,44 @@
     (check-error (lambda () (table->tabular-asa (list (cons "a" '(1 2)) (cons "b" '(3)))))
                  #rx"different lengths" #rx"column: \"b\""))
 
+  (test-case "a glmnet table with no rows makes a tabular-asa table with no rows"
+    (define none (table->tabular-asa (list (cons "x" '()) (cons 'y #()))))
+    (check-equal? (asa:table-header none) '(x y))
+    (check-equal? (asa:table-index none) #())
+    (check-true (asa:table-empty? none))
+    (check-equal? (asa:table-header (table->tabular-asa (list (cons "x" '()) (cons "y" '())) '(y)))
+                  '(y))
+    (check-error (lambda () (table->tabular-asa (list (cons "x" '()) (cons "y" '(1)))))
+                 #rx"different lengths" #rx"column: \"y\""))
+
+  ;; The column checks look names up in a set. Looking each up in the list of
+  ;; the table's columns took 5 s at 20000 columns on the lab host, where these
+  ;; conversions now take about 50 ms. At 40000 columns the bound, 2 s of CPU
+  ;; time each, is many times the linear time on a slow machine, and a tenth of
+  ;; the quadratic time on a fast one.
+  (test-case "a wide table converts in time linear in its number of columns"
+    (define nc 40000)
+    (define names (for/list ([j (in-range nc)]) (string->symbol (format "x~a" j))))
+    (define columns (for/list ([j (in-range nc)]) (vector j (+ j 0.5))))
+    (define wide (asa:table #(0 1) (map cons names columns)))
+    (define t (for/list ([name (in-list names)] [column (in-list columns)])
+                (cons (symbol->string name) column)))
+    (define (cpu-ms thunk)
+      (collect-garbage)
+      (define t0 (current-process-milliseconds))
+      (define v (thunk))
+      (values v (- (current-process-milliseconds) t0)))
+    (define-values (dm dm-ms) (cpu-ms (lambda () (tabular-asa->design-matrix wide names))))
+    (check-equal? (design-matrix-ncols dm) nc)
+    (check-eqv? (design-matrix-ref dm 1 (sub1 nc)) (+ (sub1 nc) 0.5))
+    (check < dm-ms 2000)
+    (define-values (back table-ms) (cpu-ms (lambda () (tabular-asa->table wide (reverse names)))))
+    (check-equal? (car back) (cons (format "x~a" (sub1 nc)) (vector (sub1 nc) (+ (sub1 nc) 0.5))))
+    (check < table-ms 2000)
+    (define-values (df df-ms) (cpu-ms (lambda () (table->tabular-asa t names))))
+    (check-equal? (asa:table-header df) names)
+    (check < df-ms 2000))
+
   (test-case "arguments are checked by contracts that blame the caller"
     (check-blame (lambda () (tabular-asa->design-matrix df '(x1 z)))
                  #rx"the table has no column named 'z")
@@ -191,7 +230,7 @@
     (check-blame (lambda () (tabular-asa->response df 'z)) #rx"no column named 'z")
     (check-blame (lambda () (tabular-asa->table df '(x1 w))) #rx"no column named 'w")
     (check-blame (lambda () (tabular-asa->design-matrix mtcars '("mpg")))
-                 #rx"not a tabular-asa table")
+                 #rx"not a tabular-asa table" #rx"expected: asa:table[?]")
     (check-blame (lambda () (tabular-asa->table asa:empty-table)) #rx"the table has no columns")
     (check-blame (lambda () (tabular-asa->design-matrix (asa:table-head df 0) '(x1)))
                  #rx"the table has no rows")
@@ -203,6 +242,14 @@
     (check-blame (lambda () (table->tabular-asa mtcars '("mpg" "speed")))
                  #rx"no column named \"speed\"")
     (check-blame (lambda () (table->tabular-asa '((1 2)))) #rx"table\\?"))
+
+  (test-case "the contracts name tabular-asa's table? asa:table?, apart from glmnet's table?"
+    (define (result-of f) (last (contract-name (value-contract f))))
+    (check-equal? (result-of design-matrix->tabular-asa) '(result asa:table?))
+    (check-equal? (result-of table->tabular-asa) '(result asa:table?))
+    (check-equal? (result-of tabular-asa->table) '(result table?))
+    (check-equal? (cadr (car (cadr (contract-name (value-contract tabular-asa->response)))))
+                  '(and/c asa:table? (not/c asa:table-empty?))))
 
   (test-case "a tabular-asa table with two columns of the same name breaks the contract"
     (define twice (asa:table #(0) (list (cons 'a #(1)) (cons "a" #(2)))))
@@ -287,6 +334,12 @@
                   (multinomial-cv Xm ym #:fold-ids (folds 150) #:nlambda 10))
     (check-equal? (multinomial-predict-proba fit X) (multinomial-predict-proba fit Xm))
     (check-equal? (multinomial-predict fit X) (multinomial-predict fit Xm)))
+
+  (test-case "class labels read as flonums fit as the exact labels do"
+    (define labels (asa:table-read/columns (list (map exact->inexact ym)) '(class)))
+    (define y (tabular-asa->response labels 'class))
+    (check-true (andmap flonum? y))
+    (check-equal? (multinomial-fit Xm y #:lambda 0.01) (multinomial-fit Xm ym #:lambda 0.01)))
 
   (test-case "Cox"
     (define X (tabular-asa->design-matrix veteran (all-but veteran 'time 'status)))

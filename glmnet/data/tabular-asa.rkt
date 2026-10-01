@@ -28,11 +28,11 @@
   [design-matrix->tabular-asa
    (->i ([dm design-matrix?])
         (#:column-names [names (dm) (column-names-for/c (design-matrix-ncols dm))])
-        [result asa:table?])]
+        [result asa-table/c])]
   [table->tabular-asa
    (->i ([t table?])
         ([columns (t) (column-list-of/c (table-names t 'table->tabular-asa))])
-        [result asa:table?])]))
+        [result asa-table/c])]))
 
 ;; --- contracts -----------------------------------------------------------------
 
@@ -42,13 +42,16 @@
   (apply raise-blame-error blame v (list problem 'expected: expected 'given: "~e")
          (append args (list v))))
 
+;; tabular-asa's table?, named as the manual names it, apart from glmnet's.
+(define asa-table/c (rename-contract asa:table? 'asa:table?))
+
 ;; A tabular-asa table with a row and a column, whose columns have distinct
 ;; names.
 (define non-empty-table/c
   (flat-contract-with-explanation
    (lambda (df)
      (cond
-       [(not (asa:table? df)) (explain df "not a tabular-asa table" "table?")]
+       [(not (asa:table? df)) (explain df "not a tabular-asa table" "asa:table?")]
        [(null? (asa:table-data df)) (explain df "the table has no columns" "a table with columns")]
        [(zero? (asa:table-length df)) (explain df "the table has no rows" "a table with rows")]
        [(check-duplicates (tabular-asa-names df))
@@ -56,25 +59,31 @@
              (explain df "the table has two columns named ~s"
                       "a table whose columns have distinct names" name))]
        [else #t]))
-   #:name '(and/c table? (not/c table-empty?))))
+   #:name '(and/c asa:table? (not/c asa:table-empty?))))
 
 (define (name? v) (or (string? v) (symbol? v)))
 
-;; `name` as one of `names`, a table's column names as strings; #t, or the
-;; failure of `v`, the argument that holds it.
-(define (check-name v name names)
+;; A table's column names, strings, as a set to look names up in.
+(define (name-set names)
+  (for/hash ([name (in-list names)]) (values name #t)))
+
+;; `name` as one of a table's column names, `names`, whose set is `known`; #t,
+;; or the failure of `v`, the argument that holds it.
+(define (check-name v name known names)
   (cond
     [(not (name? name))
      (explain v "a column name must be a string or a symbol, not ~e" "(or/c string? symbol?)" name)]
-    [(member (column-name->string name) names) #t]
+    [(hash-ref known (column-name->string name) #f) #t]
     [else (explain v "the table has no column named ~e" "one of ~e" name names)]))
 
 (define (column-of/c names)
+  (define known (name-set names))
   (flat-contract-with-explanation
-   (lambda (name) (check-name name name names))
+   (lambda (name) (check-name name name known names))
    #:name '(or/c string? symbol?)))
 
 (define (column-list-of/c names)
+  (define known (name-set names))
   (flat-contract-with-explanation
    (lambda (columns)
      (cond
@@ -82,7 +91,7 @@
         (explain columns "the columns must be a non-empty list of names"
                  "(and/c (listof (or/c string? symbol?)) pair?)")]
        [(for*/first ([name (in-list columns)]
-                     [checked (in-value (check-name columns name names))]
+                     [checked (in-value (check-name columns name known names))]
                      #:unless (eq? checked #t))
           checked)]
        [(check-duplicates columns #:key column-name->string)
@@ -190,7 +199,7 @@
     [(design-matrix? t)
      (design-matrix->tabular-asa (table->design-matrix t names))]
     [else
-     (define selected (select-table-values t names who))
+     (define selected (select-table-values t names who #:rows-required? #f))
      (asa:table (build-vector (vector-length (first selected)) values)
                 (for/list ([column (in-list selected)]
                            [name (in-list names)])

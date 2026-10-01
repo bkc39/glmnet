@@ -132,12 +132,12 @@ The library a format adapts is a real dependency in `info.rkt`, which
      `rkt-polars.packages.${system}.racket-deps.overrideAttrs (_: {
      outputHash = "<got>"; })` in `installPolars`, and drop the override at 1.
 
-`glmnet/data/tabular-asa` depends on the catalog package `tabular-asa`, which
-depends on csv-reading, mcfly and overeasy (#63 is on hold for their licences).
-In the Nix sandbox, `installCatalogDeps` installs the four, before polars, from
-the sources in `catalogSources`, each pinned to what the catalog names: the git
-commit of tabular-asa, and the SHA-1 checksum of the others' zip files.
-`raco pkg catalog-show <name>` prints both when a pin moves.
+`glmnet/data/tabular-asa` depends on the catalog package `tabular-asa` (MIT),
+which depends on csv-reading, mcfly and overeasy (LGPL-3; #62 tracks the
+licence question). In the Nix sandbox, `installCatalogDeps` installs the four,
+before polars, from the sources in `catalogSources`, each pinned to what the
+catalog names: the git commit of tabular-asa, and the SHA-1 checksum of the
+others' zip files. `raco pkg catalog-show <name>` prints both when a pin moves.
 
 - **When the csv-reading zip changes.** Its pin fetches an unversioned URL,
   `https://www.neilvandyke.org/racket/csv-reading.zip`, the catalog's own
