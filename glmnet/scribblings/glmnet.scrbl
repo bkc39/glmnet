@@ -35,6 +35,9 @@ Friedman, Trevor Hastie, Rob Tibshirani and the other authors of the
 @hyperlink["https://glmnet.stanford.edu/"]{R glmnet package}, whose vignettes
 shaped this manual.
 
+@bold{AI Disclosure.} The guide and reference for this package were created with the help of AI tools.
+
+
 @local-table-of-contents[]
 
 @include-section["guide.scrbl"]

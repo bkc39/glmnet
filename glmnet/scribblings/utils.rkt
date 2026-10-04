@@ -21,6 +21,7 @@
          (for-syntax racket/base))
 
 (require (for-label glmnet
+                    (only-in datasets load-dataset)
                     glmnet/data/nested
                     glmnet/plot
                     glmnet/data/csv
@@ -29,6 +30,7 @@
                     (only-in polars
                              dataframe? series? dataframe series read-csv ref column-names
                              dtype polars-null dataframe->f64vector cast)
+                    (prefix-in pl: (only-in polars head))
                     glmnet/datasets
                     racket/base
                     racket/contract
@@ -41,12 +43,14 @@
                     math/distributions
                     (only-in pict pict?)
                     (only-in plot
-                             plot-pict plot-width plot-height plot-title plot-font-size vrule)
+                             plot-pict plot-width plot-height plot-title plot-font-size vrule
+                             points hrule function)
                     (only-in plot/utils renderer2d?)))
 
 (provide (all-from-out scribble/manual)
          (all-from-out scribble/example)
          (for-label (all-from-out glmnet
+                                  datasets
                                   glmnet/data/nested
                                   glmnet/plot
                                   glmnet/data/csv

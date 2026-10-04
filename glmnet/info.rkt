@@ -28,9 +28,10 @@
 ;; to read the manual's sources. math-doc, pict-doc and plot-doc are for the
 ;; manual's links into their documentation; plot-gui-lib provides `plot`, the
 ;; module plot's documentation is written against, which the manual imports
-;; for-label.
+;; for-label. datasets supplies the getting-started chapter's real data and
+;; is needed only to build and evaluate the documentation.
 (define build-deps
-  '("at-exp-lib" "math-doc" "pict-doc" "plot-doc" "plot-gui-lib" "racket-doc" "rackunit-lib"
+  '("at-exp-lib" "datasets" "math-doc" "pict-doc" "plot-doc" "plot-gui-lib" "racket-doc" "rackunit-lib"
     "sandbox-lib"))
 (define scribblings '(("scribblings/glmnet.scrbl" (multi-page))))
 (define pkg-desc

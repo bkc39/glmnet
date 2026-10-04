@@ -2,7 +2,9 @@
   description = "glmnet - Racket bindings for lasso and elastic-net regularized models";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    # datasets, used by the evaluated guide, currently requires Racket 9.3.
+    nixpkgs.url = "github:NixOS/nixpkgs/07e1d92cdc0ed416cfa11ff3ca40d17e61cfba7a";
+    nixpkgs-intel-macos.url = "github:NixOS/nixpkgs/4df1b885d76a54e1aa1a318f8d16fd6005b6401f";
     # rkt-polars, the catalog package `polars` that glmnet/data/polars adapts.
     # The sandboxed builds cannot reach the package catalog, so they install
     # it from this source, whose native library is the prebuilt candidate the
@@ -12,13 +14,32 @@
     # the live catalog, unpinned (bkc39/rkt-polars#146); AGENTS.md says what
     # to do when its hash stops matching.
     rkt-polars.url = "github:bkc39/rkt-polars";
+    datasets-src = {
+      url = "github:bkc39/datasets/007c85a57b4e5c638227c5e7b90c50ce18cc63fd";
+      flake = false;
+    };
+    data-frame-src = {
+      url = "github:alex-hhh/data-frame/ab3980c4da5a99d2b79172a32b9cb86b2c2b63b4";
+      flake = false;
+    };
+    al2-test-runner-src = {
+      url = "github:alex-hhh/al2-test-runner/b6757271932151dff6507ee6f1b690d0268da808";
+      flake = false;
+    };
   };
 
-  outputs = { self, nixpkgs, rkt-polars }:
+  outputs = { self, nixpkgs, nixpkgs-intel-macos, rkt-polars, datasets-src, data-frame-src, al2-test-runner-src }:
     let
       supportedSystems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
       version = "0.1.0";
+
+      # The Racket 9.3 nixpkgs pin dropped Intel macOS. Its native-only
+      # output keeps the repository's previous toolchain pin.
+      pkgsFor = system:
+        import (if system == "x86_64-darwin" then nixpkgs-intel-macos else nixpkgs) {
+          inherit system;
+        };
 
       # Source filter shared by both derivations: drop local build artifacts and
       # any dev-staged shared objects so they do not perturb the store hash.
@@ -83,11 +104,24 @@
         raco pkg install --batch --copy --no-docs --scope user \
           --name polars "$TMPDIR/polars"
       '';
+
+      # Guide examples use the catalog datasets API. Stage its source and
+      # adapter dependencies offline, reusing the Polars installed above.
+      installDatasets = ''
+        raco pkg install --batch --deps fail --no-setup --copy --scope user \
+          --name al2-test-runner ${al2-test-runner-src}
+        raco pkg install --batch --deps fail --no-setup --copy --scope user \
+          --name data-frame ${data-frame-src}
+        raco pkg install --batch --deps fail --no-setup --copy --scope user \
+          --name datasets-core ${datasets-src}/datasets-core
+        raco pkg install --batch --deps fail --no-setup --copy --scope user \
+          --name datasets ${datasets-src}/datasets
+      '';
     in
     {
       packages = forAllSystems (system:
         let
-          pkgs = import nixpkgs { inherit system; };
+          pkgs = pkgsFor system;
 
           # The native C-ABI shim: libglmnetcompat, built from the vendored glmnet
           # Fortran (fortran/vendor/glmnet5dpclean.f, R glmnet 4.1) plus our iso_c_binding wrapper.
@@ -120,7 +154,8 @@
             inherit version;
             src = cleanSrc pkgs ./.;
 
-            nativeBuildInputs = [ pkgs.racket pkgs.makeWrapper ];
+            nativeBuildInputs = [ pkgs.racket pkgs.makeWrapper ]
+              ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.xvfb-run ];
             buildInputs = [ native ];
 
             FONTCONFIG_FILE = pkgs.makeFontsConf { fontDirectories = [ pkgs.dejavu_fonts ]; };
@@ -139,6 +174,7 @@
               cp ${native}/lib/libglmnetcompat.* ./glmnet/native-libs/ 2>/dev/null || true
 
               ${installPolars system}
+              ${installDatasets}
 
               raco pkg install --batch --deps fail --no-setup --copy --scope user \
                 --name glmnet ./glmnet
@@ -155,10 +191,10 @@
               runHook preCheck
               # Recursive: covers tests/ (the plot tests among them) plus the
               # literate examples' companion harnesses under glmnet/examples/test/.
-              raco test ./glmnet/
+              ${pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux "xvfb-run -a "}raco test ./glmnet/
 
               # Render the Scribble docs to catch errors.
-              raco scribble --htmls --dest "$TMPDIR/glmnet-doc" glmnet/scribblings/glmnet.scrbl
+              ${pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux "xvfb-run -a "}raco scribble --htmls --dest "$TMPDIR/glmnet-doc" glmnet/scribblings/glmnet.scrbl
               runHook postCheck
             '';
 
@@ -217,6 +253,7 @@
               mkdir -p $PLTUSERHOME ./glmnet/native-libs
               cp ${native}/lib/libglmnetcompat.* ./glmnet/native-libs/ 2>/dev/null || true
               ${installPolars system}
+              ${installDatasets}
               raco pkg install --batch --deps fail --no-setup --copy --scope user \
                 --name glmnet ./glmnet
               raco setup --no-docs --pkgs glmnet
@@ -275,11 +312,12 @@
 
       devShells = forAllSystems (system:
         let
-          pkgs = import nixpkgs { inherit system; };
+          pkgs = pkgsFor system;
         in
         {
           default = pkgs.mkShell {
-            packages = [ pkgs.racket pkgs.gfortran pkgs.cmake pkgs.gnumake ];
+            packages = [ pkgs.racket pkgs.gfortran pkgs.cmake pkgs.gnumake ]
+              ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.xvfb-run ];
             shellHook = ''
               export PLTUSERHOME="$PWD/.racket-user"
               mkdir -p "$PLTUSERHOME"

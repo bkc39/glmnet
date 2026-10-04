@@ -3,20 +3,14 @@
 
 @title[#:tag "guide" #:style 'toc]{User guide}
 
-The guide starts with a first fit, then covers the data layout, the penalty
-and the result types that every model family shares, where data comes from
-(example datasets and CSV files), fitting from named data with formulas, and
-plotting paths and cross-validation curves, and ends with R glmnet's Quick
-Start and one worked example per family.
+To get started we will walk through an example of estimating a model from data and unpacking the results.
 
-Every snippet is evaluated when this manual is built, so the printed results
-are what the library returns. Each section in @secref["examples"] has a runnable
-literate counterpart under @filepath{glmnet/examples/} in the package source,
-together with a companion runner and test under @filepath{glmnet/examples/test/}:
+There are several worked @secref["examples"] if you prefer to jump to the specific model type you are interested in.
 
-@commandline{racket glmnet/examples/test/02-lasso.rkt}
+You can also evaluate the examples in this guide and their source code which
+you can view @filepath{glmnet/examples} in the main repository on GitHub.
 
-For the definition of every binding mentioned, see the @secref["reference"].
+To find the documentation for a specific definition or procedure, see the @secref["reference"].
 
 @local-table-of-contents[]
 

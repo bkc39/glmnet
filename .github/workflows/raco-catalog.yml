@@ -121,7 +121,14 @@ jobs:
           path: glmnet/native-libs/candidates/${{ matrix.candidate }}/
 
       - name: Install from candidate and test
-        run: bash scripts/test-local.sh
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            sudo apt-get update
+            sudo apt-get install --yes xvfb xauth
+            xvfb-run -a bash scripts/test-local.sh
+          else
+            bash scripts/test-local.sh
+          fi
 
   old-glibc-load:
     name: Old-glibc load test (manylinux2014 / glibc 2.17)

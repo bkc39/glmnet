@@ -1,6 +1,73 @@
 {
   "nodes": {
+    "al2-test-runner-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1598584755,
+        "narHash": "sha256-/sUmGp7odmi6baDsJeN8oN7AAa6ojWQD1aynA4UL2us=",
+        "owner": "alex-hhh",
+        "repo": "al2-test-runner",
+        "rev": "b6757271932151dff6507ee6f1b690d0268da808",
+        "type": "github"
+      },
+      "original": {
+        "owner": "alex-hhh",
+        "repo": "al2-test-runner",
+        "rev": "b6757271932151dff6507ee6f1b690d0268da808",
+        "type": "github"
+      }
+    },
+    "data-frame-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1787141646,
+        "narHash": "sha256-AE3M0JM2qQ2FIjDuunV3GEIuKyDyZw4qZYnSGLgGFJo=",
+        "owner": "alex-hhh",
+        "repo": "data-frame",
+        "rev": "ab3980c4da5a99d2b79172a32b9cb86b2c2b63b4",
+        "type": "github"
+      },
+      "original": {
+        "owner": "alex-hhh",
+        "repo": "data-frame",
+        "rev": "ab3980c4da5a99d2b79172a32b9cb86b2c2b63b4",
+        "type": "github"
+      }
+    },
+    "datasets-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1791056085,
+        "narHash": "sha256-EQi2aAxFKGl/G1ZaK7dDvLFlzvM3S21i7mKjd59p/0Y=",
+        "owner": "bkc39",
+        "repo": "datasets",
+        "rev": "007c85a57b4e5c638227c5e7b90c50ce18cc63fd",
+        "type": "github"
+      },
+      "original": {
+        "owner": "bkc39",
+        "repo": "datasets",
+        "rev": "007c85a57b4e5c638227c5e7b90c50ce18cc63fd",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
+      "locked": {
+        "lastModified": 1787172299,
+        "narHash": "sha256-PShzS87awOlE5XWkxUGBd/58/F+AtE2ZMgFffKj4r8s=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "07e1d92cdc0ed416cfa11ff3ca40d17e61cfba7a",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "07e1d92cdc0ed416cfa11ff3ca40d17e61cfba7a",
+        "type": "github"
+      }
+    },
+    "nixpkgs-intel-macos": {
       "locked": {
         "lastModified": 1780336545,
         "narHash": "sha256-vhVhuXzFrIOfcssC/9hDHx7MHzDKjF3keHuREOQqQiQ=",
@@ -11,8 +78,8 @@
       },
       "original": {
         "owner": "NixOS",
-        "ref": "nixpkgs-unstable",
         "repo": "nixpkgs",
+        "rev": "4df1b885d76a54e1aa1a318f8d16fd6005b6401f",
         "type": "github"
       }
     },
@@ -52,7 +119,11 @@
     },
     "root": {
       "inputs": {
+        "al2-test-runner-src": "al2-test-runner-src",
+        "data-frame-src": "data-frame-src",
+        "datasets-src": "datasets-src",
         "nixpkgs": "nixpkgs",
+        "nixpkgs-intel-macos": "nixpkgs-intel-macos",
         "rkt-polars": "rkt-polars"
       }
     }

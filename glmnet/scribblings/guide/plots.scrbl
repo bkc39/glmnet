@@ -44,7 +44,7 @@ plots are drawn with @racketmodname[plot/no-gui], whose parameters, such as
 
 @section[#:tag "plot-path"]{Coefficient paths}
 
-The running fixture of @secref["gs-first-fit"] has a response that is exactly
+The small illustrative dataset below has a response that is exactly
 @math{y = 1 + 2x₁ − x₂}, and a third predictor, @math{x₃ = x₁²}, that carries
 no signal. @racket[plot-coefficient-path] plots its path as R's
 @tt{plot(fit, label = TRUE)} does:

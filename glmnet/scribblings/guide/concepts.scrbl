@@ -9,6 +9,10 @@ Every model family in @racketmodname[glmnet] shares one data layout, one
 penalty and one shape of result. This chapter covers those shared pieces; the
 @secref["examples"] then take each family in turn.
 
+A @deftech{fit} is the result of estimating a model on a dataset. Its
+@deftech{solution} consists of the parameter values found by minimizing the
+model's objective function.
+
 @local-table-of-contents[]
 
 @section[#:tag "concepts-data"]{Data layout}
