@@ -126,8 +126,11 @@ Load @racketmodname[glmnet/plot] for coefficient paths and Racket's
 this manual and DrRacket display as images. @racket[plot-pict] draws an
 image rather than opening a plot window.
 
+@; Keep the displayed interactive require, but render picts without loading
+@; the GUI in raco setup's documentation worker places and sandbox namespace.
 @examples[#:eval ev #:label #f
-(require glmnet/plot plot)
+(eval:alts (require glmnet/plot plot)
+           (require glmnet/plot plot/no-gui))
 ]
 
 @subsubsection[#:tag "gs-predicted-actual"]{Predicted versus actual values}

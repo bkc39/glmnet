@@ -4,7 +4,7 @@
   inputs = {
     # datasets, used by the evaluated guide, currently requires Racket 9.3.
     nixpkgs.url = "github:NixOS/nixpkgs/07e1d92cdc0ed416cfa11ff3ca40d17e61cfba7a";
-    nixpkgs-intel-macos.url = "github:NixOS/nixpkgs/4df1b885d76a54e1aa1a318f8d16fd6005b6401f";
+    nixpkgs-legacy.url = "github:NixOS/nixpkgs/4df1b885d76a54e1aa1a318f8d16fd6005b6401f";
     # rkt-polars, the catalog package `polars` that glmnet/data/polars adapts.
     # The sandboxed builds cannot reach the package catalog, so they install
     # it from this source, whose native library is the prebuilt candidate the
@@ -28,16 +28,16 @@
     };
   };
 
-  outputs = { self, nixpkgs, nixpkgs-intel-macos, rkt-polars, datasets-src, data-frame-src, al2-test-runner-src }:
+  outputs = { self, nixpkgs, nixpkgs-legacy, rkt-polars, datasets-src, data-frame-src, al2-test-runner-src }:
     let
       supportedSystems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
       version = "0.1.0";
 
-      # The Racket 9.3 nixpkgs pin dropped Intel macOS. Its native-only
-      # output keeps the repository's previous toolchain pin.
+      # Keep the previous pin for Intel macOS, which the Racket 9.3 pin
+      # dropped, and for the R glmnet 4.1-10 reference environment below.
       pkgsFor = system:
-        import (if system == "x86_64-darwin" then nixpkgs-intel-macos else nixpkgs) {
+        import (if system == "x86_64-darwin" then nixpkgs-legacy else nixpkgs) {
           inherit system;
         };
 
@@ -60,9 +60,13 @@
       # for golden output. Used ONLY by the r-parity devShell, the gen-goldens
       # app, and the checks.parity gate -- never by the default build or by the
       # `racket` check, so `nix flake check`'s core stays R-free.
-      rEnvFor = pkgs: pkgs.rWrapper.override {
-        packages = with pkgs.rPackages; [ glmnet jsonlite survival ];
-      };
+      # Updating Racket must not also update the numerical reference: the
+      # newer pin has R glmnet 5.0, whose Cox fits differ from our solver.
+      rEnvFor = system:
+        let referencePkgs = import nixpkgs-legacy { inherit system; };
+        in referencePkgs.rWrapper.override {
+          packages = with referencePkgs.rPackages; [ glmnet jsonlite survival ];
+        };
 
       # rkt-polars' prebuilt native library for each system it ships one for.
       # Its pre-install hook picks the candidate by OS family, which would give
@@ -154,8 +158,7 @@
             inherit version;
             src = cleanSrc pkgs ./.;
 
-            nativeBuildInputs = [ pkgs.racket pkgs.makeWrapper ]
-              ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.xvfb-run ];
+            nativeBuildInputs = [ pkgs.racket pkgs.makeWrapper ];
             buildInputs = [ native ];
 
             FONTCONFIG_FILE = pkgs.makeFontsConf { fontDirectories = [ pkgs.dejavu_fonts ]; };
@@ -191,10 +194,10 @@
               runHook preCheck
               # Recursive: covers tests/ (the plot tests among them) plus the
               # literate examples' companion harnesses under glmnet/examples/test/.
-              ${pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux "xvfb-run -a "}raco test ./glmnet/
+              raco test ./glmnet/
 
               # Render the Scribble docs to catch errors.
-              ${pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux "xvfb-run -a "}raco scribble --htmls --dest "$TMPDIR/glmnet-doc" glmnet/scribblings/glmnet.scrbl
+              raco scribble --htmls --dest "$TMPDIR/glmnet-doc" glmnet/scribblings/glmnet.scrbl
               runHook postCheck
             '';
 
@@ -228,7 +231,7 @@
           # R-exported dataset CSVs) from the pinned R glmnet. Run from repo root.
           gen-goldens = pkgs.writeShellApplication {
             name = "gen-goldens";
-            runtimeInputs = [ (rEnvFor pkgs) ];
+            runtimeInputs = [ (rEnvFor system) ];
             text = ''
               Rscript "$(pwd)/scripts/r-parity/gen-reference.R" "$@"
             '';
@@ -243,7 +246,7 @@
             inherit version;
             src = cleanSrc pkgs ./.;
 
-            nativeBuildInputs = [ pkgs.racket (rEnvFor pkgs) ];
+            nativeBuildInputs = [ pkgs.racket (rEnvFor system) ];
             buildInputs = [ native ];
 
             buildPhase = ''
@@ -316,8 +319,7 @@
         in
         {
           default = pkgs.mkShell {
-            packages = [ pkgs.racket pkgs.gfortran pkgs.cmake pkgs.gnumake ]
-              ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.xvfb-run ];
+            packages = [ pkgs.racket pkgs.gfortran pkgs.cmake pkgs.gnumake ];
             shellHook = ''
               export PLTUSERHOME="$PWD/.racket-user"
               mkdir -p "$PLTUSERHOME"
@@ -348,7 +350,7 @@
           # R-enabled shell for (re)generating the parity goldens. Kept separate
           # from `default` so the everyday shell needs no R.
           r-parity = pkgs.mkShell {
-            packages = [ pkgs.racket (rEnvFor pkgs) ];
+            packages = [ pkgs.racket (rEnvFor system) ];
             shellHook = ''
               echo "glmnet R-parity shell."
               echo "  Regenerate goldens:  Rscript scripts/r-parity/gen-reference.R"

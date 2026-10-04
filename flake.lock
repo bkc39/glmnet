@@ -67,7 +67,7 @@
         "type": "github"
       }
     },
-    "nixpkgs-intel-macos": {
+    "nixpkgs-legacy": {
       "locked": {
         "lastModified": 1780336545,
         "narHash": "sha256-vhVhuXzFrIOfcssC/9hDHx7MHzDKjF3keHuREOQqQiQ=",
@@ -123,7 +123,7 @@
         "data-frame-src": "data-frame-src",
         "datasets-src": "datasets-src",
         "nixpkgs": "nixpkgs",
-        "nixpkgs-intel-macos": "nixpkgs-intel-macos",
+        "nixpkgs-legacy": "nixpkgs-legacy",
         "rkt-polars": "rkt-polars"
       }
     }
