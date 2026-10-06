@@ -2,7 +2,9 @@
   description = "glmnet - Racket bindings for lasso and elastic-net regularized models";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    # datasets, used by the evaluated guide, currently requires Racket 9.3.
+    nixpkgs.url = "github:NixOS/nixpkgs/07e1d92cdc0ed416cfa11ff3ca40d17e61cfba7a";
+    nixpkgs-legacy.url = "github:NixOS/nixpkgs/4df1b885d76a54e1aa1a318f8d16fd6005b6401f";
     # rkt-polars, the catalog package `polars` that glmnet/data/polars adapts.
     # The sandboxed builds cannot reach the package catalog, so they install
     # it from this source, whose native library is the prebuilt candidate the
@@ -12,13 +14,32 @@
     # the live catalog, unpinned (bkc39/rkt-polars#146); AGENTS.md says what
     # to do when its hash stops matching.
     rkt-polars.url = "github:bkc39/rkt-polars";
+    datasets-src = {
+      url = "github:bkc39/datasets/007c85a57b4e5c638227c5e7b90c50ce18cc63fd";
+      flake = false;
+    };
+    data-frame-src = {
+      url = "github:alex-hhh/data-frame/ab3980c4da5a99d2b79172a32b9cb86b2c2b63b4";
+      flake = false;
+    };
+    al2-test-runner-src = {
+      url = "github:alex-hhh/al2-test-runner/b6757271932151dff6507ee6f1b690d0268da808";
+      flake = false;
+    };
   };
 
-  outputs = { self, nixpkgs, rkt-polars }:
+  outputs = { self, nixpkgs, nixpkgs-legacy, rkt-polars, datasets-src, data-frame-src, al2-test-runner-src }:
     let
       supportedSystems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
       version = "0.1.0";
+
+      # Keep the previous pin for Intel macOS, which the Racket 9.3 pin
+      # dropped, and for the R glmnet 4.1-10 reference environment below.
+      pkgsFor = system:
+        import (if system == "x86_64-darwin" then nixpkgs-legacy else nixpkgs) {
+          inherit system;
+        };
 
       # Source filter shared by both derivations: drop local build artifacts and
       # any dev-staged shared objects so they do not perturb the store hash.
@@ -39,9 +60,13 @@
       # for golden output. Used ONLY by the r-parity devShell, the gen-goldens
       # app, and the checks.parity gate -- never by the default build or by the
       # `racket` check, so `nix flake check`'s core stays R-free.
-      rEnvFor = pkgs: pkgs.rWrapper.override {
-        packages = with pkgs.rPackages; [ glmnet jsonlite survival ];
-      };
+      # Updating Racket must not also update the numerical reference: the
+      # newer pin has R glmnet 5.0, whose Cox fits differ from our solver.
+      rEnvFor = system:
+        let referencePkgs = import nixpkgs-legacy { inherit system; };
+        in referencePkgs.rWrapper.override {
+          packages = with referencePkgs.rPackages; [ glmnet jsonlite survival ];
+        };
 
       # rkt-polars' prebuilt native library for each system it ships one for.
       # Its pre-install hook picks the candidate by OS family, which would give
@@ -83,11 +108,24 @@
         raco pkg install --batch --copy --no-docs --scope user \
           --name polars "$TMPDIR/polars"
       '';
+
+      # Guide examples use the catalog datasets API. Stage its source and
+      # adapter dependencies offline, reusing the Polars installed above.
+      installDatasets = ''
+        raco pkg install --batch --deps fail --no-setup --copy --scope user \
+          --name al2-test-runner ${al2-test-runner-src}
+        raco pkg install --batch --deps fail --no-setup --copy --scope user \
+          --name data-frame ${data-frame-src}
+        raco pkg install --batch --deps fail --no-setup --copy --scope user \
+          --name datasets-core ${datasets-src}/datasets-core
+        raco pkg install --batch --deps fail --no-setup --copy --scope user \
+          --name datasets ${datasets-src}/datasets
+      '';
     in
     {
       packages = forAllSystems (system:
         let
-          pkgs = import nixpkgs { inherit system; };
+          pkgs = pkgsFor system;
 
           # The native C-ABI shim: libglmnetcompat, built from the vendored glmnet
           # Fortran (fortran/vendor/glmnet5dpclean.f, R glmnet 4.1) plus our iso_c_binding wrapper.
@@ -139,6 +177,7 @@
               cp ${native}/lib/libglmnetcompat.* ./glmnet/native-libs/ 2>/dev/null || true
 
               ${installPolars system}
+              ${installDatasets}
 
               raco pkg install --batch --deps fail --no-setup --copy --scope user \
                 --name glmnet ./glmnet
@@ -192,7 +231,7 @@
           # R-exported dataset CSVs) from the pinned R glmnet. Run from repo root.
           gen-goldens = pkgs.writeShellApplication {
             name = "gen-goldens";
-            runtimeInputs = [ (rEnvFor pkgs) ];
+            runtimeInputs = [ (rEnvFor system) ];
             text = ''
               Rscript "$(pwd)/scripts/r-parity/gen-reference.R" "$@"
             '';
@@ -207,7 +246,7 @@
             inherit version;
             src = cleanSrc pkgs ./.;
 
-            nativeBuildInputs = [ pkgs.racket (rEnvFor pkgs) ];
+            nativeBuildInputs = [ pkgs.racket (rEnvFor system) ];
             buildInputs = [ native ];
 
             buildPhase = ''
@@ -217,6 +256,7 @@
               mkdir -p $PLTUSERHOME ./glmnet/native-libs
               cp ${native}/lib/libglmnetcompat.* ./glmnet/native-libs/ 2>/dev/null || true
               ${installPolars system}
+              ${installDatasets}
               raco pkg install --batch --deps fail --no-setup --copy --scope user \
                 --name glmnet ./glmnet
               raco setup --no-docs --pkgs glmnet
@@ -275,7 +315,7 @@
 
       devShells = forAllSystems (system:
         let
-          pkgs = import nixpkgs { inherit system; };
+          pkgs = pkgsFor system;
         in
         {
           default = pkgs.mkShell {
@@ -310,7 +350,7 @@
           # R-enabled shell for (re)generating the parity goldens. Kept separate
           # from `default` so the everyday shell needs no R.
           r-parity = pkgs.mkShell {
-            packages = [ pkgs.racket (rEnvFor pkgs) ];
+            packages = [ pkgs.racket (rEnvFor system) ];
             shellHook = ''
               echo "glmnet R-parity shell."
               echo "  Regenerate goldens:  Rscript scripts/r-parity/gen-reference.R"
