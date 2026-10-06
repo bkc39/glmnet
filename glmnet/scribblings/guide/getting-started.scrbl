@@ -274,4 +274,56 @@ Several R @tt{glmnet} features have no binding yet. Each has an open issue:
         (@hyperlink["https://github.com/bkc39/glmnet/issues/11"]{#11}).}
 ]
 
+@section[#:tag "gs-license"]{License}
+
+This package is distributed under @bold{GPL-2.0-or-later} (see @tt{LICENSE}
+at the root of the repository). It is assembled from parts under different
+licences:
+
+@itemlist[
+  @item{The Racket bindings, the Fortran layer that gives the solver a C
+        interface (@tt{fortran/glmnet_capi.f90}) and this manual:
+        GPL-2.0-or-later.}
+  @item{The solver: R glmnet 4.1's own Fortran, @tt{glmnet5dpclean.f},
+        vendored byte for byte under @tt{fortran/vendor/}. R glmnet declares
+        it @bold{GPL-2} only. @tt{fortran/vendor/NOTICE.md} records its
+        source, commit and checksum.}
+  @item{The example datasets that @racketmodname[glmnet/datasets] loads: R
+        glmnet 4.1-10's data, GPL-2 only, and R's own @tt{mtcars} and
+        @tt{iris}, part of R, under GPL-2 or GPL-3.}
+  @item{The libraries it builds on, such as rkt-polars and Racket's plot
+        library, are permissively licensed (Apache-2.0 or MIT).}
+]
+
+The solver is GPL-2 only, so whether the package as a whole can be offered
+under "or later" terms is an open question, tracked in
+@hyperlink["https://github.com/bkc39/glmnet/issues/62"]{#62}.
+
+@section[#:tag "gs-acknowledgements"]{Acknowledgements}
+
+The solver and its algorithms are the work of the authors of the
+@hyperlink["https://glmnet.stanford.edu/"]{R glmnet package}: Jerome Friedman,
+Trevor Hastie, Rob Tibshirani, Balasubramanian Narasimhan, Kenneth Tay and
+Noah Simon, with Junyang Qian. Their vignettes shaped this manual, whose
+chapters follow them closely, and their R package is the reference the test
+suite checks every result against.
+
+The example datasets come from R glmnet and from R's @tt{datasets} package,
+maintained by the R Core Team. The tables in the guide are read and shaped
+with rkt-polars, the Racket bindings to the Polars dataframe library, and the
+plots are drawn with Racket's plot library.
+
+@section[#:tag "gs-ai-disclosure"]{AI disclosure}
+
+This package was built with substantial help from AI coding agents. Claude, by
+Anthropic, running in Claude Code, wrote most of the code, the tests and this
+manual under the maintainer's direction. As of October 2026, 30 of the 31
+commits on the main branch credit Claude as a co-author.
+
+Every change went through a pull request. AI reviewer agents also reviewed
+most of them, and the maintainer decided what was merged. The numbers do not
+rest on the agents' word. An automated parity suite compares the package's
+results with R glmnet 4.1.10's on the same data, and it runs as part of the
+package's checks.
+
 @(close-eval ev)
