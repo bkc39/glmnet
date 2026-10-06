@@ -26,17 +26,15 @@ elastic-net regularized models in six families:
 This manual has two parts: the @secref["guide"] works through the library by
 example, and the @secref["reference"] documents the public API.
 
-@bold{License.} Because this package vendors and links the GPL-2.0 glmnet
-Fortran, it is distributed under @bold{GPL-2.0-or-later} --- unlike the
-permissively licensed bindings in the same family.
+@bold{License.} This package is distributed under @bold{GPL-2.0-or-later}.
 
 @bold{Acknowledgements.} The solver and its algorithms are the work of Jerome
 Friedman, Trevor Hastie, Rob Tibshirani and the other authors of the
 @hyperlink["https://glmnet.stanford.edu/"]{R glmnet package}, whose vignettes
 shaped this manual.
 
-@bold{AI Disclosure.} The guide and reference for this package were created with the help of AI tools.
-
+@bold{AI Disclosure.} This package and its documentation were created with the
+use of AI tools.
 
 @local-table-of-contents[]
 
