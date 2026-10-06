@@ -15,6 +15,12 @@ regularization and fitting from named columns.
 
 @commandline{raco pkg install --auto glmnet datasets}
 
+The package ships a prebuilt native library, @tt{libglmnetcompat}, for Linux
+(x86-64) and macOS (arm64) only. It also depends on rkt-polars (the package
+@tt{polars}), whose native library covers the same two platforms. On any other
+platform, Windows, Linux on ARM or Intel macOS, the install fails when it
+reaches @tt{polars}.
+
 The @tt{datasets} package supplies the real data used in this chapter and
 requires Racket 9.3 or later. Load the modelling library:
 
@@ -317,8 +323,8 @@ plots are drawn with Racket's plot library.
 
 This package was built with substantial help from AI coding agents. Claude, by
 Anthropic, running in Claude Code, wrote most of the code, the tests and this
-manual under the maintainer's direction. As of October 2026, 30 of the 31
-commits on the main branch credit Claude as a co-author.
+manual under the maintainer's direction, and most commits in the repository's
+history credit Claude as a co-author.
 
 Every change went through a pull request. AI reviewer agents also reviewed
 most of them, and the maintainer decided what was merged. The numbers do not
