@@ -9,9 +9,7 @@ Every fit takes unnamed or named data as it is (see @secref["concepts-data"]).
 This chapter is about where the data comes from: the example datasets that
 ship with the package, tables, Racket's own lists and vectors, CSV files,
 @racketmodname[math/matrix] matrices and Polars dataframes, and fitting each
-directly. Each format's conversions are a module under
-@filepath{glmnet/data/}, which @racket[(require glmnet)] does not load; they
-are the explicit route of @secref["data-explicit"].
+directly; @secref["data-explicit"] converts it first instead.
 
 The example @secref["ex-data-sources"] fits one dataset from each of them.
 
@@ -85,11 +83,8 @@ are immutable. A fit names the response column and the predictors:
 (coef (ols mtcars "mpg" #:predictors '("wt" "hp")))
 ]
 
-The datasets are CSV files in the package, under
-@filepath{glmnet/datasets/}, which @filepath{scripts/export-datasets.R}
-writes from R. Every number is written with 17 significant digits, so each
-reads back as the same double as R's, and the parity tests check every one of
-them against R's own. They can be read like any other CSV file:
+The datasets are CSV files written from R, under @filepath{glmnet/datasets/},
+and read like any other:
 
 @examples[#:eval ev #:label #f
 (require glmnet/data/csv)
@@ -135,7 +130,7 @@ always holds the rows, and every nesting fits as the same lists do:
 
 @examples[#:eval ev #:label #f
 (define rows '((1.0 2.0) (2.0 1.0) (3.0 4.0) (4.0 3.0) (5.0 6.0)))
-(define response '(1 4 3 6 5))
+(define response '(1.2 3.9 3.1 5.8 5.1))
 (for/list ([X (list (map list->vector rows)
                     (list->vector rows)
                     (list->vector (map list->vector rows)))])
@@ -246,15 +241,9 @@ matrix:
 (equal? fit (elnet-path qs-x qs-y))
 ]
 
-A flonum array, from @racket[array->flarray] or @racket[design-matrix->matrix],
-or a mutable array, from @racket[vector->matrix], is copied straight from the
-vector that holds its elements. Any other array is read one element at a time,
-through the contract that the Typed Racket library puts on each array it
-returns to untyped code, which makes a large matrix several times slower to
-convert, and a lazy one, made while @racket[array-strictness] is @racket[#f]
-or returned by @racket[array-broadcast] or @racket[array-lazy], slower still.
-Converting once with @racket[matrix->design-matrix] and passing the design
-matrix to every fit pays that cost once (see @secref["data-explicit"]).
+Converting a large matrix takes time on every fit; convert it once with
+@racket[matrix->design-matrix] and pass the design matrix to each fit (see
+@secref["data-explicit"]).
 
 @(close-eval math-ev)
 
@@ -267,7 +256,7 @@ solver reads. Here Polars reads R's @tt{iris} from the copy that
 @racketmodname[glmnet/datasets] ships:
 
 @examples[#:eval ev #:label #f
-(require (only-in polars read-csv column-names dataframe series cast))
+(require (only-in polars read-csv column-names dataframe series cast polars-null))
 (define flowers (read-csv (collection-file-path "iris.csv" "glmnet" "datasets")))
 (column-names flowers)
 (coef (lasso flowers "Sepal.Length" #:lambda 0.01
@@ -294,7 +283,7 @@ the baseline of @tt{factor(dose, levels = c("low", "mid", "high"))} and fits
    (list (series '(1.0 3.2 2.1 0.9 2.0 3.1) #:name "y")
          (cast (series '("low" "high" "mid" "low" "mid" "high") #:name "dose")
                '(enum low mid high)))))
-(coef (formula-fit (~ y dose) doses #:lambda 0))
+(dict-keys (coef (formula-fit (~ y dose) doses #:lambda 0)))
 ]
 
 A missing value (a Polars null), a column that is not numeric where numbers
@@ -302,8 +291,11 @@ are needed, and a value that is not finite are errors that name the column,
 and the row or the dtype:
 
 @examples[#:eval ev #:label #f
-(eval:error (lasso flowers "Sepal.Length" #:predictors '("Petal.Width" "Species")
-                   #:lambda 0.01))
+(define gaps
+  (dataframe (list (series (list 1.0 2.0 polars-null 4.0) #:name "x")
+                   (series '(1.0 2.5 2.9 4.2) #:name "y"))))
+(eval:error (lasso gaps "y" #:predictors '("x") #:lambda 0.1))
+(eval:error (formula-fit (~ Species Petal.Width) flowers #:lambda 0.1))
 ]
 
 @section[#:tag "data-explicit"]{The explicit route}
@@ -355,11 +347,6 @@ matrices. The columns of a design matrix with no names are named
 (table->polars (list (cons "y" '(1.5 2.5)) (cons "group" '("a" "b"))))
 ]
 
-@racket[design-matrix->polars] is the slower direction. rkt-polars makes a
-series only from a list or a vector, which it reads element by element, so
-each column goes through a vector of flonums. A series made from an
-@racket[f64vector] in one copy, which rkt-polars does not have yet
-(@hyperlink["https://github.com/bkc39/rkt-polars/issues/145"]{rkt-polars#145}),
-would make it as fast as the way in.
+@racket[design-matrix->polars], the way back, is slower than the way in.
 
 @(close-eval ev)

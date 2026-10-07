@@ -115,6 +115,15 @@ goldens check every number of every file against R's, bit for bit, the
 UTF-8 `LC_CTYPE` that `gen-reference.R` sets, since white space is
 locale-dependent in R and the Nix sandbox runs R in the C locale.
 
+Two conversion costs that the manual leaves out. A `math/array` array that is
+neither a flonum array nor a mutable array is read one element at a time
+through the contract Typed Racket puts on arrays it returns to untyped code,
+several times slower for a large matrix, and a lazy array slower still.
+`design-matrix->polars` goes through a vector of flonums per column, because
+rkt-polars makes a series only from a list or a vector; a series from an
+`f64vector` in one copy (bkc39/rkt-polars#145) would make it as fast as the
+way in.
+
 The library a format adapts is a real dependency in `info.rkt`, which
 `main.rkt` does not load. `glmnet/data/polars` depends on the catalog package
 `polars` (rkt-polars, Apache-2.0 OR MIT):
