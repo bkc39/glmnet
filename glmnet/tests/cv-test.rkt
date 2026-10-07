@@ -466,12 +466,12 @@
                           #rx"^elnet-cv: fold-ids does not have one entry per row of X")
     (check-contract-error (lambda () (elnet-cv X y #:fold-ids (map (lambda (f) (modulo f 2)) folds)))
                           #rx"^elnet-cv: contract violation;\n cross-validation needs at least 3 folds"
-                          #rx"the fold-ids argument"
+                          #rx"the #:fold-ids argument"
                           #rx"blaming: .*cv-test\\.rkt")
     (check-contract-error (lambda () (elnet-cv X y #:fold-ids (map (lambda (f) (* 2 f)) folds)))
                           #rx"^elnet-cv: contract violation;\n a fold has no observations"
                           #rx"cover 0 to 8\n  expected: an observation in fold 1\n"
-                          #rx"the fold-ids argument")
+                          #rx"the #:fold-ids argument")
     (check-contract-error (lambda () (elnet-cv X y #:fold-ids (cons -1 (cdr folds)))) #rx"elnet-cv"))
 
   (test-case "a huge fold id is rejected without a vector of that size"

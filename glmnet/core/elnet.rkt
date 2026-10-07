@@ -137,7 +137,7 @@
                            max-iters
                            beta))
   (check-jerr jerr who)
-  (with-data-predictors (elnet-result intercept (unpack-vector beta ni) rsq lam nlp) names))
+  (attach-data-names (elnet-result intercept (unpack-vector beta ni) rsq lam nlp) names))
 
 (define (elnet-fit X y
                    #:predictors [predictors #f]
@@ -262,7 +262,7 @@
                            a0 beta dev alm))
   (check-jerr jerr 'elnet-path lmu)
   (define coefficients (unpack-columns beta ni lmu))
-  (with-data-predictors
+  (attach-data-names
    (glmnet-path 'gaussian (finish-lambdas alm lmu (not lambda))
                 (unpack-vector a0 lmu) coefficients (unpack-vector dev lmu)
                 (count-nonzero coefficients) nlp)
@@ -291,9 +291,9 @@
                 #:lambda lambda #:nlambda nlambda #:lambda-min-ratio lambda-min-ratio
                 #:alpha alpha #:standardize? standardize? #:intercept? intercept?
                 #:thresh thresh #:max-iters max-iters))
-  (define (fit-all) (fit x ys))
+  (define (fit-all) (attach-data-names (fit x ys) names))
   (define (fit-rows rows) (fit (design-matrix-select-rows x rows) (select ys rows)))
-  (with-data-predictors
+  (attach-data-names
    (cross-validate 'elnet-cv x ys fit-all fit-rows
                    #:measure measure #:nfolds nfolds #:fold-ids fold-ids #:grouped? grouped?)
    names))

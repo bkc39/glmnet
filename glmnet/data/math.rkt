@@ -86,11 +86,11 @@
                                 [j (in-range n)])
       (define x (ref i j))
       (define k (+ (* i n) j))
-      (unless (real? x)
-        (element-error who what "not a real number" x #:position k))
-      (unless (fl< (flabs (real->double-flonum x)) +inf.0)
-        (element-error who what "not finite" x #:position k))
-      x))
+      (cond
+        [(not (real? x)) (element-error who what "not a real number" x #:position k)]
+        [(not (fl< (flabs (real->double-flonum x)) +inf.0))
+         (element-error who what "not finite" x #:position k)]
+        [else x])))
 
   (: row-major->flarray (-> FlVector Index Index FlArray))
   (define (row-major->flarray data m n)
@@ -122,9 +122,8 @@
   [design-matrix->matrix (-> design-matrix? matrix/c)]
   [array->response (-> response-array/c (and/c (listof real?) pair?))]))
 
-;; For glmnet's data boundary (core/input.rkt) only, which loads this module
-;; when a program has loaded math/array or math/matrix: the conversions above
-;; with the name of the procedure the user called.
+;; For glmnet's data boundary (core/input.rkt) only: the conversions above with
+;; the name of the procedure the user called.
 (module* support #f
   (provide math-matrix? response-array? matrix->dm array->reals))
 

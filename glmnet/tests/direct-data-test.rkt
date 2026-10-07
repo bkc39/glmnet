@@ -60,6 +60,17 @@
           (cons 'elnet-cv (lambda (X y [predictors #f])
                             (elnet-cv X y #:predictors predictors #:fold-ids folds)))))
 
+  (define ((blame-matching . patterns) e)
+    (and (exn:fail:contract:blame? e)
+         (for/and ([p (in-list (cons #rx"blaming: [^\n]*direct-data-test[.]rkt" patterns))])
+           (regexp-match? p (exn-message e)))))
+
+  (define ((error-matching . patterns) e)
+    (and (exn:fail:contract? e)
+         (not (exn:fail:contract:blame? e))
+         (for/and ([p (in-list patterns)])
+           (regexp-match? p (exn-message e)))))
+
   (define (check-same-model direct explicit [new-data new-rows] [direct-new-data new-data])
     (check-equal? direct explicit)
     (check-equal? (coef direct) (coef explicit))
@@ -125,18 +136,35 @@
     (define cv (elnet-cv cars "mpg" #:predictors predictors #:fold-ids folds))
     (check-equal? (predict cv new-cars #:lambda 'lambda-min) (predict cv new-rows #:lambda 'lambda-min)))
 
+  (test-case "a fit from named data reads a design matrix with column names by name"
+    (define fit (ols cars "mpg" #:predictors predictors))
+    (define expected (predict fit new-rows))
+    (check-equal? (predict fit (polars->design-matrix new-cars '("qsec" "wt" "hp"))) expected)
+    (check-equal? (elnet-predict fit (rows->design-matrix '((18.6 110.0 2.78) (16.9 113.0 1.513))
+                                                          #:column-names '(qsec hp wt)))
+                  expected)
+    (check-equal? (predict fit (nested->design-matrix new-rows)) expected)
+    (check-exn (error-matching #rx"^predict: the table has no column with this name"
+                               #rx"column: \"qsec\"")
+               (lambda () (predict fit (rows->design-matrix '((2.78 110.0 18.6))
+                                                            #:column-names '(wt hp sec))))))
+
+  (test-case "the path inside a cross-validated fit from named data predicts by name too"
+    (define cv (elnet-cv cars "mpg" #:predictors predictors #:fold-ids folds))
+    (define p (glmnet-cv-path cv))
+    (check-equal? p (glmnet-cv-path (elnet-cv rows mpg #:fold-ids folds)))
+    (check-equal? (predict p new-cars #:lambda 0.5) (predict p new-rows #:lambda 0.5))
+    (check-equal? (predict p new-table #:lambda 0.5) (predict p new-rows #:lambda 0.5)))
+
+  (test-case "a struct-copy of a fit from named data is a fit from unnamed data"
+    (define fit (ols cars "mpg" #:predictors predictors))
+    (define copy (struct-copy elnet-result fit))
+    (check-equal? copy fit)
+    (check-equal? (predict copy new-rows) (predict fit new-rows))
+    (check-exn (error-matching #rx"^predict: the model's predictors are not named")
+               (lambda () (predict copy new-cars))))
+
   ;; --- errors -------------------------------------------------------------------------------
-
-  (define ((blame-matching . patterns) e)
-    (and (exn:fail:contract:blame? e)
-         (for/and ([p (in-list (cons #rx"blaming: [^\n]*direct-data-test[.]rkt" patterns))])
-           (regexp-match? p (exn-message e)))))
-
-  (define ((error-matching . patterns) e)
-    (and (exn:fail:contract? e)
-         (not (exn:fail:contract:blame? e))
-         (for/and ([p (in-list patterns)])
-           (regexp-match? p (exn-message e)))))
 
   (test-case "named data needs #:predictors, and unnamed data takes none"
     (check-exn (blame-matching #rx"^ols: contract violation"
@@ -147,8 +175,8 @@
     (check-exn (blame-matching #rx"expected: a non-empty list of distinct names of numeric columns of the table"
                                #rx"given: #f")
                (lambda () (elnet-cv mtcars "mpg" #:predictors #f)))
-    (check-exn (blame-matching #rx"expected: #f, since X is not named data"
-                               #rx"in: the predictors argument of")
+    (check-exn (blame-matching #rx"expected: #f, since X is unnamed data: rows, a matrix or a design matrix, even one whose columns have names"
+                               #rx"in: the #:predictors argument of")
                (lambda () (ols rows mpg #:predictors '("wt")))))
 
   (test-case "unknown names, the response among the predictors, and repeated names"
@@ -157,9 +185,9 @@
                                #rx"in: the y argument of")
                (lambda () (ols cars "mpgg" #:predictors predictors)))
     (check-exn (blame-matching #rx"given: \"weight\", which is not a column of the table"
-                               #rx"in: the predictors argument of")
+                               #rx"in: the #:predictors argument of")
                (lambda () (ridge mtcars "mpg" #:predictors '("wt" "weight") #:lambda 1.0)))
-    (check-exn (blame-matching #rx"given: \"mpg\", which is the response")
+    (check-exn (blame-matching #rx"given: column \"mpg\", which is the response")
                (lambda () (elnet-path cars "mpg" #:predictors '("wt" mpg))))
     (check-exn (blame-matching #rx"given: \"wt\" twice")
                (lambda () (ols cars "mpg" #:predictors '("wt" wt))))
@@ -173,10 +201,31 @@
                      (series '(2.0 1.0 4.0 3.0) #:name "z")
                      (series '(1.0 3.0 2.0 5.0) #:name "y"))))
 
+  (test-case "two columns of a table with one name are an error in the caller's name"
+    (check-exn (error-matching #rx"^ols: the table has two columns with the same name"
+                               #rx"name: \"x\"")
+               (lambda () (ols (list (cons "x" #(1 2 3)) (cons 'x #(2 3 5)) (cons "y" #(1 2 4)))
+                               "y" #:predictors '("x"))))
+    (check-exn (error-matching #rx"^lasso: the table has two columns with the same name"
+                               #rx"name: \"x\"")
+               (lambda () (lasso (hash "x" '(1 2 3) 'x '(2 3 5) "y" '(1 2 4)) "y"
+                                 #:predictors '("x") #:lambda 0.1))))
+
+  (test-case "rows that start with text are rows, unless y names a column"
+    (check-exn (error-matching #rx"^ols: X has an element that is not a real number"
+                               #rx"column: 0\n  row: 0\n  element: \"a\"")
+               (lambda () (ols '(("a" 1 2) ("b" 3 4) ("c" 5 7)) '(1 2 4))))
+    (define table '(("x" 1 2 3 5) ("z" 2 1 4 3) ("y" 1 3 2 5)))
+    (define fit (ols table "y" #:predictors '("x" "z")))
+    (check-equal? fit (ols '((1 2) (2 1) (3 4) (5 3)) '(1 3 2 5)))
+    (check-equal? (predict fit '(("z" 1) ("x" 2))) (predict fit '((2 1))))
+    (check-exn (error-matching #rx"^predict: the model's predictors are not named")
+               (lambda () (predict (ols '((1 2) (2 1) (3 4) (5 3)) '(1 3 2 5)) table))))
+
   (test-case "a text column is never read as numbers"
-    (check-exn (blame-matching #rx"given: \"model\", a column of the dataframe that is not numeric")
+    (check-exn (blame-matching #rx"given: column \"model\", of dtype string")
                (lambda () (ols text-cars "y" #:predictors '("x" "model"))))
-    (check-exn (blame-matching #rx"given: \"model\", a column of the dataframe that is not numeric"
+    (check-exn (blame-matching #rx"given: column \"model\", of dtype string"
                                #rx"in: the y argument of")
                (lambda () (ols text-cars "model" #:predictors '("x"))))
     (define table (list (cons "model" '("a" "b" "c" "d")) (cons "x" '(1 2 3 5)) (cons "y" '(1 3 2 5))))
@@ -257,6 +306,60 @@
                                                           (series '(1.0) #:name "qsec")))))))
 
   ;; --- loading ---------------------------------------------------------------------------
+
+  ;; A fresh namespace with glmnet, where `declarations` are required, and the
+  ;; forms evaluated there.
+  (define (glmnet-namespace declarations)
+    (define ns (make-base-empty-namespace))
+    (parameterize ([current-namespace ns])
+      (namespace-require 'racket/base)
+      (namespace-require 'glmnet)
+      (for-each namespace-require declarations))
+    ns)
+
+  (define (declared? ns mod)
+    (parameterize ([current-namespace ns]) (module-declared? mod #f)))
+
+  ;; Every plain form of data, fitted and predicted from.
+  (define plain-fits
+    '((define X '((1 2) (3 4) (5 7) (2 2)))
+      (define y '(1 2 4 3))
+      (predict (ols X y) X)
+      (predict (ols (list->vector (map list->vector X)) (list->vector y)) #(#(1 2)))
+      (predict (ols (rows->design-matrix X) y) (rows->design-matrix X))
+      (define table (list (cons "a" #(1 3 5 2)) (cons "b" #(2 4 7 2)) (cons "y" y)))
+      (predict (lasso table "y" #:predictors '("a" "b") #:lambda 0.1) (hash "b" '(1) "a" '(2)))
+      (predict (elnet-path '(("a" 1 3 5 2) ("b" 2 4 7 2) ("y" 1 2 4 3)) "y" #:predictors '(a b))
+               table #:lambda 0.1)
+      (with-handlers ([exn:fail? void]) (ols '(("a" 1 2) ("b" 3 4)) '(1 2)))))
+
+  (test-case "a plain value never consults a library: declared, its adapter stays unloaded"
+    (define ns (glmnet-namespace '((for-label polars) math/array)))
+    (parameterize ([current-namespace ns])
+      (for-each eval plain-fits))
+    (check-false (declared? ns 'glmnet/data/polars))
+    (check-false (declared? ns 'glmnet/data/math))
+    (check-false (declared? ns 'math/matrix))
+    ;; Only a value that is no plain form asks, and loads both adapters.
+    (parameterize ([current-namespace ns])
+      (eval '(with-handlers ([exn:fail:contract? void]) (ols (box 1) '(1 2)))))
+    (check-true (declared? ns 'glmnet/data/polars))
+    (check-true (declared? ns 'glmnet/data/math)))
+
+  (test-case "glmnet attached to another namespace reads the dataframes of that namespace"
+    (define outer (glmnet-namespace '()))
+    (define inner (make-base-namespace))
+    (namespace-attach-module outer 'glmnet inner)
+    (parameterize ([current-namespace inner])
+      (namespace-require 'glmnet)
+      (namespace-require '(only polars dataframe series))
+      (check-equal?
+       (eval '(let* ([df (dataframe (list (series '(1.0 2.0 3.0 5.0) #:name "x")
+                                          (series '(1.0 3.0 2.0 5.0) #:name "y")))]
+                     [fit (ols df "y" #:predictors '("x"))])
+                (list (coef fit) (predict fit df))))
+       (eval '(let ([fit (ols '((1.0) (2.0) (3.0) (5.0)) '(1.0 3.0 2.0 5.0))])
+                (list (coef fit) (predict fit '((1.0) (2.0) (3.0) (5.0)))))))))
 
   (test-case "(require glmnet) and a fit from plain data load neither Polars nor math/matrix"
     (parameterize ([current-namespace (make-base-empty-namespace)])

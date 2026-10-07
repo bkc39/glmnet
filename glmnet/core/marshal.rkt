@@ -11,8 +11,7 @@
          racket/flonum
          ffi/vector
          (only-in "../data.rkt" design-matrix/c response/c)
-         (submod "../data.rkt" support)
-         (only-in (submod "input.rkt" support) unnamed->design-matrix))
+         (submod "../data.rkt" support))
 
 (provide design-matrix/c response/c
          design-matrix-data design-matrix-nrows design-matrix-ncols
@@ -34,10 +33,9 @@
 
 ;; --- prediction ------------------------------------------------------------
 
-;; The new-data argument of a prediction helper, unnamed data, as a design
-;; matrix with one column per coefficient.
-(define (prediction-matrix X ni who)
-  (define x (unnamed->design-matrix who "X" X))
+;; The new data x of a prediction, a design matrix, checked to have one
+;; column per coefficient.
+(define (prediction-matrix x ni who)
   (define no (design-matrix-nrows x))
   (define nc (design-matrix-ncols x))
   (cond

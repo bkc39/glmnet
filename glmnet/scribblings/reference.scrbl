@@ -80,14 +80,18 @@ then required, lists the predictor columns in the order of the coefficients.
 Nothing is guessed: a column is used only when it is named, no row is
 dropped, and a missing value, a value that is not a real number or one that
 is not finite is an error naming its column and row. A design matrix is
-unnamed data, even when its columns have names.
+unnamed data, even when its columns have names. An association list whose
+columns are lists, such as @racket['(("x" 1 2) ("y" 3 4))], is also a list of
+rows: it is named data when @racket[y] names a column, and rows otherwise.
 
 A fit from named data remembers its predictors' names: @racket[predict] and
-@racket[elnet-predict] read new named data by them, in any order, ignoring
-other columns, the response included, and unnamed data by position. A fit from
-unnamed data reads only unnamed data. The result is the same struct as from
-the explicit conversions, and @racket[equal?] to it; @racket[coef] keeps its
-layout, and @racket[plot-coefficient-path] labels the curves by name.
+@racket[elnet-predict] read new named data, and a design matrix with column
+names, by them, in any order, ignoring other columns, the response included,
+and other unnamed data by position. A fit from unnamed data reads only
+unnamed data. The result is the same struct as from the explicit conversions,
+and @racket[equal?] to it, though a copy made by @racket[struct-copy] does not
+remember the names; @racket[coef] keeps its layout, and
+@racket[plot-coefficient-path] labels the curves by name.
 
 @racket[(require glmnet)] loads neither Polars nor @racketmodname[math/matrix];
 their values are recognised once the program has loaded the library itself.
@@ -147,8 +151,8 @@ their values are recognised once the program has loaded the library itself.
   The contract on the @racket[#:predictors] argument, given @racket[X] and
   @racket[y]. For named data, a non-empty list of distinct names of its
   columns, numeric ones for a dataframe, without the response @racket[y]; it
-  is required. For unnamed data, only @racket[#f], since every column of
-  @racket[X] is a predictor.
+  is required. For unnamed data, a design matrix with column names included,
+  only @racket[#f], since every column of @racket[X] is a predictor.
 
   @examples[#:eval ev
   (define car-predictors/c (predictors-for/c autos "mpg"))
