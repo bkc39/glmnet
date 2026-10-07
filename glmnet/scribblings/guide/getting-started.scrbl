@@ -51,7 +51,7 @@ economy and vehicle characteristics. We will predict fuel economy
 and horsepower (@tt{hp}). Load and display the Polars dataframe:
 
 @examples[#:eval ev #:label #f
-(require datasets glmnet/data/polars (prefix-in pl: polars) racket/match)
+(require datasets glmnet/data/polars (prefix-in pl: polars))
 (define cars (load-dataset 'mtcars #:format 'polars))
 cars
 ]
