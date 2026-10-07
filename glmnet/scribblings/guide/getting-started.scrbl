@@ -175,7 +175,7 @@ error curve, with the two marked:
          #:title "Mtcars: cross-validated error")
 ]
 
-@secref["concepts-cv"] covers folds and error measures.
+@seclink["concepts-cv"]{Concepts} covers folds and error measures.
 
 @section[#:tag "gs-formulas"]{Fitting from named columns}
 
@@ -214,11 +214,11 @@ Predict a car of 3,000 pounds and 150 horsepower:
 (define new-car '((wt 3.0) (hp 150)))
 (predict fit new-car)
 (predict named-fit new-car)
-(predict cv new-car #:lambda 'lambda-1se)
+(predict cv new-car)
 ]
 
-The penalized prediction at @tech{lambda-1se} is pulled toward the mean fuel
-economy. A classifier's @racket[#:type] chooses its linear predictor,
+The penalized predictions, the lasso's and @racket[cv]'s at
+@tech{lambda-1se}, are pulled toward the mean fuel economy. A classifier's @racket[#:type] chooses its linear predictor,
 probabilities or classes; see @secref["concepts-predict"].
 
 @section[#:tag "gs-api-gaps"]{What is not there yet}
