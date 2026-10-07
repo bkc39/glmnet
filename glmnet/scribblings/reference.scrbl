@@ -86,8 +86,8 @@ A fit from named data remembers its predictors' names: @racket[predict] and
 @racket[elnet-predict] read new named data by them, in any order, ignoring
 other columns, the response included, and unnamed data by position. A fit from
 unnamed data reads only unnamed data. The result is the same struct as from
-the explicit conversions, and @racket[equal?] to it, and @racket[coef] keeps
-its layout.
+the explicit conversions, and @racket[equal?] to it; @racket[coef] keeps its
+layout, and @racket[plot-coefficient-path] labels the curves by name.
 
 @racket[(require glmnet)] loads neither Polars nor @racketmodname[math/matrix];
 their values are recognised once the program has loaded the library itself.
@@ -2965,7 +2965,8 @@ cross-validated fit @racket[cv] of @secref["ref-cv"], and the formula model
          @racket['dev] for the fraction of deviance explained.}
    @item{@racket[label] labels each curve at the end of the path: @racket[#f]
          for no labels, @racket[#t] for the predictor's name if the model names
-         its predictors, as a @racket[formula-model] does, and otherwise its
+         its predictors, as a @racket[formula-model] and a fit from named data
+         (see @secref["ref-common-data"]) do, and otherwise its
          position counting from 1, or the names of the predictors, as a list or
          as the column names of a design matrix. A design matrix without column
          names gives positions.}
@@ -2992,6 +2993,8 @@ cross-validated fit @racket[cv] of @secref["ref-cv"], and the formula model
   @examples[#:eval ev
   (plot-coefficient-path path #:xvar 'norm #:label '("x1" "x2" "x3")
                          #:width 400 #:height 300 #:title "Lasso path")
+  (plot-coefficient-path (elnet-path mtcars "mpg" #:predictors '("wt" "hp" "qsec"))
+                         #:label #t #:width 400 #:height 300)
   (eval:error (plot-coefficient-path (elnet-path X y #:lambda '(10.0 5.0))))
   (eval:error (plot-coefficient-path (elnet-path X y #:lambda '(0.0))))]}
 
