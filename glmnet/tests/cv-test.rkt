@@ -198,13 +198,14 @@
 
   ;; --- settings R changes for small folds -----------------------------------
 
+  ;; The warnings that thunk logs on the glmnet topic.
   (define (warnings-of thunk)
     (define messages '())
     (define result
       (with-intercepted-logging
         (lambda (v) (set! messages (cons (vector-ref v 1) messages)))
         thunk
-        'warning))
+        'warning 'glmnet))
     (values result messages))
 
   (test-case "fewer than 3 observations per fold: the folds are not grouped"

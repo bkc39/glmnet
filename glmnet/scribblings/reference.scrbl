@@ -1507,7 +1507,8 @@ it passes on to each fit, and these:
        observations, they are never grouped; @racket['auc] and @racket['C]
        are always computed per fold; and when the folds average fewer than 10
        observations, the Cox deviance is grouped. These adjustments, which R
-       also makes, log a warning.}
+       also makes, log a warning with the topic @racket['glmnet] that names
+       the procedure called.}
  @item{@racket[#:lambda] is as for the path fitter, but needs at least two
        values. Every fold's path is fitted at those values. Without it, each
        fold's path chooses its own sequence, as R's does, and is evaluated at
