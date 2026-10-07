@@ -47,7 +47,7 @@
 (module* support #f
   (provide dataframe? series? column-names column-dtype-problem numeric-series? series->list
            dataframe->design-matrix dataframe-column->response series->response
-           dataframe-column-values series-values))
+           dataframe-column-values series-values dataframe->table))
 
 ;; --- dtypes --------------------------------------------------------------------
 
@@ -244,6 +244,37 @@
     [else
      (check-no-null who s name)
      (cdar (dataframe->columns df #:columns (list name)))]))
+
+;; The columns of df with the given distinct `names`, strings, as a table, an
+;; association list from name to vector, as polars->table reads them: what a
+;; formula reads of a dataframe. Each column must hold values a table can, a
+;; numeric dtype for those of `numeric`, and no missing value.
+(define (dataframe->table who df names numeric)
+  (define present (column-names df))
+  (define known (name-set present))
+  (match (filter (lambda (name) (not (hash-ref known name #f))) names)
+    ['() (void)]
+    [(list name)
+     (raise-arguments-error who "the dataframe has no column with this name"
+                            "column" name "columns of the dataframe" present)]
+    [missing
+     (raise-arguments-error who "the dataframe has no columns with these names"
+                            "columns" missing "columns of the dataframe" present)])
+  (when (zero? (height df))
+    (raise-arguments-error who "the dataframe has no rows"))
+  (for ([name (in-list names)])
+    (define s (ref df name))
+    (define d (dtype s))
+    (cond
+      [(and (member name numeric) (not (numeric-dtype? d)))
+       (raise-arguments-error who "the dataframe has a column that is not numeric"
+                              "column" name "dtype" d)]
+      [(not (table-dtype? d))
+       (raise-arguments-error who (format "the dataframe has a column whose dtype is not ~a"
+                                          table-dtypes)
+                              "column" name "dtype" d)]
+      [else (check-no-null who s name)]))
+  (dataframe->columns df #:columns names))
 
 ;; The values of the series s, a response named `what` in errors, as a vector.
 (define (series-values who what s)
