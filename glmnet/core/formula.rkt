@@ -1,14 +1,17 @@
 #lang racket/base
 
-;; The formula front end (#26, #53): R-style formulas over tables, the named
-;; data of data.rkt. `~` quotes a formula, except for its transforms, which it
-;; compiles into procedures, and checks its grammar where it is written;
-;; `formula-fit`, `formula-path` and `formula-cv` expand its terms against a
-;; table (terms.rkt, R's terms() and model.matrix()), call the matrix
-;; procedure of the family that #:family names, and wrap the result in a
-;; `formula-model`. The model keeps its formula, its predictor names and its
-;; expanded terms, so that `coef` is keyed by name and `predict` rebuilds the
-;; design matrix from a new table (core/model.rkt).
+;; The formula front end (#26, #53, #75): R-style formulas over named data, a
+;; table (data.rkt) or a Polars dataframe. `~` quotes a formula, except for its
+;; transforms, which it compiles into procedures, and checks its grammar where
+;; it is written; `formula-fit`, `formula-path` and `formula-cv` expand its
+;; terms against the data's columns (terms.rkt, R's terms() and
+;; model.matrix()), call the matrix procedure of the family that #:family
+;; names, and wrap the result in a `formula-model`. The model keeps its
+;; formula, its predictor names and its expanded terms, so that `coef` is
+;; keyed by name and `predict` rebuilds the design matrix from new named data
+;; (core/model.rkt). The terms read a table; of a dataframe, they read the
+;; columns the formula uses, converted by the data boundary (core/input.rkt),
+;; which recognises a dataframe without loading Polars.
 
 (require (for-syntax racket/base racket/list syntax/parse
                      (submod "terms.rkt" words))
@@ -25,6 +28,7 @@
          (submod "path.rkt" support)
          "cv.rkt"
          (only-in "marshal.rkt" current-warning-who log-fit-warning)
+         (only-in "input.rkt" named-data?)
          (only-in (submod "cv.rkt" support)
                   nfolds/c cv-lambda-sequence/c write-cv)
          "elnet.rkt"
@@ -36,11 +40,16 @@
          (only-in "../data.rkt" table? design-matrix? design-matrix-column-names
                   design-matrix->columns)
          (only-in (submod "../data.rkt" support)
-                  design-matrix-nrows column-name->string table-names select-table-columns
+                  design-matrix-nrows column-name->string select-table-columns
                   select-table-values one-dimensional-length table-column->flvector status->real)
-         (only-in (submod "input.rkt" support) one-dimensional-values))
+         (only-in (submod "input.rkt" support)
+                  one-dimensional-values named-column-names named->table named-data-kind))
 
 (define family/c (or/c 'gaussian 'binomial 'multinomial 'poisson 'cox 'mgaussian))
+
+;; What a formula reads: a table, a named design matrix included, or a Polars
+;; dataframe.
+(define formula-data/c (or/c table? named-data?))
 
 ;; A formula procedure's #:family, 'gaussian when it is not given, for the
 ;; contracts that depend on it.
@@ -63,8 +72,8 @@
   [formula? (-> any/c boolean?)]
   [formula-response (-> formula? formula-response/c)]
   [formula-terms (-> formula? formula-rhs/c)]
-  [formula-predictor-names (-> formula? table? (listof string?))]
-  [formula-design-matrix (-> formula? table? design-matrix?)]
+  [formula-predictor-names (-> formula? formula-data/c (listof string?))]
+  [formula-design-matrix (-> formula? formula-data/c design-matrix?)]
   [formula-model? (-> any/c boolean?)]
   [formula-model-formula (-> formula-model? formula?)]
   [formula-model-predictor-names (-> formula-model? (listof string?))]
@@ -72,7 +81,7 @@
   [formula-model-levels (-> formula-model? (listof (cons/c string? (listof string?))))]
   [formula-fit
    (->i ([f (family) (formula-for/c (family-argument family))]
-         [table table?]
+         [data formula-data/c]
          #:lambda [lambda (>=/c 0)])
         (#:family [family family/c]
          #:alpha [alpha (real-in 0 1)]
@@ -83,7 +92,7 @@
         [result formula-model?])]
   [formula-path
    (->i ([f (family) (formula-for/c (family-argument family))]
-         [table table?])
+         [data formula-data/c])
         (#:family [family family/c]
          #:lambda [lambda lambda-sequence/c]
          #:nlambda [nlambda exact-positive-integer?]
@@ -96,7 +105,7 @@
         [result formula-model?])]
   [formula-cv
    (->i ([f (family) (formula-for/c (family-argument family))]
-         [table table?])
+         [data formula-data/c])
         (#:family [family family/c]
          #:type-measure [type-measure (family) (type-measure/c (family-argument family))]
          #:nfolds [nfolds nfolds/c]
@@ -598,25 +607,29 @@
     [(? list? names) (map column-name->string names)]
     [name (list (column-name->string name))]))
 
-;; The terms of formula f on the table: R's terms(), without a response
-;; column that stands alone as a term, which R's model.matrix drops with a
-;; warning, as this does, and with the levels of its factors, which the
-;; table's values decide. The response columns must be columns of the table
-;; and distinct, and so must every column the formula names, even one it
-;; removes, as R's model.frame evaluates them all. A transform must read a
-;; column, from which its rows come. The design matrix's column names must be
-;; distinct, and none "(Intercept)", as coef keys the coefficients by them and
-;; the intercept by that name. The second value holds the variables' values,
-;; which terms->design-matrix takes as #:evaluated on the same table, so that
-;; each transform is evaluated once, as R's model.frame evaluates it.
-(define (formula-expansion who f table)
-  (define columns (table-names table who))
+;; The terms of formula f on `data`, a table or a dataframe: R's terms(),
+;; without a response column that stands alone as a term, which R's
+;; model.matrix drops with a warning, as this does, and with the levels of its
+;; factors, which the data's values decide. The response columns must be
+;; columns of the data and distinct, and so must every column the formula
+;; names, even one it removes, as R's model.frame evaluates them all. A
+;; transform must read a column, from which its rows come. The design
+;; matrix's column names must be distinct, and none "(Intercept)", as coef
+;; keys the coefficients by them and the intercept by that name. The second
+;; value holds the variables' values, which terms->design-matrix takes as
+;; #:evaluated on the third, the table the terms were read from: `data`
+;; itself, or the dataframe's columns that the terms read, and its response
+;; columns too when `responses-as` is 'numeric, which they must then be, or
+;; 'labels. Each transform is evaluated once, as R's model.frame evaluates it.
+(define (formula-expansion who f data [responses-as #f])
+  (define kind (named-data-kind data))
+  (define columns (named-column-names who data))
   (define responses (response-columns f))
   (define present (for/hash ([c (in-list columns)]) (values c #t)))
   (define (check-column name)
     (unless (hash-ref present name #f)
-      (raise-arguments-error who "the table has no column with this name"
-                             "column" name "formula" f "columns of the table" columns)))
+      (raise-arguments-error who (format "the ~a has no column with this name" kind)
+                             "column" name "formula" f (format "columns of the ~a" kind) columns)))
   (for-each check-column responses)
   (define dup (check-duplicates responses))
   (when dup
@@ -625,14 +638,18 @@
   (for ([v (in-vector (model-terms-variables mt))])
     (define inputs (variable-inputs v))
     (when (null? inputs)
-      (raise-arguments-error who "a transform must read a column of the table"
+      (raise-arguments-error who (format "a transform must read a column of the ~a" kind)
                              "transform" (variable-label v) "formula" f
-                             "columns of the table" columns))
+                             (format "columns of the ~a" kind) columns))
     (for-each check-column inputs))
   (define-values (kept dropped) (drop-response-terms mt))
   (for ([v (in-list dropped)])
     (log-fit-warning who "the response column ~s appeared on the right-hand side and was dropped"
                      (variable-label v)))
+  (define table
+    (named->table who data
+                  (append (if responses-as responses '()) (model-terms-inputs kept))
+                  (if (eq? responses-as 'numeric) responses '())))
   (define-values (resolved evaluated) (resolve-levels/evaluated who kept table))
   (define names (model-terms-column-names resolved))
   (when (member "(Intercept)" names)
@@ -642,20 +659,20 @@
   (when same-name
     (raise-arguments-error who "two columns of the formula's design matrix have the same name"
                            "name" same-name "formula" f))
-  (values resolved evaluated))
+  (values resolved evaluated table))
 
 (define (check-predictors who f mt)
   (when (null? (model-terms-terms mt))
     (raise-arguments-error who "the formula has no predictors, and glmnet needs at least one"
                            "formula" f)))
 
-(define (formula-predictor-names f table)
-  (define-values (mt evaluated) (formula-expansion 'formula-predictor-names f table))
+(define (formula-predictor-names f data)
+  (define-values (mt evaluated table) (formula-expansion 'formula-predictor-names f data))
   (model-terms-column-names mt))
 
-(define (formula-design-matrix f table)
+(define (formula-design-matrix f data)
   (define who 'formula-design-matrix)
-  (define-values (mt evaluated) (formula-expansion who f table))
+  (define-values (mt evaluated table) (formula-expansion who f data))
   (check-predictors who f mt)
   (terms->design-matrix who mt table #:evaluated evaluated))
 
@@ -710,14 +727,16 @@
 
 ;; The model that the formula procedures make: a formula model with the
 ;; expanded terms of its fit, with its factors' levels, from which `predict`
-;; builds the design matrix of a new table, and the classes of its response,
+;; builds the design matrix of new named data, reading only the columns the
+;; terms read, and the classes of its response,
 ;; or #f (model-frame). They are internal, so they live in this subtype and
 ;; formula-model keeps its documented fields.
 (struct formula-model/terms formula-model (terms classes)
   #:transparent
   #:property prop:predictor-matrix
   (lambda (m X who)
-    (terms->design-matrix who (formula-model/terms-terms m) X))
+    (define mt (formula-model/terms-terms m))
+    (terms->design-matrix who mt (named->table who X (model-terms-inputs mt))))
   #:property prop:class-labels
   (lambda (m) (formula-model/terms-classes m)))
 
@@ -821,20 +840,22 @@
                            "column" column "missing label" missing "largest label" largest)))
 
 ;; The terms, the design matrix of predictors, the response arguments of the
-;; family's procedures and the response's classes, from the table: R's
+;; family's procedures and the response's classes, from `data`: R's
 ;; model.frame, model.matrix and model.response. A binomial or multinomial
 ;; response of strings, symbols or booleans has classes, its levels in R's
 ;; order, as R's glmnet makes a factor response's; the second of a binomial
 ;; response's two is the one whose probability the model gives. Otherwise
 ;; the classes are #f.
-(define (model-frame who f table family-name)
-  (define-values (mt evaluated) (formula-expansion who f table))
+(define (model-frame who f data family-name)
+  (define classes? (and (memq family-name '(binomial multinomial)) #t))
+  (define-values (mt evaluated table)
+    (formula-expansion who f data (if (or classes? (eq? family-name 'cox)) 'labels 'numeric)))
   (check-predictors who f mt)
   (define x (terms->design-matrix who mt table #:evaluated evaluated))
   (define responses (response-columns f))
   (define column (car responses))
   (define-values (classes indices)
-    (if (memq family-name '(binomial multinomial))
+    (if classes?
         (response-classes who column (car (select-table-values table (list column) who)))
         (values #f #f)))
   (define y
@@ -893,19 +914,20 @@
 
 ;; Fits the formula with the family procedure that `select` picks, passing
 ;; `options`, an association list from keyword to value, as keyword arguments.
-;; A #:fold-ids option must have one entry per row of the table. An
+;; A #:fold-ids option must have one entry per row of the data. An
 ;; #:intercept? that was not given is the formula's intercept, and the Cox
 ;; family, which has no intercept, takes none.
-(define (fit-formula who select f table family-name options)
+(define (fit-formula who select f data family-name options)
   (define spec (hash-ref families family-name))
-  (define-values (mt x responses classes) (model-frame who f table family-name))
+  (define-values (mt x responses classes) (model-frame who f data family-name))
   (define fold-ids
     (cond [(assq '#:fold-ids options) => (lambda (option) (one-dimensional-values (cdr option)))]
           [else #f]))
+  (define kind (named-data-kind data))
   (when (and fold-ids (not (= (one-dimensional-length fold-ids) (design-matrix-nrows x))))
-    (raise-arguments-error who "fold-ids does not have one entry per row of the table"
+    (raise-arguments-error who (format "fold-ids does not have one entry per row of the ~a" kind)
                            "length of fold-ids" (one-dimensional-length fold-ids)
-                           "rows of the table" (design-matrix-nrows x)))
+                           (format "rows of the ~a" kind) (design-matrix-nrows x)))
   (define kws
     (sort (for/list ([kw (in-list options)]
                      #:unless (and (eq? (car kw) '#:intercept?) (not (family-intercept? spec))))
@@ -943,7 +965,7 @@
     (parameterize ([current-warning-who who])
       (thunk))))
 
-(define (formula-fit f table
+(define (formula-fit f data
                      #:family [family-name 'gaussian]
                      #:lambda lambda
                      #:alpha [alpha 1.0]
@@ -951,7 +973,7 @@
                      #:intercept? [intercept? unsupplied-intercept]
                      #:thresh [thresh 1e-7]
                      #:max-iters [max-iters 100000])
-  (fit-formula 'formula-fit family-fit f table family-name
+  (fit-formula 'formula-fit family-fit f data family-name
                (list (cons '#:lambda lambda)
                      (cons '#:alpha alpha)
                      (cons '#:standardize? standardize?)
@@ -959,7 +981,7 @@
                      (cons '#:thresh thresh)
                      (cons '#:max-iters max-iters))))
 
-(define (formula-path f table
+(define (formula-path f data
                       #:family [family-name 'gaussian]
                       #:lambda [lambda #f]
                       #:nlambda [nlambda 100]
@@ -969,7 +991,7 @@
                       #:intercept? [intercept? unsupplied-intercept]
                       #:thresh [thresh 1e-7]
                       #:max-iters [max-iters 100000])
-  (fit-formula 'formula-path family-path f table family-name
+  (fit-formula 'formula-path family-path f data family-name
                (list (cons '#:lambda lambda)
                      (cons '#:nlambda nlambda)
                      (cons '#:lambda-min-ratio lambda-min-ratio)
@@ -979,7 +1001,7 @@
                      (cons '#:thresh thresh)
                      (cons '#:max-iters max-iters))))
 
-(define (formula-cv f table
+(define (formula-cv f data
                     #:family [family-name 'gaussian]
                     #:type-measure [measure #f]
                     #:nfolds [nfolds 10]
@@ -994,7 +1016,7 @@
                     #:thresh [thresh 1e-7]
                     #:max-iters [max-iters 100000])
   (define measures (family-measures (hash-ref families family-name)))
-  (fit-formula 'formula-cv family-cv f table family-name
+  (fit-formula 'formula-cv family-cv f data family-name
                (list (cons '#:type-measure (or measure (car measures)))
                      (cons '#:nfolds nfolds)
                      (cons '#:fold-ids fold-ids)

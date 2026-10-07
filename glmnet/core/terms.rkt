@@ -76,6 +76,7 @@
          drop-response-terms
          term-variables
          model-terms-labels
+         model-terms-inputs
          resolve-levels
          resolve-levels/evaluated
          model-terms-column-names
