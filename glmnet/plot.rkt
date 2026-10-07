@@ -45,7 +45,8 @@
                   formula-model-fit
                   glmnet-model-predictor-names
                   glmnet-model-response-names)
-         (only-in (submod "core/model.rkt" support) model-class-labels))
+         (only-in (submod "core/model.rkt" support) model-class-labels)
+         (only-in "core/marshal.rkt" log-fit-warning))
 
 (define model/c (or/c glmnet-path? glmnet-cv? formula-model?))
 (define cv/c (or/c glmnet-cv? formula-model?))
@@ -310,7 +311,7 @@
   (define n (vector-length (vector-ref betas 0)))
   (define which (ever-nonzero betas))
   (when (and (pair? which) (null? (cdr which)))
-    (log-warning "~a: 1 or less nonzero coefficients; the plot is not meaningful" who))
+    (log-fit-warning who "1 or less nonzero coefficients; the plot is not meaningful"))
   (define points (finite-points xs betas))
   (define curves
     (for/list ([j (in-list which)]

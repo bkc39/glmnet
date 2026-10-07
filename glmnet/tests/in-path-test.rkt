@@ -88,6 +88,7 @@
 
   (test-case "formula models of every family, as paths, fits and cross-validations"
     (for ([model (list (formula-path (~ Employed all) longley #:nlambda 20)
+                       (formula-path (~ am (+ wt hp)) mtcars #:family 'binomial #:nlambda 10)
                        (formula-path (~ class all) iris #:family 'multinomial #:nlambda 10)
                        (formula-path (~ Species all) iris-species #:family 'multinomial #:nlambda 10)
                        (formula-path (~ (surv time status) all) veteran #:family 'cox #:nlambda 10)

@@ -2718,8 +2718,7 @@ family:
   that @math{λ} as @racket[coef] gives them, keyed by name for a model that
   names its predictors. A single fit is a path with one @math{λ}, and a
   @racket[glmnet-cv] walks its path of all the data. Nothing is interpolated:
-  where a @math{λ} appears twice on a path, each element holds the path's own
-  fit there, while @racket[coef] gives the first.
+  each element holds the path's own fit at its @math{λ}.
 
   @examples[#:eval ev
   (for ([(λ β) (in-path path)])

@@ -72,10 +72,10 @@
 (define current-warning-who (make-parameter #f))
 (define current-warning-what (make-parameter #f))
 
-;; Logs `message` as a warning on the glmnet topic, in the name of the
-;; procedure the user called.
-(define (log-fit-warning who message)
-  (log-glmnet-warning "~a: ~a" (or (current-warning-who) who) message))
+;; Logs (format fmt arg ...) as a warning on the glmnet topic, in the name of
+;; the procedure the user called; nothing is formatted unless a receiver listens.
+(define (log-fit-warning who fmt . args)
+  (log-glmnet-warning "~a: ~a" (or (current-warning-who) who) (apply format fmt args)))
 
 ;; Map glmnet's jerr flag (documented in R glmnet's R/jerr.R) to a Racket
 ;; error. Handles the codes shared across model families; family-specific
@@ -100,9 +100,9 @@
     [(zero? fitted)
      (error who "glmnet fitted no lambda: ~a" (stop-reason jerr))]
     [(negative? jerr)
-     (log-fit-warning who (format "~athe path stops after ~a ~a: ~a"
-                                  (if (current-warning-what) (format "~a: " (current-warning-what)) "")
-                                  fitted (if (= fitted 1) "lambda" "lambdas") (stop-reason jerr)))]
+     (log-fit-warning who "~athe path stops after ~a ~a: ~a"
+                      (if (current-warning-what) (format "~a: " (current-warning-what)) "")
+                      fitted (if (= fitted 1) "lambda" "lambdas") (stop-reason jerr))]
     [else (void)]))
 
 ;; glmnet's reason for stopping, from a non-fatal jerr: -m, or -(code + m) for
