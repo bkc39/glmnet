@@ -503,6 +503,28 @@
                        (regexp #rx"^glmnet: formula-cv: fitting the training data of held-out fold 1: ")
                        (regexp #rx"^glmnet: formula-cv: fitting the training data of held-out fold 2: "))))
 
+  (test-case "cross-validation's warnings about small folds name the formula procedure"
+    (define-values (ungrouped ungrouped-warnings)
+      (glmnet-warnings
+       (lambda () (formula-cv (~ mpg wt hp) mtcars
+                              #:fold-ids (for/list ([i (in-range 32)]) (modulo i 12))))))
+    (check-match ungrouped-warnings
+                 (list (regexp #rx"^glmnet: formula-cv: fewer than 3 observations per fold; ")))
+    (define-values (auc auc-warnings)
+      (glmnet-warnings
+       (lambda () (formula-cv (~ am wt hp) mtcars #:family 'binomial #:type-measure 'auc
+                              #:fold-ids (for/list ([i (in-range 32)]) (modulo i 4))))))
+    (check-eq? (glmnet-cv-measure (formula-model-fit auc)) 'deviance)
+    (check-match auc-warnings
+                 (list (regexp #rx"^glmnet: formula-cv: fewer than 10 observations per fold for 'auc")))
+    (define-values (cox cox-warnings)
+      (glmnet-warnings
+       (lambda () (formula-cv (~ (surv time status) all) veteran #:family 'cox #:grouped? #f
+                              #:fold-ids (for/list ([i (in-range 137)]) (modulo i 15))
+                              #:nlambda 10))))
+    (check-match cox-warnings
+                 (list (regexp #rx"^glmnet: formula-cv: fewer than 10 observations per fold; the Cox"))))
+
   (test-case "a response column alone on the right-hand side is dropped with a warning, as in R"
     (define-values (names warnings)
       (glmnet-warnings (lambda () (mtcars-names (mpg . ~ . 1 + wt + mpg + (* wt mpg))))))

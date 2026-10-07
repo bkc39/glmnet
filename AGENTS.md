@@ -36,7 +36,7 @@ glmnet/                        Racket collection
                                mtcars and iris, from datasets/*.csv
   datasets/*.csv               R's data, written by scripts/export-datasets.R
   core/*.rkt                   one module per family; marshal.rkt, path.rkt shared
-  core/model.rkt               gen:glmnet-model: predict / coef / deviance-ratio on any result
+  core/model.rkt               gen:glmnet-model: predict / coef / deviance-ratio / in-path on any result
   core/cv.rkt                  cross-validation (R's cv.glmnet) behind every family's *-cv
   core/formula.rkt             formula front end: (~ y all) on a table -> any family,
                                a formula-model with name-keyed coef and predict
