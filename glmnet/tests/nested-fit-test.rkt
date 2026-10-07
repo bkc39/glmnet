@@ -172,8 +172,8 @@
                  #rx"or named data \\(a table or a Polars dataframe\\)"
                  #rx"in: the X argument of")
     (check-blame (lambda () (mgaussian-fit Xr #(1.0 2.0) #:lambda 1.0))
-                 #rx"expected: \\(or/c design-matrix\\? \\(listof \\(or/c list\\? vector\\?\\)\\)"
-                 #rx"in: the 2nd argument of"))
+                 #rx"expected: unnamed data \\(a design matrix, a list or vector of rows or a math/matrix matrix\\), since X is unnamed"
+                 #rx"in: the Y argument of"))
 
   (test-case "new data of the wrong shape names the accepted shapes"
     (define r (lasso Xg yg #:lambda 0.1))
@@ -189,7 +189,7 @@
                  #rx"expected: a non-empty list, vector, flvector or f64vector of real\\?")
     (check-blame (lambda () (cox-fit Xc tc (vector) #:lambda 0.05))
                  #rx"expected: a non-empty list, vector, flvector or f64vector of \\(or/c 0 1\\)"
-                 #rx"in: the 3rd argument of"))
+                 #rx"in: the statuses argument of"))
 
   (test-case "a response entry that fails is named by its position"
     (check-blame (lambda () (logistic-fit Xb (list->vector (list-set yb 7 2)) #:lambda 0.02))
@@ -235,9 +235,9 @@
                (lambda () (logistic-fit '((1.0) (2.0) (3.0) (4.0) (5.0) (6.0)) labels #:lambda 0.1))))
 
   (test-case "a positive Cox time that rounds to 0.0 is an error"
-    (check-exn #rx"^cox-fit: times has an element that is not \\(>/c 0\\) as a flonum\n  position: 1\n"
+    (check-exn #rx"^cox-fit: y has an element that is not \\(>/c 0\\) as a flonum\n  position: 1\n"
                (lambda () (cox-fit '((1.0 0.0) (0.0 1.0) (1.0 1.0) (0.0 0.0))
                                    (list 1 (expt 10 -400) 3 4) '(1 1 0 1) #:lambda 0.1)))
-    (check-exn #rx"^cox-path: times has an element that is not \\(>/c 0\\) as a flonum"
+    (check-exn #rx"^cox-path: y has an element that is not \\(>/c 0\\) as a flonum"
                (lambda () (cox-path '((1.0 0.0) (0.0 1.0) (1.0 1.0) (0.0 0.0))
                                     (vector 1 2 (expt 10 -400) 4) '(1 1 0 1))))))

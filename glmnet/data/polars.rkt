@@ -45,7 +45,7 @@
 ;; contract has checked the column names and dtypes, as numeric-column-problem
 ;; does; otherwise they are checked here.
 (module* support #f
-  (provide dataframe? series? column-names numeric-column-problem label-column? numeric-series?
+  (provide dataframe? series? column-names numeric-column-problem label-column-problem numeric-series?
            dataframe->design-matrix dataframe-column->response series->response
            dataframe-column-values series-values))
 
@@ -156,11 +156,11 @@
 (define (numeric-column-problem df)
   (dtype-problem df numeric-dtype?))
 
-;; Whether df's column `name`, a string, holds values a table can: numbers,
-;; booleans, strings, or the symbols of a categorical or enum column, such as
-;; the class labels of a response.
-(define (label-column? df name)
-  (table-dtype? (dtype (ref df name))))
+;; What is wrong with df's column `name`, a string, as a column of values a
+;; table can hold, such as the class labels of a response: numbers, booleans,
+;; strings, or the symbols of a categorical or enum column; or #f.
+(define (label-column-problem df)
+  (dtype-problem df table-dtype?))
 
 (define (numeric-series? s)
   (numeric-dtype? (dtype s)))

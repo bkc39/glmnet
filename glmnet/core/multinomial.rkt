@@ -13,6 +13,8 @@
          racket/flonum
          ffi/vector
          "marshal.rkt"
+         (only-in "input.rkt" data/c response-for/c)
+         (submod "input.rkt" support)
          "model.rkt"
          (submod "model.rkt" support)
          "../foreign/raw/multinomial.rkt"
@@ -27,46 +29,49 @@
  (struct-out multinomial-result)
  (contract-out
   [multinomial-fit
-   (->* (design-matrix/c (response/c class-label/c) #:lambda (>=/c 0))
-        (#:alpha (real-in 0 1)
-         #:standardize? boolean?
-         #:intercept? boolean?
-         #:thresh (>/c 0)
-         #:max-iters exact-positive-integer?)
-        multinomial-result?)]
+   (fit/c (response-for/c X (and/c integer? (>=/c 0)) #:classes? #t)
+          (#:lambda (>=/c 0))
+          (#:alpha (real-in 0 1)
+           #:standardize? boolean?
+           #:intercept? boolean?
+           #:thresh (>/c 0)
+           #:max-iters exact-positive-integer?)
+          multinomial-result?)]
   [multinomial-predict-proba
-   (-> multinomial-result? design-matrix/c (listof (listof (real-in 0 1))))]
+   (-> multinomial-result? data/c (listof (listof (real-in 0 1))))]
   [multinomial-predict
-   (-> multinomial-result? design-matrix/c (listof exact-nonnegative-integer?))]))
+   (-> multinomial-result? data/c (listof (or/c exact-nonnegative-integer? string?)))]))
 
 (provide
  (contract-out
   [multinomial-path
-   (->* (design-matrix/c (response/c class-label/c))
-           (#:lambda lambda-sequence/c
-            #:nlambda exact-positive-integer?
-            #:lambda-min-ratio lambda-min-ratio/c
-            #:alpha (real-in 0 1)
-            #:standardize? boolean?
-            #:intercept? boolean?
-            #:thresh (>/c 0)
-            #:max-iters exact-positive-integer?)
-        glmnet-path?)]
+   (fit/c (response-for/c X (and/c integer? (>=/c 0)) #:classes? #t)
+          ()
+          (#:lambda lambda-sequence/c
+           #:nlambda exact-positive-integer?
+           #:lambda-min-ratio lambda-min-ratio/c
+           #:alpha (real-in 0 1)
+           #:standardize? boolean?
+           #:intercept? boolean?
+           #:thresh (>/c 0)
+           #:max-iters exact-positive-integer?)
+          glmnet-path?)]
   [multinomial-cv
-   (->* (design-matrix/c (response/c class-label/c))
-        (#:type-measure (or/c 'deviance 'class 'mse 'mae)
-         #:nfolds nfolds/c
-         #:fold-ids fold-ids/c
-         #:grouped? boolean?
-         #:lambda cv-lambda-sequence/c
-         #:nlambda exact-positive-integer?
-         #:lambda-min-ratio lambda-min-ratio/c
-         #:alpha (real-in 0 1)
-         #:standardize? boolean?
-         #:intercept? boolean?
-         #:thresh (>/c 0)
-         #:max-iters exact-positive-integer?)
-        glmnet-cv?)]))
+   (fit/c (response-for/c X (and/c integer? (>=/c 0)) #:classes? #t)
+          ()
+          (#:type-measure (or/c 'deviance 'class 'mse 'mae)
+           #:nfolds nfolds/c
+           #:fold-ids fold-ids/c
+           #:grouped? boolean?
+           #:lambda cv-lambda-sequence/c
+           #:nlambda exact-positive-integer?
+           #:lambda-min-ratio lambda-min-ratio/c
+           #:alpha (real-in 0 1)
+           #:standardize? boolean?
+           #:intercept? boolean?
+           #:thresh (>/c 0)
+           #:max-iters exact-positive-integer?)
+          glmnet-cv?)]))
 
 ;; A fitted K-class multinomial model. `intercepts` is a vector of K reals,
 ;; centred to sum to zero; `coefficients` is a vector of K coefficient vectors
@@ -139,16 +144,17 @@
 ;; --- public API ------------------------------------------------------------
 
 (define (multinomial-fit X y
+                         #:predictors [predictors #f]
                          #:lambda lambda
                          #:alpha [alpha 1.0]
                          #:standardize? [standardize? #t]
                          #:intercept? [intercept? #t]
                          #:thresh [thresh 1e-7]
                          #:max-iters [max-iters 100000])
-  (define x (as-design-matrix X 'multinomial-fit "X"))
+  (define-values (x yv names classes)
+    (class-fit-input 'multinomial-fit X y predictors class-label/c 'multinomial))
   (define no (design-matrix-nrows x))
   (define ni (design-matrix-ncols x))
-  (define yv (as-response y no 'multinomial-fit "y" class-label/c))
   (define nc (labels->num-classes (response-labels yv) 'multinomial-fit))
   (define intercepts (make-f64vector nc 0.0))
   (define beta (make-f64vector (* ni nc) 0.0))
@@ -162,9 +168,11 @@
                                  intercepts beta))
   (check-multinomial-jerr jerr 'multinomial-fit)
   ;; beta is class-major: class k's predictor j at k*ni + j.
-  (multinomial-result (center-intercepts (unpack-vector intercepts nc))
-                      (unpack-columns beta ni nc)
-                      dev-ratio lam nlp))
+  (attach-data-names
+   (multinomial-result (center-intercepts (unpack-vector intercepts nc))
+                       (unpack-columns beta ni nc)
+                       dev-ratio lam nlp)
+   names #:classes classes))
 
 ;; --- prediction ------------------------------------------------------------
 
@@ -173,14 +181,16 @@
 (define (multinomial-predict-proba result X)
   (predict-as 'multinomial-predict-proba result X 'response))
 
-;; Predicted class label (0..K-1) for each row of X: the class with the largest
-;; linear predictor, and so the largest probability.
+;; Predicted class (0..K-1, or its label for a fit that names its classes)
+;; for each row of X: the class with the largest linear predictor, and so the
+;; largest probability.
 (define (multinomial-predict result X)
   (predict-as 'multinomial-predict result X 'class))
 
 ;; --- regularization path (#10) ---------------------------------------------
 
 (define (multinomial-path X y
+                          #:predictors [predictors #f]
                           #:lambda [lambda #f]
                           #:nlambda [nlambda 100]
                           #:lambda-min-ratio [lambda-min-ratio #f]
@@ -189,10 +199,10 @@
                           #:intercept? [intercept? #t]
                           #:thresh [thresh 1e-7]
                           #:max-iters [max-iters 100000])
-  (define x (as-design-matrix X 'multinomial-path "X"))
+  (define-values (x yv names classes)
+    (class-fit-input 'multinomial-path X y predictors class-label/c 'multinomial))
   (define no (design-matrix-nrows x))
   (define ni (design-matrix-ncols x))
-  (define yv (as-response y no 'multinomial-path "y" class-label/c))
   (define k (labels->num-classes (response-labels yv) 'multinomial-path))
   (define-values (nlam flmin ulam)
     (path-lambdas lambda nlambda lambda-min-ratio no ni))
@@ -208,15 +218,18 @@
                                  a0 beta dev alm))
   (check-multinomial-jerr jerr 'multinomial-path lmu)
   (define coefficients (unpack-column-groups beta ni k lmu))
-  (glmnet-path 'multinomial (finish-lambdas alm lmu (not lambda))
-               (for/vector #:length lmu ([a (in-vector (unpack-intercept-groups a0 k lmu))])
-                 (center-intercepts a))
-               coefficients (unpack-vector dev lmu)
-               (count-nonzero-groups coefficients) nlp))
+  (attach-data-names
+   (glmnet-path 'multinomial (finish-lambdas alm lmu (not lambda))
+                (for/vector #:length lmu ([a (in-vector (unpack-intercept-groups a0 k lmu))])
+                  (center-intercepts a))
+                coefficients (unpack-vector dev lmu)
+                (count-nonzero-groups coefficients) nlp)
+   names #:classes classes))
 
 ;; --- cross-validation (#27) ------------------------------------------------
 
 (define (multinomial-cv X y
+                        #:predictors [predictors #f]
                         #:type-measure [measure 'deviance]
                         #:nfolds [nfolds 10]
                         #:fold-ids [fold-ids #f]
@@ -229,9 +242,9 @@
                         #:intercept? [intercept? #t]
                         #:thresh [thresh 1e-7]
                         #:max-iters [max-iters 100000])
-  (define x (as-design-matrix X 'multinomial-cv "X"))
-  (define labels
-    (response-labels (as-response y (design-matrix-nrows x) 'multinomial-cv "y" class-label/c)))
+  (define-values (x yv names classes)
+    (class-fit-input 'multinomial-cv X y predictors class-label/c 'multinomial))
+  (define labels (response-labels yv))
   (labels->num-classes labels 'multinomial-cv)
   (define (fit x y)
     (multinomial-path x y
@@ -240,5 +253,7 @@
                       #:thresh thresh #:max-iters max-iters))
   (define (fit-all) (fit x labels))
   (define (fit-rows rows) (fit (design-matrix-select-rows x rows) (select labels rows)))
-  (cross-validate 'multinomial-cv x labels fit-all fit-rows
-                  #:measure measure #:nfolds nfolds #:fold-ids fold-ids #:grouped? grouped?))
+  (attach-data-names
+   (cross-validate 'multinomial-cv x labels fit-all fit-rows
+                   #:measure measure #:nfolds nfolds #:fold-ids fold-ids #:grouped? grouped?)
+   names #:classes classes))

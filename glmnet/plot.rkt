@@ -45,7 +45,8 @@
                   formula-model-fit
                   glmnet-model-predictor-names
                   glmnet-model-response-names)
-         (only-in (submod "core/model.rkt" support) model-class-labels data-predictor-names)
+         (only-in (submod "core/model.rkt" support) model-class-labels data-predictor-names
+                  data-response-names)
          (only-in "core/marshal.rkt" log-fit-warning))
 
 (define model/c (or/c glmnet-path? glmnet-cv? formula-model?))
@@ -293,7 +294,9 @@
 
 ;; The panels of a model's path p, titled by the model's responses or classes.
 (define (model-panels model p type-coef)
-  (path-panels p type-coef (glmnet-model-response-names model) (model-class-labels model)))
+  (path-panels p type-coef
+               (or (glmnet-model-response-names model) (data-response-names model))
+               (model-class-labels model)))
 
 ;; #t labels the curves of a model with named predictors, such as a formula
 ;; model or a model fitted from named data, by name, and those of any other
