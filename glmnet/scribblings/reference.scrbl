@@ -2090,17 +2090,20 @@ or cross-validation procedure of the family that @racket[#:family] names on
 it. They return a @racket[formula-model], which keeps the formula, the names
 of the design matrix's columns and the expanded terms, so that @racket[coef]
 keys the coefficients by name and @racket[predict] builds the design matrix of
-new named data (see @secref["ref-model"]).
+new named data (see @secref["ref-model"]). @secref["formulas"] works through
+examples, @secref["formulas-algebra"] explains the algebra,
+@secref["formulas-transforms"] the transforms, and
+@secref["formulas-factors"] the factors.
 
 A dataframe is read as @racket[(polars->table df)] would be, and the results
 are the same, except that only the columns the formula uses are converted:
-the response columns and those its terms read. The other columns may have any
-dtype, and missing values. A converted column needs a numeric, boolean,
-string, categorical or enum dtype, a numeric one for the response of a family
-without classes, and no missing value; an error names the column. @secref["formulas"] works through examples,
-@secref["formulas-algebra"] explains the algebra,
-@secref["formulas-transforms"] the transforms, and
-@secref["formulas-factors"] the factors.
+those its terms read and, for a fit, the response columns. The other columns
+may have any dtype, and missing values. A converted column needs a numeric,
+boolean, string, categorical or enum dtype and no missing value; a response
+needs a numeric one, except the class labels of a binomial or multinomial
+response and a Cox status, which may be boolean. An error names the column.
+A dataframe with no rows is an error only for a formula that reads a column
+of it, as a table is.
 
 The terms of a formula expand as R's @tt{terms} expands them:
 
