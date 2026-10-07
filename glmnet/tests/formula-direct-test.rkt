@@ -204,6 +204,23 @@
     (check-exn (blame-matching #rx"expected: \\(or/c table[?] named-data[?]\\)" #rx"given: 5")
                (lambda () (formula-fit (~ mpg wt) 5 #:lambda 0.1))))
 
+  (test-case "an empty dataframe is read as an empty table: no rows only for a formula that reads"
+    (define empty-frame (head cars-frame 0))
+    (define empty-table (list (cons "mpg" #()) (cons "wt" #())))
+    (check-equal? (formula-predictor-names (~ mpg 1) empty-frame) '())
+    (check-equal? (formula-predictor-names (~ mpg 1) empty-table) '())
+    (for ([data (list empty-frame empty-table)])
+      (check-exn (error-matching #rx"^formula-design-matrix: the formula has no predictors")
+                 (lambda () (formula-design-matrix (~ mpg 1) data))))
+    (check-exn (error-matching #rx"^formula-predictor-names: the dataframe has no rows$")
+               (lambda () (formula-predictor-names (~ mpg wt) empty-frame)))
+    (check-exn (error-matching #rx"^formula-predictor-names: the table has a column with no rows")
+               (lambda () (formula-predictor-names (~ mpg wt) empty-table)))
+    (check-exn (error-matching #rx"^formula-design-matrix: the dataframe has no rows$")
+               (lambda () (formula-design-matrix (~ mpg wt) empty-frame)))
+    (check-exn (error-matching #rx"^formula-fit: the dataframe has no rows$")
+               (lambda () (formula-fit (~ mpg 1) empty-frame #:lambda 0.1))))
+
   (test-case "a table's response that is not numbers is an error of the response column"
     (define message
       #rx"^formula-fit: the response column \"id\" has an element that is not a real number\n  row: 0\n  element: \"car 0\"$")

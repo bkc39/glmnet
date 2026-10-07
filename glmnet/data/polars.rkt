@@ -170,10 +170,10 @@
 (define (numeric-series? s)
   (numeric-dtype? (dtype s)))
 
-;; Checks that df has rows and that each of `names`, strings, is a column,
-;; unless present?, of a dtype of its kind, (kind-of name), unless checked?,
-;; with no missing value. An error calls a column for which response? holds
-;; the response column.
+;; Checks that df has rows, unless `names` (strings) is empty, and that each
+;; name is a column, unless present?, of a dtype of its kind, (kind-of name),
+;; unless checked?, with no missing value. An error calls a column for which
+;; response? holds the response column.
 (define (check-frame-columns who df names kind-of
                              #:response? [response? (lambda (name) #f)]
                              #:checked? [checked? #f]
@@ -181,7 +181,8 @@
   (define (wrong-dtype? name)
     (not ((kind-dtype? (kind-of name)) (dtype (ref df name)))))
   (cond
-    [(zero? (height df)) (raise-arguments-error who "the dataframe has no rows")]
+    [(and (pair? names) (zero? (height df)))
+     (raise-arguments-error who "the dataframe has no rows")]
     [(and (not present?) (absent-columns names (column-names df)))
      => (lambda (absent) (absent-columns-error who "dataframe" absent (column-names df)))]
     [(and (not checked?) (findf wrong-dtype? names))
