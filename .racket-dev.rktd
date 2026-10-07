@@ -1,0 +1,10 @@
+((shell "nix develop --command")
+ (base-ref "origin/master")
+ (gates
+  (compile     "raco make -j 2 glmnet/main.rkt glmnet/plot.rkt glmnet/tests/*.rkt glmnet/examples/test/*.rkt")
+  (docs-idioms "raco test glmnet/tests/docs-idiom-test.rkt")
+  (resyntax    "resyntax analyze --local-git-repository . origin/master --analyzer-timeout 30000")
+  (test        "raco test -j 2 glmnet/")
+  (docs        "raco scribble --htmls --dest /tmp/glmnet-doc glmnet/scribblings/glmnet.scrbl")
+  (check       "nix flake check"))
+ (push-gates (compile docs-idioms resyntax test)))

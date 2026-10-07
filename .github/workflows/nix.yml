@@ -21,3 +21,53 @@ jobs:
         run: nix flake check --all-systems --no-build
       - name: Build native lib + Racket package, run tests, render docs
         run: nix flake check --print-build-logs
+
+  resyntax:
+    name: Resyntax lint
+    runs-on: ubuntu-latest
+    steps:
+      # full history: --local-git-repository resolves the base ref locally,
+      # and checkout's default shallow fetch would not have it
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: DeterminateSystems/nix-installer-action@v22
+      # The ci shell links glmnet and installs the Resyntax pinned in
+      # nix/racket-linters.nix, so the job lints with the same version, on the
+      # same Racket, as every local shell. Only the .rkt files changed against
+      # the base are analyzed; the .scrbl pages and lp2 programs are
+      # tests/docs-idiom-test.rkt's, which nix flake check runs.
+      - name: Resyntax lint
+        env:
+          # on a master push the empty diff against origin/master reports
+          # quickly; a skipped required check never reports and stalls merges
+          BASE_REF: ${{ github.event.pull_request.base.sha || 'origin/master' }}
+        run: |
+          nix develop .#ci --command bash -c '
+            set -euo pipefail
+            for stamp in "$PLTUSERHOME"/.glmnet-linked "$PLTUSERHOME"/.linters-*; do
+              if [ ! -f "$stamp" ]; then
+                echo "::error::The ci shell did not provision glmnet and Resyntax; see its log above."
+                exit 1
+              fi
+            done
+            # set -e would abort at the substitution, losing $out and the
+            # ::error:: below
+            rc=0
+            out=$(resyntax analyze --local-git-repository . "$BASE_REF" \
+                    --analyzer-timeout 30000 2>&1) || rc=$?
+            echo "$out"
+            if [ "$rc" -ne 0 ]; then
+              echo "::error::Resyntax exited $rc without completing the analysis."
+              exit 1
+            fi
+            if echo "$out" | grep -qE "resyntax: .*\.rkt:[0-9]+:[0-9]+ \["; then
+              echo "::error::Resyntax found refactoring suggestions. Run: resyntax fix --local-git-repository . $BASE_REF"
+              exit 1
+            fi
+            timeouts=$(echo "$out" | grep -c "timed out" || true)
+            if [ "$timeouts" -gt 0 ]; then
+              echo "::warning::Resyntax analyzer timed out on $timeouts file(s); that part of the analysis was partial."
+            fi
+            echo "Resyntax: no suggestions."
+          '
