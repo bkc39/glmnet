@@ -902,14 +902,15 @@
   (for/list ([x (in-vector (car (select-table-values table (list name) who)))] [i (in-naturals)])
     (->finite-flonum (->real x) who what i #f)))
 
-;; An #:intercept? option that was not given.
-(define unsupplied-intercept (string->uninterned-symbol "unsupplied"))
+;; An option that was not given.
+(define unsupplied (string->uninterned-symbol "unsupplied"))
 
 ;; Fits the formula with the family procedure that `select` picks, passing
 ;; `options`, an association list from keyword to value, as keyword arguments.
 ;; A #:fold-ids option must have one entry per row of the data. An
 ;; #:intercept? that was not given is the formula's intercept, and the Cox
-;; family, which has no intercept, takes none.
+;; family, which has no intercept, takes none. Any other option that was not
+;; given is not passed, so the family procedure's own default applies.
 (define (fit-formula who select f data family-name options)
   (define spec (hash-ref families family-name))
   (define-values (mt x responses classes) (model-frame who f data family-name))
@@ -921,13 +922,13 @@
     (raise-arguments-error who (format "fold-ids does not have one entry per row of the ~a" kind)
                            "length of fold-ids" (one-dimensional-length fold-ids)
                            (format "rows of the ~a" kind) (design-matrix-nrows x)))
-  (define kws
-    (sort (for/list ([kw (in-list options)]
-                     #:unless (and (eq? (car kw) '#:intercept?) (not (family-intercept? spec))))
-            (if (eq? (cdr kw) unsupplied-intercept)
-                (cons (car kw) (model-terms-intercept? mt))
-                kw))
-          keyword<? #:key car))
+  (define (passed option)
+    (match option
+      [(cons '#:intercept? _) #:when (not (family-intercept? spec)) #f]
+      [(cons '#:intercept? (== unsupplied eq?)) (cons '#:intercept? (model-terms-intercept? mt))]
+      [(cons _ (== unsupplied eq?)) #f]
+      [_ option]))
+  (define kws (sort (filter-map passed options) keyword<? #:key car))
   (formula-model/terms
    f (design-matrix-column-names x)
    (as-formula-procedure who spec
@@ -963,8 +964,8 @@
                      #:lambda lambda
                      #:alpha [alpha 1.0]
                      #:standardize? [standardize? #t]
-                     #:intercept? [intercept? unsupplied-intercept]
-                     #:thresh [thresh 1e-7]
+                     #:intercept? [intercept? unsupplied]
+                     #:thresh [thresh unsupplied]
                      #:max-iters [max-iters 100000])
   (fit-formula 'formula-fit family-fit f data family-name
                (list (cons '#:lambda lambda)
@@ -981,8 +982,8 @@
                       #:lambda-min-ratio [lambda-min-ratio #f]
                       #:alpha [alpha 1.0]
                       #:standardize? [standardize? #t]
-                      #:intercept? [intercept? unsupplied-intercept]
-                      #:thresh [thresh 1e-7]
+                      #:intercept? [intercept? unsupplied]
+                      #:thresh [thresh unsupplied]
                       #:max-iters [max-iters 100000])
   (fit-formula 'formula-path family-path f data family-name
                (list (cons '#:lambda lambda)
@@ -1005,8 +1006,8 @@
                     #:lambda-min-ratio [lambda-min-ratio #f]
                     #:alpha [alpha 1.0]
                     #:standardize? [standardize? #t]
-                    #:intercept? [intercept? unsupplied-intercept]
-                    #:thresh [thresh 1e-7]
+                    #:intercept? [intercept? unsupplied]
+                    #:thresh [thresh unsupplied]
                     #:max-iters [max-iters 100000])
   (define measures (family-measures (hash-ref families family-name)))
   (fit-formula 'formula-cv family-cv f data family-name

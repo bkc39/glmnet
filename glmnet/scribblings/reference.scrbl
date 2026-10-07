@@ -1082,7 +1082,7 @@ fixed @racket[#:alpha]. See @secref["ex-ols"], @secref["ex-ridge"],
                     [#:alpha alpha (real-in 0 1) 1.0]
                     [#:standardize? standardize? boolean? #t]
                     [#:intercept? intercept? boolean? #t]
-                    [#:thresh thresh (>/c 0) 1e-7]
+                    [#:thresh thresh (>/c 0) @#,elem{@racket[1e-10] if @racket[lambda] is 0, else @racket[1e-7]}]
                     [#:max-iters max-iters exact-positive-integer? 100000])
          elnet-result?]{
   Fits a Gaussian elastic-net model of the response @racket[y], one real per
@@ -1109,7 +1109,7 @@ fixed @racket[#:alpha]. See @secref["ex-ols"], @secref["ex-ridge"],
   Ordinary least squares: @racket[elnet-fit] with @racket[#:lambda 0.0], where
   @racket[#:alpha] has no effect. The default @racket[thresh] is tighter than
   the penalized fits' because coordinate descent approaches the unpenalized
-  solution slowly.
+  solution slowly; every Gaussian fit at @math{λ = 0} defaults to it.
 
   @examples[#:eval ev
   (elnet-result-coefficients
@@ -1123,7 +1123,7 @@ fixed @racket[#:alpha]. See @secref["ex-ols"], @secref["ex-ridge"],
                 [#:lambda lambda (>=/c 0)]
                 [#:standardize? standardize? boolean? #t]
                 [#:intercept? intercept? boolean? #t]
-                [#:thresh thresh (>/c 0) 1e-7]
+                [#:thresh thresh (>/c 0) @#,elem{@racket[1e-10] if @racket[lambda] is 0, else @racket[1e-7]}]
                 [#:max-iters max-iters exact-positive-integer? 100000])
          elnet-result?]{
   Ridge regression: @racket[elnet-fit] with @racket[#:alpha 0.0]. Shrinks
@@ -1140,7 +1140,7 @@ fixed @racket[#:alpha]. See @secref["ex-ols"], @secref["ex-ridge"],
                 [#:lambda lambda (>=/c 0)]
                 [#:standardize? standardize? boolean? #t]
                 [#:intercept? intercept? boolean? #t]
-                [#:thresh thresh (>/c 0) 1e-7]
+                [#:thresh thresh (>/c 0) @#,elem{@racket[1e-10] if @racket[lambda] is 0, else @racket[1e-7]}]
                 [#:max-iters max-iters exact-positive-integer? 100000])
          elnet-result?]{
   The lasso: @racket[elnet-fit] with @racket[#:alpha 1.0]. Sets coefficients
@@ -1157,7 +1157,7 @@ fixed @racket[#:alpha]. See @secref["ex-ols"], @secref["ex-ridge"],
                       [#:lambda lambda (>=/c 0)]
                       [#:standardize? standardize? boolean? #t]
                       [#:intercept? intercept? boolean? #t]
-                      [#:thresh thresh (>/c 0) 1e-7]
+                      [#:thresh thresh (>/c 0) @#,elem{@racket[1e-10] if @racket[lambda] is 0, else @racket[1e-7]}]
                       [#:max-iters max-iters exact-positive-integer? 100000])
          elnet-result?]{
   The elastic net at an explicit @racket[alpha], which is required here.
@@ -2630,15 +2630,15 @@ package, with a text column of the cars' names:
                       [#:alpha alpha (real-in 0 1) 1.0]
                       [#:standardize? standardize? boolean? #t]
                       [#:intercept? intercept? boolean? @#,elem{the formula's}]
-                      [#:thresh thresh (>/c 0) 1e-7]
+                      [#:thresh thresh (>/c 0) @#,elem{the procedure's}]
                       [#:max-iters max-iters exact-positive-integer? 100000])
          formula-model?]{
   Fits @racket[f] to @racket[data], a table or a dataframe, at a single
   @math{λ}, with the fit
   procedure of @racket[family]: @racket[elnet-fit], @racket[logistic-fit],
   @racket[multinomial-fit], @racket[poisson-fit], @racket[cox-fit] or
-  @racket[mgaussian-fit], on the design matrix of @racket[f]. The keywords are
-  passed on to it. @racket[intercept?] defaults to the formula's intercept and
+  @racket[mgaussian-fit], on the design matrix of @racket[f]. The keywords given
+  are passed on to it, so @racket[thresh] defaults as that procedure's does. @racket[intercept?] defaults to the formula's intercept and
   must agree with a formula's @racket[1], @racket[0] or @racket[- 1]; the Cox
   family has no intercept, so it does not apply to it.
 
@@ -2682,7 +2682,7 @@ package, with a text column of the cars' names:
                        [#:alpha alpha (real-in 0 1) 1.0]
                        [#:standardize? standardize? boolean? #t]
                        [#:intercept? intercept? boolean? @#,elem{the formula's}]
-                       [#:thresh thresh (>/c 0) 1e-7]
+                       [#:thresh thresh (>/c 0) @#,elem{the procedure's}]
                        [#:max-iters max-iters exact-positive-integer? 100000])
          formula-model?]{
   Fits the @tech{regularization path} of @racket[f] on @racket[data], with the
@@ -2713,7 +2713,7 @@ package, with a text column of the cars' names:
                      [#:alpha alpha (real-in 0 1) 1.0]
                      [#:standardize? standardize? boolean? #t]
                      [#:intercept? intercept? boolean? @#,elem{the formula's}]
-                     [#:thresh thresh (>/c 0) 1e-7]
+                     [#:thresh thresh (>/c 0) @#,elem{the procedure's}]
                      [#:max-iters max-iters exact-positive-integer? 100000])
          formula-model?]{
   Cross-validates the path of @racket[f] on @racket[data] with the

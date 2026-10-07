@@ -117,6 +117,23 @@
                                                   #:lambda 0.05))
                   (mgaussian-fit mg '("y1" "y2") #:predictors '("V1" "V2") #:lambda 0.05)))
 
+  (test-case "an unpenalized Gaussian fit has ols's default threshold, whichever procedure fits it"
+    (define frame (table->polars cars))
+    (define ols-fit (ols frame "mpg" #:predictors '("wt" "hp")))
+    (define model (formula-fit (~ mpg (+ wt hp)) frame #:lambda 0))
+    (check-equal? (predict model frame) (predict ols-fit frame))
+    (check-equal? (formula-model-fit model) ols-fit)
+    (for ([fitter (in-list (list elnet-fit ridge lasso))])
+      (check-equal? (fitter frame "mpg" #:predictors '("wt" "hp") #:lambda 0) ols-fit
+                    (symbol->string (object-name fitter))))
+    (check-equal? (elastic-net frame "mpg" #:predictors '("wt" "hp") #:alpha 0.5 #:lambda 0)
+                  ols-fit)
+    (check-equal? (ols frame "mpg" #:predictors '("wt" "hp") #:thresh 1e-7)
+                  (elnet-fit frame "mpg" #:predictors '("wt" "hp") #:lambda 0 #:thresh 1e-7))
+    (check-not-equal? (formula-fit (~ mpg (+ wt hp)) frame #:lambda 0 #:thresh 1e-7) model)
+    (check-equal? (formula-model-fit (formula-fit (~ mpg (+ wt hp)) frame #:lambda 0.5))
+                  (lasso frame "mpg" #:predictors '("wt" "hp") #:lambda 0.5 #:thresh 1e-7)))
+
   ;; --- what is read --------------------------------------------------------------------
 
   ;; mtcars as a dataframe with a date column and a column with a missing
