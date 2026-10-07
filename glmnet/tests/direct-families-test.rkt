@@ -33,7 +33,7 @@
   ;; The first n rows of a table's columns `names`, in reverse order, after a
   ;; text column: new data that a fit from named data reads by name.
   (define (new-table table names n)
-    (cons (cons "id" (for/vector ([i (in-range n)]) (format "row ~a" i)))
+    (cons (cons "id" (for/vector #:length n ([i (in-range n)]) (format "row ~a" i)))
           (reverse (for/list ([name (in-list names)])
                      (cons name (list->vector (take (column table name) n)))))))
 
