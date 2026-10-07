@@ -11,24 +11,28 @@ own Fortran.
 raco pkg install glmnet
 ```
 
-The package ships prebuilt native libraries, its own and those of its
-dependency [rkt-polars](https://github.com/bkc39/rkt-polars), for Linux x86-64
-and macOS arm64 only; on any other platform the install fails. Racket 9.3 is
-the oldest version tested: CI installs the package from its sources, as the
-package catalog does, with the current stable Racket on Ubuntu 22.04, the
-latest Ubuntu and macOS arm64, and runs its tests.
+Prebuilt native libraries exist for Linux x86-64 and macOS arm64 only: the
+package's own `libglmnetcompat`, and the library that its dependency
+[rkt-polars](https://github.com/bkc39/rkt-polars) ships. On Intel macOS the
+install stages the arm64 libraries, so it completes but they fail to load; on
+any other platform the install fails. CI tests Racket 9.3 under Nix, and the
+current stable release by installing from the sources, as the package catalog
+does, on Ubuntu 22.04, the latest Ubuntu and macOS arm64.
 
 ## Example
 
 Fuel economy from weight and horsepower, in R's `mtcars`: fit, read the
-coefficients, predict a new car, and fit the same model from a formula.
+coefficients and predict a new car; then a lasso fit, and the same lasso from a
+formula.
 
 ```racket
 (require glmnet glmnet/datasets)
 (define fit (ols mtcars "mpg" #:predictors '("wt" "hp")))
 (coef fit)
 (predict fit '((wt 3.0) (hp 150)))
-(coef (formula-fit (~ mpg (+ wt hp)) mtcars #:lambda 0))
+(define lasso-fit (lasso mtcars "mpg" #:predictors '("wt" "hp") #:lambda 4.0))
+(define named-fit (formula-fit (~ mpg (+ wt hp)) mtcars #:lambda 4.0))
+(equal? (predict named-fit mtcars) (predict lasso-fit mtcars))
 ```
 
 ## Documentation

@@ -2,11 +2,13 @@
 
 ;; The README's examples run (#81): every ```racket block of the repository's
 ;; README.md is read as data, form by form, and evaluated in a `racket`
-;; sandbox, in order, so the README cannot drift from the API. The README is
-;; in the repository, beside the glmnet collection, and not in the installed
-;; package, so the test says so and checks nothing where it is absent.
+;; sandbox, in order, so the README cannot drift from the API; a comparison,
+;; such as (equal? a b), must be true. The README is in the repository, beside
+;; the glmnet collection, and not in the installed package, so the test says
+;; so and checks nothing where it is absent.
 
-(require racket/port
+(require racket/match
+         racket/port
          racket/runtime-path)
 
 (define-runtime-path readme "../../README.md")
@@ -20,6 +22,12 @@
 (define (block-forms block)
   (port->list read (open-input-string block)))
 
+;; Whether a form is a comparison, whose result the README claims is true.
+(define (comparison? form)
+  (match form
+    [(list (or 'equal? 'eqv? 'eq? '= '< '> '<= '>=) _ ...) #t]
+    [_ #f]))
+
 (module+ test
   (require racket/file
            racket/sandbox
@@ -30,8 +38,7 @@
                    [sandbox-error-output 'string]
                    [sandbox-memory-limit #f]
                    [sandbox-eval-limits #f]
-                   [sandbox-security-guard current-security-guard]
-                   [sandbox-path-permissions '((exists "/"))])
+                   [sandbox-security-guard current-security-guard])
       (make-evaluator 'racket)))
 
   (test-case "racket-blocks finds each racket block, and only those"
@@ -39,6 +46,12 @@
                   '("(f 1)\n(g 2)\n" "'x\n"))
     (check-equal? (block-forms "(define x 1) ; a comment\n'(a \"b\")\n")
                   '((define x 1) '(a "b"))))
+
+  (test-case "a comparison is a call of equal?, eqv?, eq? or a numeric comparison"
+    (check-true (comparison? '(equal? (f 1) 2)))
+    (check-true (comparison? '(< x y)))
+    (check-false (comparison? '(define x (equal? 1 1))))
+    (check-false (comparison? 'equal?)))
 
   (cond
     [(file-exists? readme)
@@ -50,7 +63,9 @@
            [i (in-naturals 1)])
        (for ([form (in-list (block-forms block))])
          (test-case (format "README racket block ~a: ~s" i form)
-           (check-not-exn (lambda () (ev form))))))
+           (cond
+             [(comparison? form) (check-not-false (ev form))]
+             [else (check-not-exn (lambda () (ev form)))]))))
      (kill-evaluator ev)]
     [else
      (printf "readme-test: no README.md at ~a; skipping (the README is in the repository, not the package)\n"
