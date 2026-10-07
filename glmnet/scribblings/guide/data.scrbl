@@ -5,14 +5,13 @@
 
 @title[#:tag "data" #:style 'toc]{Data}
 
-Every fit reads a @tech{design matrix} and a @tech{response}, and the formula
-front end reads a @tech{table}. This chapter is about where they come from:
-the example datasets that ship with the package, tables, Racket's own lists
-and vectors, CSV files, @racketmodname[math/matrix] matrices and Polars
-dataframes. Each data format is a module under @filepath{glmnet/data/}, which
-@racket[(require glmnet)] does not load. The Gaussian fitters also take a
-matrix, a table or a dataframe as it is, without these conversions (see
-@secref["ref-common-data"]).
+Every fit takes unnamed or named data as it is (see @secref["concepts-data"]).
+This chapter is about where the data comes from: the example datasets that
+ship with the package, tables, Racket's own lists and vectors, CSV files,
+@racketmodname[math/matrix] matrices and Polars dataframes, and fitting each
+directly. Each format's conversions are a module under
+@filepath{glmnet/data/}, which @racket[(require glmnet)] does not load; they
+are the explicit route of @secref["data-explicit"].
 
 The example @secref["ex-data-sources"] fits one dataset from each of them.
 
@@ -78,11 +77,12 @@ in a sparse matrix, and here they are dense, until sparse input is supported
 
 @racket[mtcars] and @racket[iris] are tables, as R's are data frames, whose
 columns are vectors. Every module that uses them shares them, so the vectors
-are immutable:
+are immutable. A fit names the response column and the predictors:
 
 @examples[#:eval ev #:label #f
 (table-column-names mtcars)
-(vector-take (cdr (assoc "Species" iris)) 3)
+(vector-take (dict-ref iris "Species") 3)
+(coef (ols mtcars "mpg" #:predictors '("wt" "hp")))
 ]
 
 The datasets are CSV files in the package, under
@@ -102,11 +102,10 @@ them against R's own. They can be read like any other CSV file:
 A @tech{table} is named columns. It can be an association list from names to
 columns, a hash, or a design matrix with column names, and a column can be a
 list, a vector, an @racket[flvector] or an @racket[f64vector] (see
-@secref["ref-tables"]). A column of numbers is a
-predictor or a numeric response, and a column of strings, symbols or booleans
-is a factor, as R's character and logical columns are (see
-@secref["formulas-factors"]). The formula front end fits from a table, and
-@racket[table->design-matrix] takes numeric columns out of one:
+@secref["ref-tables"]). A column of numbers is a predictor or a numeric
+response, and a column of strings, symbols or booleans is a factor, as R's
+character and logical columns are (see @secref["formulas-factors"]). A fit
+reads the columns it names, and a formula the columns its terms use:
 
 @examples[#:eval ev #:label #f
 (define patients
@@ -114,8 +113,7 @@ is a factor, as R's character and logical columns are (see
         (cons "site" '("Boston" "Portland" "Portland" "Boston"))
         (cons "dose" #(2.5 5.0 1.0 3.5))
         (cons "response" '(3.1 5.2 1.9 4.0))))
-(table-column-names patients)
-(design-matrix->rows (table->design-matrix patients '("age" "dose")))
+(coef (lasso patients "response" #:predictors '("age" "dose") #:lambda 0.1))
 (coef (formula-fit (response . ~ . age + dose + site) patients #:lambda 0.1))
 ]
 
@@ -123,31 +121,31 @@ is a factor, as R's character and logical columns are (see
 
 Racket's own data needs no conversion: every fit and prediction procedure
 takes rows as a list or a vector of lists or vectors, and a response as a
-list, vector, @racket[flvector] or @racket[f64vector] (see
-@secref["concepts-data"]). @racketmodname[glmnet/data/nested] converts the
-nestings to a @racket[design-matrix?] value, by rows or by columns, to check
-the data once and fit it many times or to name its columns, and converts a
-design matrix back to any of them:
+list, vector, @racket[flvector] or @racket[f64vector]. The outer sequence
+always holds the rows, and every nesting fits as the same lists do:
 
-@margin-note{See @secref["ref-data-nested"] in the @secref["reference"] for
-the two procedures.}
+@tabular[#:style 'boxed
+         #:sep @hspace[2]
+         #:row-properties '(bottom-border ())
+ (list (list @bold{Rows}                      @bold{Example})
+       (list "list of lists"                  @racket['((1.0 2.0) (2.0 1.0))])
+       (list "list of vectors"                @racket[(list #(1.0 2.0) #(2.0 1.0))])
+       (list "vector of lists"                @racket[(vector '(1.0 2.0) '(2.0 1.0))])
+       (list "vector of vectors"              @racket[#(#(1.0 2.0) #(2.0 1.0))]))]
 
 @examples[#:eval ev #:label #f
-(require glmnet/data/nested)
-(define rows (vector #(1.0 2.0) #(2.0 1.0) #(3.0 4.0) #(4.0 3.0) #(5.0 6.0)))
-(define D (nested->design-matrix rows #:column-names '(x1 x2)))
-(design-matrix-column-names D)
-(define by-column (vector #(1.0 2.0 3.0 4.0 5.0) #(2.0 1.0 4.0 3.0 6.0)))
-(equal? (nested->design-matrix by-column #:by 'columns #:column-names '("x1" "x2")) D)
-(elnet-result-coefficients (lasso D (vector 1.0 4.0 3.0 6.0 5.0) #:lambda 0.1))
-(design-matrix->nested D #:outer 'vector #:inner 'vector)
-(design-matrix->nested D #:by 'columns #:outer 'vector #:inner 'vector)
+(define rows '((1.0 2.0) (2.0 1.0) (3.0 4.0) (4.0 3.0) (5.0 6.0)))
+(define response '(1 4 3 6 5))
+(for/list ([X (list (map list->vector rows)
+                    (list->vector rows)
+                    (list->vector (map list->vector rows)))])
+  (equal? (ols X response) (ols rows response)))
+(equal? (ols rows (list->vector response)) (ols rows response))
+(predict (ols rows response) (vector #(6.0 5.0) '(0.0 1.0)))
 ]
 
-The column names are kept as strings, whether they were given as strings or
-symbols, so the same data named either way gives @racket[equal?] design
-matrices. A design matrix with column names is a @tech{table}, from which a
-formula fits by name.
+@racketmodname[glmnet/data/nested] converts any nesting to a design matrix and
+back (see @secref["data-explicit"]).
 
 @section[#:tag "data-csv"]{CSV files}
 
@@ -222,15 +220,11 @@ faster (see @secref["data-polars"]).
 
 @(define math-ev (make-glmnet-eval))
 
-@racketmodname[glmnet/data/math] converts the matrices of Racket's
-@racketmodname[math/matrix] library to design matrices and back. A matrix's
-rows are the observations. A response can be a column matrix, a row matrix or
-a one-dimensional @racketmodname[math/array] array. @racket[(require glmnet)]
-does not load the module, so a program that does not use
-@racketmodname[math/matrix] does not wait for it to load.
-
-@margin-note{See @secref["ref-data-math"] in the @secref["reference"] for the
-three procedures.}
+A @racketmodname[math/matrix] matrix is unnamed data: its rows are the
+observations. A response can be a column matrix, a row matrix or a
+one-dimensional @racketmodname[math/array] array. @racket[(require glmnet)]
+does not load @racketmodname[math/matrix], so a program that does not use it
+does not wait for it to load.
 
 The Quick Start of R's @tt{glmnet} fits @tt{glmnet(x, y)} to the 100 × 20
 matrix @tt{x} and the response vector @tt{y} of @tt{QuickStartExample}, then
@@ -239,29 +233,17 @@ predicts at new rows @tt{nx} drawn at random. Here is the same fit, with
 matrix:
 
 @examples[#:eval math-ev #:label #f
-(require math/matrix math/distributions glmnet/datasets glmnet/data/math)
+(require math/matrix math/distributions glmnet/datasets)
 (define-values (qs-x qs-y) (quick-start-example))
-(define x (design-matrix->matrix qs-x))
+(define x (list*->matrix (design-matrix->rows qs-x)))
 (define y (->col-matrix qs-y))
 (matrix-shape x)
-(define fit (elnet-path (matrix->design-matrix x) (array->response y)))
+(define fit (elnet-path x y))
 (coef fit #:lambda 0.1)
 (random-seed 29)
 (define nx (build-matrix 5 20 (lambda (i j) (sample (normal-dist)))))
-(predict fit (matrix->design-matrix nx) #:lambda '(0.1 0.05))
-]
-
-@racket[matrix->design-matrix] copies and checks a matrix as
-@racket[rows->design-matrix] does a list of rows, and @racket[array->response]
-gives the response as a list, so the fit is the one from the same numbers as
-lists. @racket[design-matrix->matrix] converts back, to a matrix of flonums:
-
-@examples[#:eval math-ev #:label #f
-(define X (matrix->design-matrix x))
-(equal? (elnet-path X (array->response y))
-        (elnet-path (matrix->list* x) (matrix->list y)))
-(equal? (design-matrix->matrix X) x)
-(design-matrix->matrix (rows->design-matrix '((1 2) (3 4))))
+(predict fit nx #:lambda '(0.1 0.05))
+(equal? fit (elnet-path qs-x qs-y))
 ]
 
 A flonum array, from @racket[array->flarray] or @racket[design-matrix->matrix],
@@ -270,56 +252,41 @@ vector that holds its elements. Any other array is read one element at a time,
 through the contract that the Typed Racket library puts on each array it
 returns to untyped code, which makes a large matrix several times slower to
 convert, and a lazy one, made while @racket[array-strictness] is @racket[#f]
-or returned by @racket[array-broadcast] or @racket[array-lazy], slower still. Converting once and passing the design matrix to every fit pays
-that cost once.
+or returned by @racket[array-broadcast] or @racket[array-lazy], slower still.
+Converting once with @racket[matrix->design-matrix] and passing the design
+matrix to every fit pays that cost once (see @secref["data-explicit"]).
 
 @(close-eval math-ev)
 
 @section[#:tag "data-polars"]{Polars dataframes}
 
-@racketmodname[glmnet/data/polars] converts between the dataframes of
-@racketmodname[polars] (rkt-polars) and glmnet's data: design matrices,
-responses and tables, both ways. @racket[(require glmnet)] does not load it,
-and so does not load Polars.
-
-@margin-note{See @secref["ref-data-polars"] in the @secref["reference"] for the
-five procedures.}
-
-Reading a file with Polars' @racket[read-csv] and converting it is the fast
-way to fit real data: the predictors leave Polars in one bulk copy, already in
-the column-major layout, and become a design matrix without another. Here
-Polars reads R's @tt{iris} from the copy that @racketmodname[glmnet/datasets]
-ships:
+A dataframe of @racketmodname[polars] (rkt-polars) is named data. Reading a
+file with Polars' @racket[read-csv] and fitting it is the fast way to fit real
+data: the predictors leave Polars in one bulk copy, already in the layout the
+solver reads. Here Polars reads R's @tt{iris} from the copy that
+@racketmodname[glmnet/datasets] ships:
 
 @examples[#:eval ev #:label #f
-(require glmnet/data/polars
-         (only-in polars read-csv column-names dataframe series cast))
+(require (only-in polars read-csv column-names dataframe series cast))
 (define flowers (read-csv (collection-file-path "iris.csv" "glmnet" "datasets")))
 (column-names flowers)
-(define measures
-  (polars->design-matrix flowers '("Sepal.Width" "Petal.Length" "Petal.Width")))
-(design-matrix-column-names measures)
-(define sepal-length (polars->response flowers "Sepal.Length"))
-(elnet-result-coefficients (lasso measures sepal-length #:lambda 0.01))
+(coef (lasso flowers "Sepal.Length" #:lambda 0.01
+             #:predictors '("Sepal.Width" "Petal.Length" "Petal.Width")))
 ]
 
-A formula fits from a dataframe once it is a @tech{table}, which
-@racket[polars->table] makes of it. Its string column, @racket["Species"], is
-a factor:
+A formula reads a dataframe's columns as a @tech{table}'s. Its string column,
+@racket["Species"], is a factor:
 
 @examples[#:eval ev #:label #f
-(define flower-model
-  (formula-fit (Sepal.Length . ~ . Petal.Width + Species) (polars->table flowers)
-               #:lambda 0.01))
-(coef flower-model)
+(coef (formula-fit (Sepal.Length . ~ . Petal.Width + Species) flowers
+                   #:lambda 0.01))
 ]
 
-A categorical or enum column becomes a column of symbols, a factor too. Its
-levels are sorted as strings, as a column of strings' are: the order of an
-enum's categories is not kept. R's @tt{factor} keeps the order of its levels,
-so R takes @tt{low} as the baseline of @tt{factor(dose, levels = c("low",
-"mid", "high"))} and fits @tt{dosemid} and @tt{dosehigh}, where here
-@racket["high"] is the baseline:
+A categorical or enum column is a factor too. Its levels are sorted as
+strings, as a column of strings' are: the order of an enum's categories is not
+kept. R's @tt{factor} keeps the order of its levels, so R takes @tt{low} as
+the baseline of @tt{factor(dose, levels = c("low", "mid", "high"))} and fits
+@tt{dosemid} and @tt{dosehigh}, where here @racket["high"] is the baseline:
 
 @examples[#:eval ev #:label #f
 (define doses
@@ -327,21 +294,65 @@ so R takes @tt{low} as the baseline of @tt{factor(dose, levels = c("low",
    (list (series '(1.0 3.2 2.1 0.9 2.0 3.1) #:name "y")
          (cast (series '("low" "high" "mid" "low" "mid" "high") #:name "dose")
                '(enum low mid high)))))
-(polars->table doses '("dose"))
-(coef (formula-fit (~ y dose) (polars->table doses) #:lambda 0))
+(coef (formula-fit (~ y dose) doses #:lambda 0))
 ]
 
 A missing value (a Polars null), a column that is not numeric where numbers
 are needed, and a value that is not finite are errors that name the column,
-and the row or the dtype. @racket[design-matrix->polars] and
-@racket[table->polars] convert back. The columns of a design matrix with no
-names are named @racket["V1"], @racket["V2"] and so on, as R names them:
+and the row or the dtype:
 
 @examples[#:eval ev #:label #f
+(eval:error (lasso flowers "Sepal.Length" #:predictors '("Petal.Width" "Species")
+                   #:lambda 0.01))
+]
+
+@section[#:tag "data-explicit"]{The explicit route}
+
+Every procedure converts its data to a @tech{design matrix} and a response on
+each call, and checks it each time. The conversions can also be called
+directly: to check the data once and fit it many times, to see the matrix a
+fit reads, or to convert a design matrix back to a format. Rows, columns and
+tables convert with @racketmodname[glmnet] itself (see @secref["ref-data"]);
+each other format has its module:
+
+@tabular[#:style 'boxed
+         #:sep @hspace[2]
+         #:row-properties '(bottom-border ())
+ (list (list @bold{Data}               @bold{Module}                        @bold{To glmnet}                                                              @bold{Back})
+       (list "rows, columns"           @racketmodname[glmnet]                @elem{@racket[rows->design-matrix], @racket[columns->design-matrix]}         @elem{@racket[design-matrix->rows], @racket[design-matrix->columns]})
+       (list "tables"                  @racketmodname[glmnet]                @racket[table->design-matrix]                                                 "---")
+       (list "nested lists, vectors"   @racketmodname[glmnet/data/nested]    @racket[nested->design-matrix]                                                @racket[design-matrix->nested])
+       (list @racketmodname[math/matrix] @racketmodname[glmnet/data/math]    @elem{@racket[matrix->design-matrix], @racket[array->response]}              @racket[design-matrix->matrix])
+       (list "Polars"                  @racketmodname[glmnet/data/polars]    @elem{@racket[polars->design-matrix], @racket[polars->response], @racket[polars->table]} @elem{@racket[design-matrix->polars], @racket[table->polars]}))]
+
+A fit from the converted data is the fit from the data itself:
+
+@examples[#:eval ev #:label #f
+(require glmnet/data/polars)
+(define measures
+  (polars->design-matrix flowers '("Sepal.Width" "Petal.Length" "Petal.Width")))
+(define sepal-length (polars->response flowers "Sepal.Length"))
+(equal? (lasso measures sepal-length #:lambda 0.01)
+        (lasso flowers "Sepal.Length" #:lambda 0.01
+               #:predictors '("Sepal.Width" "Petal.Length" "Petal.Width")))
+(for/list ([lam '(1.0 0.1 0.01)])
+  (coef (lasso measures sepal-length #:lambda lam)))
+]
+
+Column names are kept as strings, whether they were given as strings or
+symbols, so the same data named either way gives @racket[equal?] design
+matrices. The columns of a design matrix with no names are named
+@racket["V1"], @racket["V2"] and so on, as R names them:
+
+@examples[#:eval ev #:label #f
+(require glmnet/data/nested)
+(define D (nested->design-matrix rows #:column-names '(x1 x2)))
+(design-matrix-column-names D)
+(design-matrix->nested D #:by 'columns #:outer 'vector #:inner 'vector)
+(design-matrix->rows (table->design-matrix patients '("age" "dose")))
 (design-matrix->polars (design-matrix-select-rows measures '(0 50 100)))
 (design-matrix->polars (rows->design-matrix '((1 2) (3 4))))
 (table->polars (list (cons "y" '(1.5 2.5)) (cons "group" '("a" "b"))))
-(eval:error (polars->design-matrix flowers '("Petal.Width" "Species")))
 ]
 
 @racket[design-matrix->polars] is the slower direction. rkt-polars makes a
