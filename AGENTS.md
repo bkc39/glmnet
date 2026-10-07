@@ -155,10 +155,12 @@ matrix and a response for every fitter and for `predict`:
   columns, and rows otherwise.
 - **Libraries glmnet does not load.** Only for a value that is none of the
   plain forms does it ask whether the value is a Polars dataframe or series,
-  or a `math/array` array: each library's module name is resolved once (an
-  uninstalled library is absent), and is checked with `module-declared?`,
-  never loading it, in the current namespace's module registry and in
-  glmnet's own. Where it is declared, together with glmnet, the adapter's
+  or a `math/array` array: each library's public modules (`polars`;
+  `math/array` and `math/matrix`, since `math/matrix` does not declare
+  `math/array`) are resolved once (an uninstalled library is absent), and
+  checked with `module-declared?`, never loading them, in the current
+  namespace's module registry and in glmnet's own. Where one is declared,
+  together with glmnet, the adapter's
   `support` submodule (`data/polars.rkt`, `data/math.rkt`) is loaded into that
   registry, so that its struct types are the program's, and its predicates
   and conversions are kept per registry. A plain value never loads Polars,
