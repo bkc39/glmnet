@@ -10,6 +10,8 @@
 (require racket/contract
          ffi/vector
          "marshal.rkt"
+         (only-in "input.rkt" data/c)
+         (submod "input.rkt" support)
          "model.rkt"
          (submod "model.rkt" support)
          "../foreign/raw/elnet.rkt"
@@ -24,72 +26,79 @@
  (struct-out elnet-result)
  (contract-out
   [elnet-fit
-   (->* (design-matrix/c (response/c real?) #:lambda (>=/c 0))
-        (#:alpha (real-in 0 1)
-         #:standardize? boolean?
-         #:intercept? boolean?
-         #:thresh (>/c 0)
-         #:max-iters exact-positive-integer?)
-        elnet-result?)]
+   (fit/c real?
+          (#:lambda (>=/c 0))
+          (#:alpha (real-in 0 1)
+           #:standardize? boolean?
+           #:intercept? boolean?
+           #:thresh (>/c 0)
+           #:max-iters exact-positive-integer?)
+          elnet-result?)]
   [ols
-   (->* (design-matrix/c (response/c real?))
-        (#:standardize? boolean?
-         #:intercept? boolean?
-         #:thresh (>/c 0)
-         #:max-iters exact-positive-integer?)
-        elnet-result?)]
+   (fit/c real?
+          ()
+          (#:standardize? boolean?
+           #:intercept? boolean?
+           #:thresh (>/c 0)
+           #:max-iters exact-positive-integer?)
+          elnet-result?)]
   [ridge
-   (->* (design-matrix/c (response/c real?) #:lambda (>=/c 0))
-        (#:standardize? boolean?
-         #:intercept? boolean?
-         #:thresh (>/c 0)
-         #:max-iters exact-positive-integer?)
-        elnet-result?)]
+   (fit/c real?
+          (#:lambda (>=/c 0))
+          (#:standardize? boolean?
+           #:intercept? boolean?
+           #:thresh (>/c 0)
+           #:max-iters exact-positive-integer?)
+          elnet-result?)]
   [lasso
-   (->* (design-matrix/c (response/c real?) #:lambda (>=/c 0))
-        (#:standardize? boolean?
-         #:intercept? boolean?
-         #:thresh (>/c 0)
-         #:max-iters exact-positive-integer?)
-        elnet-result?)]
+   (fit/c real?
+          (#:lambda (>=/c 0))
+          (#:standardize? boolean?
+           #:intercept? boolean?
+           #:thresh (>/c 0)
+           #:max-iters exact-positive-integer?)
+          elnet-result?)]
   [elastic-net
-   (->* (design-matrix/c (response/c real?) #:alpha (real-in 0 1) #:lambda (>=/c 0))
-        (#:standardize? boolean?
-         #:intercept? boolean?
-         #:thresh (>/c 0)
-         #:max-iters exact-positive-integer?)
-        elnet-result?)]
+   (fit/c real?
+          (#:alpha (real-in 0 1) #:lambda (>=/c 0))
+          (#:standardize? boolean?
+           #:intercept? boolean?
+           #:thresh (>/c 0)
+           #:max-iters exact-positive-integer?)
+          elnet-result?)]
   [elnet-predict
-   (-> elnet-result? design-matrix/c (listof real?))]))
+   (-> elnet-result? data/c (listof real?))]))
 
 (provide
  (contract-out
   [elnet-path
-   (->* (design-matrix/c (response/c real?))
-           (#:lambda lambda-sequence/c
-            #:nlambda exact-positive-integer?
-            #:lambda-min-ratio lambda-min-ratio/c
-            #:alpha (real-in 0 1)
-            #:standardize? boolean?
-            #:intercept? boolean?
-            #:thresh (>/c 0)
-            #:max-iters exact-positive-integer?)
-        glmnet-path?)]
+   (fit/c real?
+          ()
+          (#:lambda lambda-sequence/c
+           #:nlambda exact-positive-integer?
+           #:lambda-min-ratio lambda-min-ratio/c
+           #:alpha (real-in 0 1)
+           #:standardize? boolean?
+           #:intercept? boolean?
+           #:thresh (>/c 0)
+           #:max-iters exact-positive-integer?)
+          glmnet-path?)]
   [elnet-cv
-   (->* (design-matrix/c (response/c real?))
-        (#:type-measure (or/c 'mse 'deviance 'mae)
-         #:nfolds nfolds/c
-         #:fold-ids fold-ids/c
-         #:grouped? boolean?
-         #:lambda cv-lambda-sequence/c
-         #:nlambda exact-positive-integer?
-         #:lambda-min-ratio lambda-min-ratio/c
-         #:alpha (real-in 0 1)
-         #:standardize? boolean?
-         #:intercept? boolean?
-         #:thresh (>/c 0)
-         #:max-iters exact-positive-integer?)
-        glmnet-cv?)]))
+   (fit/c real?
+          ()
+          (#:type-measure (or/c 'mse 'deviance 'mae)
+           #:nfolds nfolds/c
+           #:fold-ids fold-ids/c
+           #:grouped? boolean?
+           #:lambda cv-lambda-sequence/c
+           #:nlambda exact-positive-integer?
+           #:lambda-min-ratio lambda-min-ratio/c
+           #:alpha (real-in 0 1)
+           #:standardize? boolean?
+           #:intercept? boolean?
+           #:thresh (>/c 0)
+           #:max-iters exact-positive-integer?)
+          glmnet-cv?)]))
 
 ;; A fitted model. `coefficients` is a vector of length ni on the original
 ;; predictor scale; `lambda` is the penalty actually used; `r-squared` is the
@@ -107,17 +116,16 @@
 
 ;; One Gaussian fit at a single lambda. `who` names the public procedure in
 ;; error messages.
-(define (fit-elnet who X y
+(define (fit-elnet who X y predictors
                    #:alpha alpha
                    #:lambda lambda
                    #:standardize? standardize?
                    #:intercept? intercept?
                    #:thresh thresh
                    #:max-iters max-iters)
-  (define x (as-design-matrix X who "X"))
+  (define-values (x yv names) (fit-input who X y predictors))
   (define no (design-matrix-nrows x))
   (define ni (design-matrix-ncols x))
-  (define yv (as-response y no who "y"))
   (check-response-varies yv no 1 intercept? who)
   (define beta (make-f64vector ni 0.0))
   (define-values (intercept rsq lam nlp jerr)
@@ -129,16 +137,17 @@
                            max-iters
                            beta))
   (check-jerr jerr who)
-  (elnet-result intercept (unpack-vector beta ni) rsq lam nlp))
+  (attach-data-names (elnet-result intercept (unpack-vector beta ni) rsq lam nlp) names))
 
 (define (elnet-fit X y
+                   #:predictors [predictors #f]
                    #:lambda lambda
                    #:alpha [alpha 1.0]
                    #:standardize? [standardize? #t]
                    #:intercept? [intercept? #t]
                    #:thresh [thresh 1e-7]
                    #:max-iters [max-iters 100000])
-  (fit-elnet 'elnet-fit X y
+  (fit-elnet 'elnet-fit X y predictors
              #:alpha alpha
              #:lambda lambda
              #:standardize? standardize?
@@ -151,11 +160,12 @@
 ;; tightens, so `ols` uses a tighter default than the penalized fits where
 ;; glmnet's 1e-7 is conventional.
 (define (ols X y
+             #:predictors [predictors #f]
              #:standardize? [standardize? #t]
              #:intercept? [intercept? #t]
              #:thresh [thresh 1e-10]
              #:max-iters [max-iters 100000])
-  (fit-elnet 'ols X y
+  (fit-elnet 'ols X y predictors
              #:alpha 1.0
              #:lambda 0.0
              #:standardize? standardize?
@@ -166,12 +176,13 @@
 ;; Ridge regression = elastic net at alpha 0 (pure L2 penalty). Shrinks all
 ;; coefficients smoothly toward zero; none are driven exactly to zero.
 (define (ridge X y
+               #:predictors [predictors #f]
                #:lambda lambda
                #:standardize? [standardize? #t]
                #:intercept? [intercept? #t]
                #:thresh [thresh 1e-7]
                #:max-iters [max-iters 100000])
-  (fit-elnet 'ridge X y
+  (fit-elnet 'ridge X y predictors
              #:alpha 0.0
              #:lambda lambda
              #:standardize? standardize?
@@ -183,12 +194,13 @@
 ;; selection: coefficients are driven exactly to zero, more of them as lambda
 ;; grows.
 (define (lasso X y
+               #:predictors [predictors #f]
                #:lambda lambda
                #:standardize? [standardize? #t]
                #:intercept? [intercept? #t]
                #:thresh [thresh 1e-7]
                #:max-iters [max-iters 100000])
-  (fit-elnet 'lasso X y
+  (fit-elnet 'lasso X y predictors
              #:alpha 1.0
              #:lambda lambda
              #:standardize? standardize?
@@ -199,13 +211,14 @@
 ;; Elastic net at an explicit alpha in [0,1]: blends the lasso's selection with
 ;; the ridge's shrinkage. alpha 0 reduces to `ridge`, alpha 1 to `lasso`.
 (define (elastic-net X y
+                     #:predictors [predictors #f]
                      #:alpha alpha
                      #:lambda lambda
                      #:standardize? [standardize? #t]
                      #:intercept? [intercept? #t]
                      #:thresh [thresh 1e-7]
                      #:max-iters [max-iters 100000])
-  (fit-elnet 'elastic-net X y
+  (fit-elnet 'elastic-net X y predictors
              #:alpha alpha
              #:lambda lambda
              #:standardize? standardize?
@@ -222,6 +235,7 @@
 ;; --- regularization path (#10) ---------------------------------------------
 
 (define (elnet-path X y
+                    #:predictors [predictors #f]
                     #:lambda [lambda #f]
                     #:nlambda [nlambda 100]
                     #:lambda-min-ratio [lambda-min-ratio #f]
@@ -230,10 +244,9 @@
                     #:intercept? [intercept? #t]
                     #:thresh [thresh 1e-7]
                     #:max-iters [max-iters 100000])
-  (define x (as-design-matrix X 'elnet-path "X"))
+  (define-values (x yv names) (fit-input 'elnet-path X y predictors))
   (define no (design-matrix-nrows x))
   (define ni (design-matrix-ncols x))
-  (define yv (as-response y no 'elnet-path "y"))
   (check-response-varies yv no 1 intercept? 'elnet-path)
   (define-values (nlam flmin ulam)
     (path-lambdas lambda nlambda lambda-min-ratio no ni))
@@ -249,13 +262,16 @@
                            a0 beta dev alm))
   (check-jerr jerr 'elnet-path lmu)
   (define coefficients (unpack-columns beta ni lmu))
-  (glmnet-path 'gaussian (finish-lambdas alm lmu (not lambda))
-               (unpack-vector a0 lmu) coefficients (unpack-vector dev lmu)
-               (count-nonzero coefficients) nlp))
+  (attach-data-names
+   (glmnet-path 'gaussian (finish-lambdas alm lmu (not lambda))
+                (unpack-vector a0 lmu) coefficients (unpack-vector dev lmu)
+                (count-nonzero coefficients) nlp)
+   names))
 
 ;; --- cross-validation (#27) ------------------------------------------------
 
 (define (elnet-cv X y
+                  #:predictors [predictors #f]
                   #:type-measure [measure 'mse]
                   #:nfolds [nfolds 10]
                   #:fold-ids [fold-ids #f]
@@ -268,14 +284,16 @@
                   #:intercept? [intercept? #t]
                   #:thresh [thresh 1e-7]
                   #:max-iters [max-iters 100000])
-  (define x (as-design-matrix X 'elnet-cv "X"))
-  (define ys (response->vector (as-response y (design-matrix-nrows x) 'elnet-cv "y")))
+  (define-values (x yv names) (fit-input 'elnet-cv X y predictors))
+  (define ys (response->vector yv))
   (define (fit x y)
     (elnet-path x y
                 #:lambda lambda #:nlambda nlambda #:lambda-min-ratio lambda-min-ratio
                 #:alpha alpha #:standardize? standardize? #:intercept? intercept?
                 #:thresh thresh #:max-iters max-iters))
-  (define (fit-all) (fit x ys))
+  (define (fit-all) (attach-data-names (fit x ys) names))
   (define (fit-rows rows) (fit (design-matrix-select-rows x rows) (select ys rows)))
-  (cross-validate 'elnet-cv x ys fit-all fit-rows
-                  #:measure measure #:nfolds nfolds #:fold-ids fold-ids #:grouped? grouped?))
+  (attach-data-names
+   (cross-validate 'elnet-cv x ys fit-all fit-rows
+                   #:measure measure #:nfolds nfolds #:fold-ids fold-ids #:grouped? grouped?)
+   names))

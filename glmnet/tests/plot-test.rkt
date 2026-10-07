@@ -154,6 +154,23 @@
 
   (define (png pict) (convert pict 'png-bytes))
 
+  (test-case "a fit from named data has its curves labelled by name"
+    (define names '("a" "b" "c" "d"))
+    (define table
+      (cons (cons "y" y)
+            (for/list ([name (in-list names)] [j (in-naturals)])
+              (cons name (map (lambda (row) (list-ref row j)) X)))))
+    (define p (elnet-path X y))
+    (define named (elnet-path table "y" #:predictors names))
+    (define cv (elnet-cv table "y" #:predictors names #:fold-ids folds))
+    (check-equal? named p)
+    (check-equal? (png (plot-coefficient-path named #:label #t))
+                  (png (plot-coefficient-path p #:label names)))
+    (check-not-equal? (png (plot-coefficient-path named #:label #t))
+                      (png (plot-coefficient-path p #:label #t)))
+    (check-equal? (png (plot-coefficient-path cv #:label #t))
+                  (png (plot-coefficient-path (elnet-cv X y #:fold-ids folds) #:label names))))
+
   (test-case "a formula model is plotted through its fit, its curves labelled by name"
     (define names '("a" "b" "c" "d"))
     (define table
