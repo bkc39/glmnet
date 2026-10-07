@@ -26,33 +26,33 @@ jobs:
     name: Resyntax lint
     runs-on: ubuntu-latest
     steps:
-      # full history: --local-git-repository resolves the base ref locally,
-      # and checkout's default shallow fetch would not have it
+      # full history, so --local-git-repository finds the base commit
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - uses: DeterminateSystems/nix-installer-action@v22
-      # The ci shell links glmnet and installs the Resyntax pinned in
-      # nix/racket-linters.nix, so the job lints with the same version, on the
-      # same Racket, as every local shell. Only the .rkt files changed against
-      # the base are analyzed; the .scrbl pages and lp2 programs are
-      # tests/docs-idiom-test.rkt's, which nix flake check runs.
       - name: Resyntax lint
         env:
-          # on a master push the empty diff against origin/master reports
-          # quickly; a skipped required check never reports and stalls merges
+          # a master push lints the empty diff: a skipped required check never reports
           BASE_REF: ${{ github.event.pull_request.base.sha || 'origin/master' }}
+          BASE_NAME: ${{ github.base_ref || 'master' }}
         run: |
           nix develop .#ci --command bash -c '
             set -euo pipefail
-            for stamp in "$PLTUSERHOME"/.glmnet-linked "$PLTUSERHOME"/.linters-*; do
-              if [ ! -f "$stamp" ]; then
-                echo "::error::The ci shell did not provision glmnet and Resyntax; see its log above."
-                exit 1
+            if [ ! -f "$PLTUSERHOME/.glmnet-linked" ]; then
+              if racket -l racket/base -l pkg/lib \
+                   -e "(exit (if (hash-ref (installed-pkg-table #:scope (quote user)) \"glmnet\" #f) 0 1))"; then
+                echo "::error::glmnet installed, but raco setup failed on it (a compile error?); see the ci shell log above."
+              else
+                echo "::error::The ci shell could not install glmnet or its dependencies; see its log above."
               fi
-            done
-            # set -e would abort at the substitution, losing $out and the
-            # ::error:: below
+              exit 1
+            fi
+            if ! compgen -G "$PLTUSERHOME/.linters-*" > /dev/null; then
+              echo "::error::The ci shell could not install the pinned Resyntax; see its log above."
+              exit 1
+            fi
+            # || keeps set -e from exiting before $out is shown
             rc=0
             out=$(resyntax analyze --local-git-repository . "$BASE_REF" \
                     --analyzer-timeout 30000 2>&1) || rc=$?
@@ -61,13 +61,23 @@ jobs:
               echo "::error::Resyntax exited $rc without completing the analysis."
               exit 1
             fi
-            if echo "$out" | grep -qE "resyntax: .*\.rkt:[0-9]+:[0-9]+ \["; then
-              echo "::error::Resyntax found refactoring suggestions. Run: resyntax fix --local-git-repository . $BASE_REF"
-              exit 1
+            status=0
+            broken=$(grep -B1 -E "^ encountered an error during (initial analysis|macro expansion)" <<<"$out" \
+                       | sed -n "s/^resyntax: skipping //p" | sort -u | paste -sd " " || true)
+            if [ -n "$broken" ]; then
+              echo "::error::Resyntax could not analyze $broken; see each error above."
+              status=1
             fi
-            timeouts=$(echo "$out" | grep -c "timed out" || true)
+            if grep -qE "resyntax: .*\.rkt:[0-9]+:[0-9]+ \[" <<<"$out"; then
+              echo "::error::Resyntax found refactoring suggestions. Run: resyntax fix --local-git-repository . origin/$BASE_NAME"
+              status=1
+            fi
+            timeouts=$(grep -c "timed out" <<<"$out" || true)
             if [ "$timeouts" -gt 0 ]; then
               echo "::warning::Resyntax analyzer timed out on $timeouts file(s); that part of the analysis was partial."
             fi
-            echo "Resyntax: no suggestions."
+            if [ "$status" -eq 0 ]; then
+              echo "Resyntax: no suggestions."
+            fi
+            exit "$status"
           '
