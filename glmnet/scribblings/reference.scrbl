@@ -101,7 +101,6 @@ matrix can be passed to any number of fits.
   unlike @racket[vectorof], the contract never wraps a vector.
 
   @examples[#:eval ev
-  (require racket/contract)
   (contract-first-order-passes? design-matrix/c D)
   (contract-first-order-passes? design-matrix/c '((1.0 2.0) (3.0 4.0)))
   (contract-first-order-passes? design-matrix/c (vector #(1.0 2.0) '(3.0 4.0)))
@@ -524,7 +523,6 @@ without a name; an error names the column and the row.
   contents.
 
   @examples[#:eval ev
-  (require racket/file)
   (define path (make-temporary-file "table-~a.csv"))
   (table->csv-file (list (cons "x" '(1 2)) (cons "y" '(3.5 4.5))) path #:exists 'replace)
   (file->string path)
@@ -1814,7 +1812,7 @@ carry the signal:
   per observation.
 
   @examples[#:eval ev
-  (require racket/contract racket/flonum)
+  (require racket/flonum)
   (contract-first-order-passes? fold-ids/c '(0 1 2 0 1 2))
   (contract-first-order-passes? fold-ids/c (flvector 0.0 1.0 2.0 2.0))
   (contract-first-order-passes? fold-ids/c #f)

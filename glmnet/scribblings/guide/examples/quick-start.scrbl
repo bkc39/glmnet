@@ -15,7 +15,6 @@ choose @math{λ} by cross-validation. Each step gives the R call it follows,
 and the numbers are R's; the last section shows how they were checked.
 
 @examples[#:eval ev #:hidden
-(require racket/list racket/string)
 (define (first-rows p n)
   (for-each displayln (take (string-split (format "~a" p) "\n") (+ n 2)))
   (displayln "..."))
