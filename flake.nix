@@ -321,9 +321,12 @@
         let
           pkgs = pkgsFor system;
           racket-linters = self.packages.${system}.racket-linters;
+          # lint/'s store copy only names the stamp; the shells link the working tree.
+          lintSrc = cleanSrc pkgs ./lint;
 
           # A step stamps only on success, so the next entry retries a failed one; the
-          # Resyntax stamp names its store path, so a bump reinstalls (update moves old trees).
+          # linters stamp names Resyntax's store path and lint/'s, so a change to either
+          # reinstalls (update moves old trees).
           provisionRacket = ''
             export PLTUSERHOME="$PWD/.racket-user"
             mkdir -p "$PLTUSERHOME"
@@ -332,17 +335,20 @@
               raco pkg install --batch --auto --link --no-docs --scope user \
                 --skip-installed --name glmnet "$PWD/glmnet" && touch "$_stamp"
             fi
-            _linters_stamp="$PLTUSERHOME/.linters-${builtins.baseNameOf racket-linters}"
+            _linters_stamp="$PLTUSERHOME/.linters-${builtins.baseNameOf racket-linters}-${builtins.substring 0 32 (builtins.baseNameOf lintSrc)}"
             if [ ! -f "$_linters_stamp" ]; then
-              echo "Installing the pinned Resyntax..."
+              echo "Installing the pinned Resyntax and the project suite (lint/)..."
               if raco pkg install --batch --copy --no-docs --no-setup --deps fail \
                      --scope user --skip-installed ${racket-linters}/*/ \
                  && raco pkg update --batch --copy --no-docs --no-trash \
                       --deps fail --scope user ${racket-linters}/*/ \
-                 && raco setup --no-docs --pkgs resyntax; then
+                 && raco pkg install --batch --link --no-docs --no-setup --deps fail \
+                      --scope user --skip-installed --name glmnet-lint "$PWD/lint" \
+                 && raco setup --no-docs --pkgs resyntax glmnet-lint; then
+                rm -f "$PLTUSERHOME"/.linters-*
                 touch "$_linters_stamp"
               else
-                echo "WARNING: installing Resyntax failed; the next shell entry retries it." >&2
+                echo "WARNING: installing Resyntax or lint/ failed; the next shell entry retries it." >&2
               fi
             fi
             export PATH="$(racket -e '(require setup/dirs)(display (path->string (find-user-console-bin-dir)))'):$PATH"
@@ -367,12 +373,12 @@
               echo "glmnet dev shell ready."
               echo "  Run all examples:  bash scripts/run-examples.sh"
               echo "  Run the tests:     raco test ./glmnet/"
-              echo "  Lint the changes:  resyntax analyze --local-git-repository . origin/master"
+              echo "  Lint the changes:  resyntax analyze --refactoring-suite glmnet-lint/style project-style --local-git-repository . origin/master"
             '';
           };
 
           # Lean shell for CI's resyntax job: Racket, glmnet with its committed
-          # native candidate, and Resyntax; no Fortran toolchain.
+          # native candidate, Resyntax and lint/'s suite; no Fortran toolchain.
           ci = pkgs.mkShell {
             packages = [ pkgs.racket ];
             shellHook = provisionRacket;
