@@ -2711,6 +2711,22 @@ family:
   (eval:error (coef (glmnet-path 'gaussian (vector) (vector) (vector)
                                  (vector) (vector) 0)))]}
 
+@defproc[(in-path [model glmnet-model?]) sequence?]{
+  A @tech[#:doc '(lib "scribblings/reference/reference.scrbl")]{sequence}
+  that walks @racket[model]'s @tech{regularization path}, with two values per
+  element: each fitted @math{λ}, in the path's order, and the coefficients at
+  that @math{λ} as @racket[coef] gives them, keyed by name for a model that
+  names its predictors. A single fit is a path with one @math{λ}, and a
+  @racket[glmnet-cv] walks its path of all the data. Nothing is interpolated:
+  where a @math{λ} appears twice on a path, each element holds the path's own
+  fit there, while @racket[coef] gives the first.
+
+  @examples[#:eval ev
+  (for ([(λ β) (in-path path)])
+    (printf "~a: ~a\n" λ β))
+  (for/list ([(λ β) (in-path (formula-path (~ mpg (+ wt hp)) mtcars #:nlambda 4))])
+    β)]}
+
 @subsection[#:tag "ref-model-printing"]{Printing}
 
 A single fit prints on one line with its family, its @math{λ} (to four
