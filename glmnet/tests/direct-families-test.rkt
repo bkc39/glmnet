@@ -480,7 +480,8 @@
       (eval '(mgaussian-path cells '("x" "z") #:predictors '("t")))
       (eval '(predict (formula-fit (~ k x z) cells #:family 'multinomial #:lambda 0.1)
                       (hash "x" '(3) "z" '(3)) #:type 'class))
-      (eval '(coef (formula-cv (~ (surv t d) x z) cells #:family 'cox #:nfolds 3 #:nlambda 5)))
+      (eval '(coef (formula-cv (~ (surv t d) x z) cells #:family 'cox #:fold-ids '(0 1 2 0 1 2)
+                                 #:nlambda 5)))
       (for ([mod (in-list '(polars glmnet/data/polars math/array math/matrix glmnet/data/math
                                    typed/racket/base plot glmnet/plot))])
         (check-false (module-declared? mod #f) (format "~a is declared" mod))))))
