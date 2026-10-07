@@ -48,7 +48,9 @@ jobs:
               fi
               exit 1
             fi
-            if ! compgen -G "$PLTUSERHOME/.linters-*" > /dev/null; then
+            # nix bash has no compgen; an unmatched glob stays literal
+            stamps=("$PLTUSERHOME"/.linters-*)
+            if [ ! -e "${stamps[0]}" ]; then
               echo "::error::The ci shell could not install the pinned Resyntax; see its log above."
               exit 1
             fi
