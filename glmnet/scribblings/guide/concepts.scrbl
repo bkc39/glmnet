@@ -28,7 +28,7 @@ vector, or a @tech{design matrix}:
 @examples[#:eval ev #:label #f
 (require math/matrix)
 (define X (matrix [[1.0 2.0] [2.0 1.0] [3.0 4.0] [4.0 3.0] [5.0 6.0]]))
-(define y '(1 4 3 6 5))
+(define y '(1.2 3.9 3.1 5.8 5.1))
 (coef (ols X y))
 (equal? (ols X y) (ols (matrix->list* X) y))
 ]
@@ -88,7 +88,7 @@ A @deftech{formula}, written with @racket[~], names the response and the
 predictors in one expression, and keys the coefficients by name:
 
 @examples[#:eval ev #:label #f
-(coef (formula-fit (~ response (+ age dose)) patients #:lambda 0))
+(coef (formula-fit (~ response (+ age dose)) patients #:lambda 0.1))
 ]
 
 @secref["formulas"] covers formulas, and @secref["data"] where data comes
@@ -109,15 +109,17 @@ is the same for all of them. It has two knobs:
        @math{α = 0} is the ridge (L2) penalty, which shrinks every coefficient
        but zeroes none; @math{α = 1} is the lasso (L1) penalty, which sets
        coefficients exactly to zero; values in between are the elastic net.
-       Every fit procedure defaults to @racket[1.0].}
+       @racket[elnet-fit] and the other families' fits default to
+       @racket[1.0].}
  @item{@bold{@racket[#:lambda], @math{λ ≥ 0}}, sets the penalty's strength.
-       A single fit requires it; to fit a whole sequence of values at once, use
-       a @tech{regularization path} (@secref["concepts-path"]). @math{λ = 0} is
-       the unpenalized fit.}
+       Every single fit but @racket[ols] requires it; to fit a whole sequence
+       of values at once, use a @tech{regularization path}
+       (@secref["concepts-path"]). @math{λ = 0} is the unpenalized fit.}
 ]
 
 The four Gaussian models are one routine, @racket[elnet-fit], with different
-arguments; the named procedures only fix @racket[#:alpha]:
+arguments: @racket[ols] fixes @math{λ = 0}, @racket[ridge] and @racket[lasso]
+fix @math{α}, and @racket[elastic-net] requires it:
 
 @tabular[#:style 'boxed
          #:sep @hspace[2]
@@ -130,7 +132,7 @@ arguments; the named procedures only fix @racket[#:alpha]:
 
 @examples[#:eval ev #:label #f
 (equal? (lasso X y #:lambda 0.1) (elnet-fit X y #:alpha 1.0 #:lambda 0.1))
-(eval:error (lasso X y))
+(eval:error (elastic-net X y #:lambda 0.1))
 ]
 
 @section[#:tag "concepts-families"]{Model families}
@@ -407,9 +409,8 @@ signal, with @math{y = 1 + 3x₁ − 2x₂ + x₃} plus noise:
 (define (noise) (- (* 2 (random)) 1))
 (define X60 (build-matrix 60 8 (lambda (i j) (noise))))
 (define β (col-matrix [3.0 -2.0 1.0 0.0 0.0 0.0 0.0 0.0]))
-(define y60
-  (for/list ([μ (in-list (matrix->list (matrix* X60 β)))])
-    (+ 1.0 μ (noise))))
+(define μ60 (matrix->list (matrix* X60 β)))
+(define y60 (for/list ([μ (in-list μ60)]) (+ 1.0 μ (noise))))
 (define cv (elnet-cv X60 y60))
 cv
 ]
@@ -527,8 +528,8 @@ probabilities with 0/1 indicators of the classes. @racket['auc] and
 @racket['C] are better when larger, so @tech{lambda-min} maximizes them.
 
 @examples[#:eval ev #:label #f
-(define labels (for/list ([v (in-list y60)]) (if (> v 1.0) 1 0)))
-(logistic-cv X60 labels #:type-measure 'class #:fold-ids folds)
+(define labels60 (for/list ([v (in-list y60)]) (if (> v 1.0) 1 0)))
+(logistic-cv X60 labels60 #:type-measure 'class #:fold-ids folds)
 ]
 
 By default the errors are averaged within each fold first, which R calls
@@ -538,14 +539,8 @@ grouped when they average fewer than 3 observations, @racket['auc] needs an
 average of 10 observations per fold and otherwise falls back to
 @racket['deviance], and each of these changes logs a warning.
 
-For Cox models, the deviance of a fold is computed as R computes it. Grouped,
-it is the deviance of all the data less that of the fold's training data, at
-the fold's coefficients. Ungrouped, it is the deviance of the held-out fold
-alone, which is undefined when the fold has no event or when its first event
-is among its last two observations in time order; R stops then, and so does
-@racket[cox-cv], naming the fold. When the folds average fewer than 10
-observations, the Cox deviance is grouped even with @racket[#:grouped? #f],
-with a warning, as in R.
+For Cox models, a fold's deviance is computed as R computes it;
+@racket[cox-cv] gives the cases in which it is undefined.
 
 @section[#:tag "concepts-standardize"]{Standardization and the intercept}
 
@@ -574,11 +569,12 @@ Coordinate descent cycles over the coefficients until no update moves the
 objective by more than @racket[#:thresh] (default @racket[1e-7]) times the null
 deviance, or until @racket[#:max-iters] passes (default @racket[100000]).
 @racket[ols] defaults to a tighter @racket[1e-10], because the unpenalized
-solution is approached slowly. The pass count is recorded in every result:
+solution is approached slowly. Every result records its passes; a tighter
+threshold takes more:
 
 @examples[#:eval ev #:label #f
-(elnet-result-num-passes (lasso X y #:lambda 0.1))
-(elnet-result-num-passes (lasso X y #:lambda 0.1 #:thresh 1e-12))
+(for/list ([thresh '(1e-7 1e-12)])
+  (elnet-result-num-passes (lasso X y #:lambda 0.1 #:thresh thresh)))
 ]
 
 Problems are reported in three ways:
