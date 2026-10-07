@@ -264,7 +264,10 @@ different `α` (`parm`) and `λ`. Each new capability is shipped as one unit:
 --htmls …/glmnet.scrbl` renders with no `collected information for key multiple
 times` warnings · `nix flake check` · Resyntax clean on the changed `.rkt`
 files: `resyntax analyze --local-git-repository . origin/master` in a dev
-shell, as CI's `resyntax` job runs it. `.racket-dev.rktd` lists the gates.
+shell, as CI's `resyntax` job runs it against the PR's base. `.racket-dev.rktd`
+lists the gates; its `resyntax` gate takes the base from `RESYNTAX_BASE`
+(default `origin/master`), which a stacked branch sets to its parent, such as
+`RESYNTAX_BASE=origin/st/L0`.
 
 ## Documentation
 

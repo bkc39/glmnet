@@ -1,12 +1,5 @@
-# Resyntax, the CI lint gate, with the packages it pulls in beyond the Racket
-# distribution, each pinned to a commit so lint findings change only when this
-# file does. The pins are rktorch's (nix/racket-linters.nix there). Compiled
-# here, without docs, so a shell copies them in rather than downloading and
-# building them.
-#
-# To bump one: change its rev, set its hash to "", build `.#racket-linters`
-# and paste the hash Nix reports. A dependency missing from this list fails
-# that build by name (`--deps fail`).
+# Resyntax and the packages it needs beyond the Racket distribution, at rktorch's pins.
+# To bump: new rev, hash "", build .#racket-linters, paste Nix's hash (--deps fail names a gap).
 { stdenvNoCC, fetchFromGitHub, fetchFromGitLab, linkFarm, racket }:
 
 let

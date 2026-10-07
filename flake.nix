@@ -322,13 +322,8 @@
           pkgs = pkgsFor system;
           racket-linters = self.packages.${system}.racket-linters;
 
-          # Links glmnet into the checkout's user scope, with its catalog
-          # dependencies, and installs the pinned Resyntax, each once: a step
-          # stamps only when it succeeds, so the next entry retries a failed
-          # one. The Resyntax stamp names its store path, so a bump reaches
-          # checkouts provisioned before it: install adds missing packages,
-          # update moves the rest onto the pinned trees, setup makes the
-          # launcher.
+          # A step stamps only on success, so the next entry retries a failed one; the
+          # Resyntax stamp names its store path, so a bump reinstalls (update moves old trees).
           provisionRacket = ''
             export PLTUSERHOME="$PWD/.racket-user"
             mkdir -p "$PLTUSERHOME"
