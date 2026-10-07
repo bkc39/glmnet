@@ -42,7 +42,7 @@ glmnet/                        Racket collection
                                (see "The data boundary" below)
   core/model.rkt               gen:glmnet-model: predict / coef / deviance-ratio / in-path on any result
   core/cv.rkt                  cross-validation (R's cv.glmnet) behind every family's *-cv
-  core/formula.rkt             formula front end: (~ y all) on a table -> any family,
+  core/formula.rkt             formula front end: (~ y all) on a table or a dataframe -> any family,
                                a formula-model with name-keyed coef and predict
   core/terms.rkt               formula terms: R's terms() expansion (+ - * : ^, 0/1),
                                transforms (log x), (I expr), factors (strings,
