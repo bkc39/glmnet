@@ -26,7 +26,7 @@
           "use coef, predict or deviance-ratio (only num-passes has no generic)")
    (idiom 'path-accessor
           #px"(?<![\\w-])glmnet-path-(?:coefficients|intercepts|dev-ratio)(?![\\w-])"
-          "use coef or deviance-ratio on the path (glmnet-path-lambda has no generic)")
+          "use in-path to walk the path, or coef and deviance-ratio at one λ")
    (idiom 'last-by-index
           #px"\\((?:vector-ref|list-ref)\\s+(?:[^()\\s]+|\\([^()]*\\))\\s+\\((?:sub1|-)\\s+\\((?:vector-)?length\\s"
           "take the last element with last, or for/last over in-vector")
