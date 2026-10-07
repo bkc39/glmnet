@@ -31,13 +31,13 @@
           #px"\\((?:vector-ref|list-ref)\\s+(?:[^()\\s]+|\\([^()]*\\))\\s+\\((?:sub1|-)\\s+\\((?:vector-)?length\\s"
           "take the last element with last, or for/last over in-vector")
    (idiom 'hand-rounding
-          #px"(?<![\\w-])(?:round3|rounded)(?![\\w-])|\\(/\\s+\\(round\\s+\\(\\*\\s+10+(?![\\w.])"
+          #px"(?<![\\w-])(?:round3|rounded)(?![\\w-])|\\(/\\s+\\(round\\s+\\(\\*\\s+(?:10+(?![\\w.])|(?:[^()\\s]+|\\([^()]*\\))\\s+10+(?![\\w.]))"
           "show the value as returned, or format it with ~r")
    (idiom 'positional-access
-          #px"\\((?:car|cadr|caddr|first|second|third|list-ref) |\\(cdr \\(assoc |\\(map (?:car|cdr|cadr|caddr)[ )]"
+          #px"\\((?:car|cadr|caddr|first|second|third|list-ref)\\s|\\(cdr\\s+\\(assoc\\s|\\(map\\s+(?:car|cdr|cadr|caddr)[\\s)]"
           "destructure with match-define, read a key with dict-ref, or iterate a sequence")
    (idiom 'hand-written-output
-          #px"\\(code:comment \"\\s*=>"
+          #px"\\(code:comment\\s+\"\\s*=>"
           "evaluate it: an @examples block, or a chunk whose value the companion test checks")))
 
 ;; The hits each file, relative to the collection, may still have, by idiom.
@@ -200,7 +200,15 @@
                     (1 positional-access "(map cadr ")
                     (1 positional-access "(second ")))
     (check-equal? (hit-texts "@racketblock[\n(f x)\n(code:comment \"=> 3\")]")
-                  '((3 hand-written-output "(code:comment \"=>"))))
+                  '((3 hand-written-output "(code:comment \"=>")))
+    (check-equal? (hit-texts "@racketblock[(first\n xs) (cdr\t(assoc \"a\" t)) (map\n cadr X)
+(code:comment\n \"=> 3\") (/ (round (* x 1000)) 1000) (/ (round (* (f x) 100)) 100)]")
+                  '((1 positional-access "(first\n")
+                    (2 positional-access "(cdr\t(assoc ")
+                    (2 positional-access "(map\n cadr ")
+                    (4 hand-written-output "(code:comment\n \"=>")
+                    (5 hand-rounding "(/ (round (* x 1000")
+                    (5 hand-rounding "(/ (round (* (f x) 100"))))
 
   (test-case "CRLF line ends give the same hits"
     (check-equal? (hit-texts "@examples[\r\n(f x)\r\n(car row)]\r\n@examples[(second r)]")
