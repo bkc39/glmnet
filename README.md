@@ -1,145 +1,98 @@
 # glmnet
 
-Racket bindings for [glmnet](https://glmnet.stanford.edu/) — lasso and
-elastic-net regularized models — via the original Friedman/Hastie/Tibshirani
-coordinate-descent **Fortran**, wrapped behind a clean C ABI.
-
-This is the Fortran member of a family of Racket FFI bindings (`scs`,
-`xgboost-rkt`, `rkt-polars`). The numerics come from the self-contained glmnet
-Fortran (vendored, no BLAS/LAPACK dependency); a small `iso_c_binding` shim
-exports a C ABI that the Racket FFI binds to.
-
-## Status
-
-All six of R glmnet's families are bound: Gaussian (OLS, ridge, lasso and
-elastic net), binomial, multinomial, Cox, Poisson and multi-response Gaussian.
-Each fits at a single λ, along a regularization path and with cross-validation
-(R's `cv.glmnet`), and every result works with the generic `predict`, `coef`
-and `deviance-ratio`. A formula front end fits any family from named columns,
-and `glmnet/plot` draws R's path and cross-validation plots. Parity tests check
-the numbers against R glmnet 4.1.10. Not bound yet: observation weights,
-penalty factors, coefficient limits and offsets (#12), and sparse predictor
-matrices (#11). See `AGENTS.md` for the development workflow.
-
-The Scribble manual (`glmnet/scribblings/`) has a user guide (getting started,
-concepts, data, formulas and named data, plots, R glmnet's Quick Start on R's
-own data, one worked example per model family and three on formulas:
-interactions, transforms and factors) and an API reference.
-With the package installed, build it with
-`raco scribble --htmls glmnet/scribblings/glmnet.scrbl`.
+Lasso, ridge and elastic-net regularized models for Racket, in R
+[glmnet](https://glmnet.stanford.edu/)'s six families: Gaussian, binomial,
+multinomial, Poisson, Cox and multi-response Gaussian. The solver is R glmnet's
+own Fortran.
 
 ## Install
 
-```racket
-(require glmnet)
+```sh
+raco pkg install glmnet
 ```
 
-A prebuilt native library is staged at install time; no Fortran toolchain is
-needed to use the package.
+The package ships prebuilt native libraries, its own and those of its
+dependency [rkt-polars](https://github.com/bkc39/rkt-polars), for Linux x86-64
+and macOS arm64 only; on any other platform the install fails. Racket 9.3 is
+the oldest version tested: CI installs the package from its sources, as the
+package catalog does, with the current stable Racket on Ubuntu 22.04, the
+latest Ubuntu and macOS arm64, and runs its tests.
 
-## Formulas and named data
+## Example
 
-Any family can be fitted from a table of named columns (an association list,
-a hash, or a design matrix with column names) with an R-style formula, which
-has R's algebra of terms: interactions, crossing, powers and the intercept,
-prefix or infix; transforms such as `(log x1)` and `(I (expt x1 2))`; and
-factors, columns of strings, symbols or booleans and `(factor x)`, coded by
-R's treatment contrasts. The model keys its coefficients by name, and
-`predict` builds its predictors from a new table by name, with the factors'
-levels of the fit:
+Fuel economy from weight and horsepower, in R's `mtcars`: fit, read the
+coefficients, predict a new car, and fit the same model from a formula.
 
 ```racket
-(define data
-  (list (cons "y"  '(1.0 4.0 3.0 6.0 5.0 8.0))
-        (cons "x1" '(1.0 2.0 3.0 4.0 5.0 6.0))
-        (cons "x2" '(2.0 1.0 4.0 3.0 6.0 5.0))))
-(define m (formula-fit (~ y all) data #:lambda 0.05))   ; also formula-path, formula-cv
-(coef m)                                  ; => '(("(Intercept)" . ...) ("x1" . ...) ("x2" . ...))
-(predict m (list (cons "x2" '(6.0)) (cons "x1" '(7.0))))
-(formula-path (y . ~ . x1 * x2) data)     ; R's y ~ x1 * x2: x1, x2 and x1:x2
-(formula-path (y . ~ . x1 + (I (expt x1 2))) data)   ; R's y ~ x1 + I(x1^2)
-(formula-path (mpg . ~ . wt * (factor cyl)) mtcars)  ; R's mpg ~ wt * factor(cyl)
-(formula-fit (~ Species all) iris #:family 'multinomial #:lambda 0.05)  ; string classes
-(formula-cv (~ (surv time status) (- all id)) patients #:family 'cox)
+(require glmnet glmnet/datasets)
+(define fit (ols mtcars "mpg" #:predictors '("wt" "hp")))
+(coef fit)
+(predict fit '((wt 3.0) (hp 150)))
+(coef (formula-fit (~ mpg (+ wt hp)) mtcars #:lambda 0))
 ```
 
-## Example data and CSV files
+## Documentation
 
-R glmnet's example datasets, the data of its vignettes, and R's `mtcars` and
-`iris` ship with the package in `glmnet/datasets`, exported from R with every
-double exact. Each loader returns its family fitter's arguments, as R's
-`data(QuickStartExample)` gives `x` and `y`. `glmnet/data/csv` reads and
-writes tables as CSV files, with no dependency:
+The manual is at <https://docs.racket-lang.org/glmnet/>, and `raco docs glmnet`
+opens the installed copy:
 
-```racket
-(require glmnet glmnet/datasets glmnet/data/csv)
-(define-values (x y) (quick-start-example))   ; R's QuickStartExample, 100 x 20
-(elnet-cv x y #:fold-ids (for/list ([i 100]) (modulo i 10)))
-(call-with-values cox-example cox-path)        ; x, times and statuses
-(define t (csv-file->table "patients.csv"))    ; numbers as flonums, strings as factors
-(table->csv-file t "copy.csv")
+- [Getting started](https://docs.racket-lang.org/glmnet/getting-started.html):
+  a first regression on mtcars, cross-validation and prediction.
+- [Concepts](https://docs.racket-lang.org/glmnet/concepts.html): data, the
+  penalty, the families, paths, prediction and cross-validation.
+- [Data](https://docs.racket-lang.org/glmnet/data.html): example datasets,
+  tables, CSV files, `math/matrix` and Polars.
+- [Formulas](https://docs.racket-lang.org/glmnet/formulas.html) and
+  [Plots](https://docs.racket-lang.org/glmnet/plots.html).
+- [Examples](https://docs.racket-lang.org/glmnet/examples.html): one worked
+  example per family.
+- [Reference](https://docs.racket-lang.org/glmnet/reference.html).
+
+## Status
+
+All six of R glmnet 4.1's families fit at a single λ, along a regularization
+path and with cross-validation, from matrices, lists, tables and Polars
+dataframes or through R-style formulas, and `glmnet/plot` draws R's path and
+cross-validation plots. Parity tests check the numbers against R. Not bound
+yet: observation weights, penalty factors, coefficient limits, offsets and
+`exclude` ([#12](https://github.com/bkc39/glmnet/issues/12)), and sparse
+predictor matrices ([#11](https://github.com/bkc39/glmnet/issues/11)).
+
+## Development
+
+`AGENTS.md` describes the architecture and the workflow. With Nix:
+
+```sh
+nix develop                     # builds the native library, link-installs the package
+raco test ./glmnet/             # unit tests and the examples' harnesses
+bash scripts/run-examples.sh    # runs every example in glmnet/examples/
+nix flake check                 # builds everything, runs the tests, renders the manual
 ```
 
-## Plots
+With a local toolchain (gfortran, CMake and Racket):
 
-The coefficient-path and cross-validation plots of R's `plot.glmnet` and
-`plot.cv.glmnet` are in `glmnet/plot`, a module of this package.
-`(require glmnet)` does not load it, so a program that only fits models does
-not load the plot library:
-
-```racket
-(require glmnet glmnet/plot)
-(plot-cv (elnet-cv X y))               ; => a pict
-(plot-coefficient-path (elnet-path X y) #:label #t #:out-file "path.png")
+```sh
+cmake -S fortran -B fortran/build -DBUILD_TESTING=ON
+cmake --build fortran/build
+ctest --test-dir fortran/build --output-on-failure
+cp fortran/build/libglmnetcompat.* glmnet/native-libs/
+raco pkg install --batch --auto --link --name glmnet ./glmnet
+raco test ./glmnet/
 ```
 
-The manual's *Plots* chapter draws every plot it describes.
+The package shares its architecture with the Racket bindings
+[bkc39/rkt-polars](https://github.com/bkc39/rkt-polars),
+[bkc39/scs](https://github.com/bkc39/scs) and
+[bkc39/xgboost](https://github.com/bkc39/xgboost).
 
-## Polars dataframes
+## License, acknowledgements and AI disclosure
 
-`glmnet/data/polars` converts the dataframes of
-[rkt-polars](https://github.com/bkc39/rkt-polars) to design matrices,
-responses and tables, and back. Reading a file with Polars and converting it
-is the fast way to fit real data. `(require glmnet)` does not load Polars:
+**License.** This package is distributed under **GPL-2.0-or-later**.
 
-```racket
-(require glmnet glmnet/data/polars (only-in polars read-csv))
-(define df (read-csv "iris.csv"))
-(lasso (polars->design-matrix df '("Sepal.Width" "Petal.Width"))
-       (polars->response df "Sepal.Length")
-       #:lambda 0.01)
-(formula-fit (Sepal.Length . ~ . Petal.Width + Species) (polars->table df) #:lambda 0.01)
-```
+**Acknowledgements.** The solver and its algorithms are the work of Jerome
+Friedman, Trevor Hastie, Rob Tibshirani and the other authors of the
+[R glmnet package](https://glmnet.stanford.edu/), whose vignettes shaped this
+manual.
 
-## Quick check
-
-```racket
-(require glmnet)
-(ols '((1.0 2.0) (2.0 1.0) (3.0 4.0) (4.0 3.0)) '(1.0 4.0 3.0 6.0))  ; => an elnet-result
-(glmnet-default-real-bytes)  ; => 8   (the double-precision contract)
-```
-
-## Build and run the examples (via Nix)
-
-```bash
-nix develop                     # builds the native lib + link-installs the package
-bash scripts/run-examples.sh    # runs all fourteen examples (glmnet/examples/); prints each fit
-raco test ./glmnet/             # full suite: unit tests + example harnesses
-```
-
-Or verify everything in one shot:
-
-```bash
-nix build .#native              # build libglmnetcompat + run the Fortran ctest suite
-nix flake check                 # build everything, run raco test, render the docs
-```
-
-A local toolchain (gfortran + cmake + Racket) works too; see `AGENTS.md`.
-
-## License
-
-**GPL-2.0-or-later.** This package vendors and links the GPL-2.0 glmnet Fortran
-(R glmnet's own, under `fortran/vendor/`); see `LICENSE` and
-`fortran/vendor/NOTICE.md`. The plot library that `glmnet/plot` draws with,
-plot-lib, and rkt-polars, which `glmnet/data/polars` adapts, are Apache-2.0 or
-MIT.
+**AI Disclosure.** This package and its documentation were created with the
+use of AI tools.
