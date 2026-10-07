@@ -222,6 +222,12 @@
                (lambda () (lasso (hash "x" '(1 2 3) 'x '(2 3 5) "y" '(1 2 4)) "y"
                                  #:predictors '("x") #:lambda 0.1))))
 
+  (test-case "the exported contract builders take data as X"
+    (check-exn #rx"^response-for/c: contract violation.*given: 1"
+               (lambda () (response-for/c 1 real?)))
+    (check-exn #rx"^predictors-for/c: contract violation.*given: 1"
+               (lambda () (predictors-for/c 1 '(1 2)))))
+
   (test-case "rows that start with text are rows, unless y names a column"
     (check-exn (error-matching #rx"^ols: X has an element that is not a real number"
                                #rx"column: 0\n  row: 0\n  element: \"a\"")
