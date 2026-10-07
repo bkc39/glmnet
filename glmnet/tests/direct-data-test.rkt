@@ -179,6 +179,15 @@
                                #rx"in: the #:predictors argument of")
                (lambda () (ols rows mpg #:predictors '("wt")))))
 
+  (test-case "a contract error names a fitter's contract by its short signature"
+    (define (short-signature e)
+      (and (regexp-match? #rx"in: the #:lambda argument of\n *[(]->[*]" (exn-message e))
+           (not (regexp-match? #rx"->i|#:pre/desc|predictors-problem" (exn-message e)))))
+    (check-exn (blame-matching #rx"expected: [(]>=/c 0[)]\n  given: -1") (lambda () (lasso rows mpg #:lambda -1)))
+    (check-exn short-signature (lambda () (lasso rows mpg #:lambda -1)))
+    (check-exn (blame-matching #rx"expected: unnamed data [(]a design matrix" #rx"given: 5")
+               (lambda () (ols 5 mpg))))
+
   (test-case "unknown names, the response among the predictors, and repeated names"
     (check-exn (blame-matching #rx"expected: the name of a numeric column of the dataframe"
                                #rx"given: \"mpgg\", which is not a column of the dataframe"

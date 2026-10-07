@@ -132,10 +132,15 @@
   (and (named-data-form? (data-form v)) #t))
 
 (define data/c
-  (flat-named-contract
-   '(or/c design-matrix? (listof (or/c list? vector?)) (vectorof (or/c list? vector?))
-          (and/c array? matrix?) table? dataframe?)
-   (lambda (v) (and (data-form v) #t))))
+  (flat-contract-with-explanation
+   (lambda (v)
+     (or (and (data-form v) #t)
+         (explain v "~a" "~e"
+                  (string-append "unnamed data (a design matrix, a list or vector of rows "
+                                 "or a math/matrix matrix) or named data (a table or a "
+                                 "Polars dataframe)")
+                  v)))
+   #:name 'data/c))
 
 ;; --- column names ------------------------------------------------------------------
 
@@ -265,17 +270,23 @@
     (pattern (~seq kw:keyword ctc:expr)
              #:with id (format-id #'kw "#:~a" (keyword->string (syntax-e #'kw))))))
 
+;; The contract's name is the ->* form of the documented signature, its
+;; optional keywords elided, so that an error does not print the whole ->i.
 (define-syntax-parse-rule (fit/c elem:expr (mandatory:keyword-contract ...)
                                  (optional:keyword-contract ...)
                                  result:expr)
   #:with predictors (format-id #'elem "#:predictors")
-  (->i ([X data/c]
-        [y (X) (response-for/c X elem)]
-        (~@ mandatory.kw [mandatory.id mandatory.ctc]) ...)
-       (#:predictors [predictors (X y) (predictors-for/c X y)]
-        (~@ optional.kw [optional.id optional.ctc]) ...)
-       #:pre/desc (X y predictors) (predictors-problem X y predictors)
-       [_ result]))
+  (rename-contract
+   (->i ([X data/c]
+         [y (X) (response-for/c X elem)]
+         (~@ mandatory.kw [mandatory.id mandatory.ctc]) ...)
+        (#:predictors [predictors (X y) (predictors-for/c X y)]
+         (~@ optional.kw [optional.id optional.ctc]) ...)
+        #:pre/desc (X y predictors) (predictors-problem X y predictors)
+        [_ result])
+   '(->* (data/c (response-for/c X elem) (~@ mandatory.kw mandatory.ctc) ...)
+         (#:predictors (predictors-for/c X y) (... ...))
+         result)))
 
 ;; --- conversion --------------------------------------------------------------------
 
