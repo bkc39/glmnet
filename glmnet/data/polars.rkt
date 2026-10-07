@@ -5,7 +5,7 @@
          racket/match
          ffi/vector
          (only-in polars
-                  dataframe dataframe? series
+                  dataframe dataframe? series series?
                   dataframe->f64vector dataframe->columns series->list in-series
                   column-names height ref dtype null-count polars-null?)
          (only-in "../data.rkt" design-matrix? design-matrix-column-names table?
@@ -40,6 +40,14 @@
    (->i ([t table?])
         ([columns (t) (table-columns/c t)])
         [result dataframe?])]))
+
+;; For glmnet's data boundary (core/input.rkt) only, which loads this module
+;; when a program has loaded Polars: the conversions above with the name of
+;; the procedure the user called, and the checks that the contracts above make,
+;; as errors, for data that no contract has seen.
+(module* support #f
+  (provide dataframe? series? column-names numeric-column?
+           dataframe->design-matrix dataframe-column->response series->response))
 
 ;; --- dtypes --------------------------------------------------------------------
 
@@ -170,19 +178,45 @@
                    #:row (for/first ([x (in-series s)] [i (in-naturals)] #:when (polars-null? x)) i)
                    #:column name)))
 
+;; Whether df's column `name`, a string, has a numeric dtype.
+(define (numeric-column? df name)
+  (numeric-dtype? (dtype (ref df name))))
+
+;; Checks that df has rows and a numeric column with each of `names`, strings.
+(define (check-numeric-columns who df names)
+  (define present (column-names df))
+  (define known (name-set present))
+  (when (zero? (height df))
+    (raise-arguments-error who "the dataframe has no rows"))
+  (for ([name (in-list names)])
+    (cond
+      [(not (hash-ref known name #f))
+       (raise-arguments-error who "the dataframe has no column with this name"
+                              "column" name "columns of the dataframe" present)]
+      [(not (numeric-column? df name))
+       (raise-arguments-error who "the dataframe has a column that is not numeric"
+                              "column" name "dtype" (dtype (ref df name)))]
+      [else (void)])))
+
 ;; --- polars -> glmnet ------------------------------------------------------------
 
 (define (polars->design-matrix df columns)
-  (define who 'polars->design-matrix)
+  (dataframe->design-matrix 'polars->design-matrix df columns))
+
+(define (dataframe->design-matrix who df columns)
   (define names (map column-name->string columns))
+  (check-numeric-columns who df names)
   (for ([name (in-list names)])
     (check-no-null who (ref df name) name))
   (define-values (v nrows ncols) (dataframe->f64vector df #:columns names #:null 'error))
   (flat->design-matrix v nrows ncols names who "the dataframe" #:adopt? #t))
 
 (define (polars->response df column)
-  (define who 'polars->response)
+  (dataframe-column->response 'polars->response df column))
+
+(define (dataframe-column->response who df column)
   (define name (column-name->string column))
+  (check-numeric-columns who df (list name))
   (define s (ref df name))
   (check-no-null who s name)
   (define ys (series->list s))
@@ -190,6 +224,22 @@
     (for ([y (in-list ys)] [i (in-naturals)])
       (unless (< (abs y) +inf.0)
         (element-error who "the dataframe" "not finite" y #:row i #:column name))))
+  ys)
+
+;; The numbers of the series s, a response named `what` in errors, as a list.
+(define (series->response who what s)
+  (define d (dtype s))
+  (unless (numeric-dtype? d)
+    (raise-arguments-error who (format "~a is a series that is not numeric" what) "dtype" d))
+  (unless (zero? (null-count s))
+    (missing-error who what
+                   #:position (for/first ([x (in-series s)] [k (in-naturals)] #:when (polars-null? x))
+                                k)))
+  (define ys (series->list s))
+  (when (float-dtype? d)
+    (for ([y (in-list ys)] [k (in-naturals)])
+      (unless (< (abs y) +inf.0)
+        (element-error who what "not finite" y #:position k))))
   ys)
 
 (define (polars->table df [columns (column-names df)])
