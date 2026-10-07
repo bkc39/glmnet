@@ -70,10 +70,11 @@ with @racket[match-define]:
 horsepower at the same weight. @racket[deviance-ratio] is @math{R²}.
 
 A penalty shrinks the coefficients. @racket[lasso] applies the L1 penalty,
-which can set coefficients to zero:
+which can set coefficients to zero; at @math{λ = 4} it drops horsepower:
 
 @examples[#:eval ev #:label #f
-(coef (lasso cars "mpg" #:predictors '("wt" "hp") #:lambda 1.0))
+(define penalized-fit (lasso cars "mpg" #:predictors '("wt" "hp") #:lambda 4.0))
+(coef penalized-fit)
 ]
 
 A @tech{regularization path} fits many values of @math{λ} at once.
@@ -182,16 +183,15 @@ A @tech{formula}, written with @racket[~], names the response and the
 predictors in one expression:
 
 @examples[#:eval ev #:label #f
-(define named-fit (formula-fit (~ mpg (+ wt hp)) cars #:lambda 0))
+(define named-fit (formula-fit (~ mpg (+ wt hp)) cars #:lambda 4.0))
 (coef named-fit)
-(equal? (predict named-fit cars) (predict fit cars))
+(equal? (predict named-fit cars) (predict penalized-fit cars))
 ]
 
-At @racket[#:lambda 0] it is the OLS fit, with its coefficients keyed by
-name. Formulas also build interactions, transforms and factors;
-@racket[#:family] chooses among the six families, and @racket[formula-path]
-and @racket[formula-cv] fit a path and cross-validate one. See
-@secref["formulas"].
+It is the lasso fit above, with its coefficients keyed by name. Formulas also
+build interactions, transforms and factors; @racket[#:family] chooses among
+the six families, and @racket[formula-path] and @racket[formula-cv] fit a path
+and cross-validate one. See @secref["formulas"].
 
 @section[#:tag "gs-models"]{Choosing a model}
 

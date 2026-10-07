@@ -572,10 +572,9 @@ Every family except Cox fits an unpenalized intercept. Pass
 
 Coordinate descent cycles over the coefficients until no update moves the
 objective by more than @racket[#:thresh] (default @racket[1e-7]) times the null
-deviance, or until @racket[#:max-iters] passes (default @racket[100000]). The
-unpenalized solution is approached slowly, so a Gaussian fit at
-@math{λ = 0}, such as @racket[ols], defaults to a tighter @racket[1e-10].
-The pass count is recorded in every result:
+deviance, or until @racket[#:max-iters] passes (default @racket[100000]).
+@racket[ols] defaults to a tighter @racket[1e-10], because the unpenalized
+solution is approached slowly. The pass count is recorded in every result:
 
 @examples[#:eval ev #:label #f
 (elnet-result-num-passes (lasso X y #:lambda 0.1))

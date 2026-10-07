@@ -114,14 +114,8 @@
 
 ;; --- public API ------------------------------------------------------------
 
-;; Coordinate descent approaches the unpenalized solution from above as
-;; `thresh` tightens, so a fit at lambda 0, from any of the procedures below
-;; (`ols` always), uses a tighter default than glmnet's conventional 1e-7.
-(define (default-thresh lambda)
-  (if (zero? lambda) 1e-10 1e-7))
-
 ;; One Gaussian fit at a single lambda. `who` names the public procedure in
-;; error messages. A `thresh` of #f is the default for `lambda`.
+;; error messages.
 (define (fit-elnet who X y predictors
                    #:alpha alpha
                    #:lambda lambda
@@ -139,7 +133,7 @@
                            (exact->inexact lambda)
                            (if standardize? 1 0)
                            (if intercept? 1 0)
-                           (exact->inexact (or thresh (default-thresh lambda)))
+                           (exact->inexact thresh)
                            max-iters
                            beta))
   (check-jerr jerr who)
@@ -151,7 +145,7 @@
                    #:alpha [alpha 1.0]
                    #:standardize? [standardize? #t]
                    #:intercept? [intercept? #t]
-                   #:thresh [thresh #f]
+                   #:thresh [thresh 1e-7]
                    #:max-iters [max-iters 100000])
   (fit-elnet 'elnet-fit X y predictors
              #:alpha alpha
@@ -162,11 +156,14 @@
              #:max-iters max-iters))
 
 ;; Ordinary least squares = elastic net at lambda 0 (alpha then irrelevant).
+;; Coordinate descent approaches the OLS solution from above as `thresh`
+;; tightens, so `ols` uses a tighter default than the penalized fits where
+;; glmnet's 1e-7 is conventional.
 (define (ols X y
              #:predictors [predictors #f]
              #:standardize? [standardize? #t]
              #:intercept? [intercept? #t]
-             #:thresh [thresh #f]
+             #:thresh [thresh 1e-10]
              #:max-iters [max-iters 100000])
   (fit-elnet 'ols X y predictors
              #:alpha 1.0
@@ -183,7 +180,7 @@
                #:lambda lambda
                #:standardize? [standardize? #t]
                #:intercept? [intercept? #t]
-               #:thresh [thresh #f]
+               #:thresh [thresh 1e-7]
                #:max-iters [max-iters 100000])
   (fit-elnet 'ridge X y predictors
              #:alpha 0.0
@@ -201,7 +198,7 @@
                #:lambda lambda
                #:standardize? [standardize? #t]
                #:intercept? [intercept? #t]
-               #:thresh [thresh #f]
+               #:thresh [thresh 1e-7]
                #:max-iters [max-iters 100000])
   (fit-elnet 'lasso X y predictors
              #:alpha 1.0
@@ -219,7 +216,7 @@
                      #:lambda lambda
                      #:standardize? [standardize? #t]
                      #:intercept? [intercept? #t]
-                     #:thresh [thresh #f]
+                     #:thresh [thresh 1e-7]
                      #:max-iters [max-iters 100000])
   (fit-elnet 'elastic-net X y predictors
              #:alpha alpha
