@@ -240,12 +240,15 @@ different `α` (`parm`) and `λ`. Each new capability is shipped as one unit:
 4. **Add the Racket raw binding.** Extend `foreign/raw/elnet.rkt` via
    `define-glmnet` (`_f64vector`/`_s32vector` buffers, `(_ptr o …)` scalar outs;
    no allocator/finalizer — these are pure calls). Add a contracted wrapper in
-   `core/` (inputs through the design-matrix layer, `data.rkt`, via
-   `core/marshal.rkt`, or, for a procedure that takes data directly, the
-   contract `fit/c` and the conversion `fit-input` of `core/input.rkt`, with
-   `attach-data-names` on the result, the inner path of a CV result included; `jerr` check; a result struct that
-   implements `gen:glmnet-model` from `core/model.rkt`, so `predict`, `coef` and printing
-   work on it; prediction helpers are `predict` at a fixed `#:type`).
+   `core/` (inputs through `core/input.rkt`: the contract `fit/c` with the
+   family's response contract, such as `(response-for/c X real?)`, and the
+   conversion for its response, `fit-input`, `class-fit-input`,
+   `survival-fit-input` or `responses-fit-input`, with `attach-data-names`
+   on the result, and on the inner path of a CV result, which remembers the
+   names and classes of the data; `jerr` check; a result struct that
+   implements `gen:glmnet-model` from `core/model.rkt`, so `predict`, `coef`
+   and printing work on it; prediction helpers take `data/c` and are
+   `predict` at a fixed `#:type`).
 5. **Test the Racket binding.** `glmnet/tests/*-test.rkt` rackunit: round-trip vs
    closed-form / known values, `jerr` error surfacing, shape-mismatch contract
    errors.
@@ -277,7 +280,8 @@ different `α` (`parm`) and `λ`. Each new capability is shipped as one unit:
      (`response-form-problem` and `model-frame`). A family whose response
      has classes takes a response of strings, symbols or booleans through
      `response-classes` in `model-frame`, and `coef` and `predict` name the
-     classes through `prop:class-labels` (`core/model.rkt`).
+     classes through `prop:class-labels` (`core/model.rkt`); its fitters
+     take one through `class-fit-input` (`core/input.rkt`).
    - `core/model.rkt`: `row-transform` and `check-type` (what `#:type`
      makes of the linear predictor), and for a family with one coefficient
      vector per class or response, the grouped cases of `single-fit-path`,

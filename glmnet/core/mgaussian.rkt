@@ -15,6 +15,8 @@
          ffi/vector
          (only-in "../data.rkt" design-matrix->columns)
          "marshal.rkt"
+         (only-in "input.rkt" data/c responses-for/c)
+         (submod "input.rkt" support)
          "model.rkt"
          (submod "model.rkt" support)
          "../foreign/raw/mgaussian.rkt"
@@ -29,44 +31,47 @@
  (struct-out mgaussian-result)
  (contract-out
   [mgaussian-fit
-   (->* (design-matrix/c design-matrix/c #:lambda (>=/c 0))
-        (#:alpha (real-in 0 1)
-         #:standardize? boolean?
-         #:intercept? boolean?
-         #:thresh (>/c 0)
-         #:max-iters exact-positive-integer?)
-        mgaussian-result?)]
+   (fit/c (responses-for/c X) #:argument Y
+          (#:lambda (>=/c 0))
+          (#:alpha (real-in 0 1)
+           #:standardize? boolean?
+           #:intercept? boolean?
+           #:thresh (>/c 0)
+           #:max-iters exact-positive-integer?)
+          mgaussian-result?)]
   [mgaussian-predict
-   (-> mgaussian-result? design-matrix/c (listof (listof real?)))]))
+   (-> mgaussian-result? data/c (listof (listof real?)))]))
 
 (provide
  (contract-out
   [mgaussian-path
-   (->* (design-matrix/c design-matrix/c)
-           (#:lambda lambda-sequence/c
-            #:nlambda exact-positive-integer?
-            #:lambda-min-ratio lambda-min-ratio/c
-            #:alpha (real-in 0 1)
-            #:standardize? boolean?
-            #:intercept? boolean?
-            #:thresh (>/c 0)
-            #:max-iters exact-positive-integer?)
-        glmnet-path?)]
+   (fit/c (responses-for/c X) #:argument Y
+          ()
+          (#:lambda lambda-sequence/c
+           #:nlambda exact-positive-integer?
+           #:lambda-min-ratio lambda-min-ratio/c
+           #:alpha (real-in 0 1)
+           #:standardize? boolean?
+           #:intercept? boolean?
+           #:thresh (>/c 0)
+           #:max-iters exact-positive-integer?)
+          glmnet-path?)]
   [mgaussian-cv
-   (->* (design-matrix/c design-matrix/c)
-        (#:type-measure (or/c 'mse 'deviance 'mae)
-         #:nfolds nfolds/c
-         #:fold-ids fold-ids/c
-         #:grouped? boolean?
-         #:lambda cv-lambda-sequence/c
-         #:nlambda exact-positive-integer?
-         #:lambda-min-ratio lambda-min-ratio/c
-         #:alpha (real-in 0 1)
-         #:standardize? boolean?
-         #:intercept? boolean?
-         #:thresh (>/c 0)
-         #:max-iters exact-positive-integer?)
-        glmnet-cv?)]))
+   (fit/c (responses-for/c X) #:argument Y
+          ()
+          (#:type-measure (or/c 'mse 'deviance 'mae)
+           #:nfolds nfolds/c
+           #:fold-ids fold-ids/c
+           #:grouped? boolean?
+           #:lambda cv-lambda-sequence/c
+           #:nlambda exact-positive-integer?
+           #:lambda-min-ratio lambda-min-ratio/c
+           #:alpha (real-in 0 1)
+           #:standardize? boolean?
+           #:intercept? boolean?
+           #:thresh (>/c 0)
+           #:max-iters exact-positive-integer?)
+          glmnet-cv?)]))
 
 ;; A fitted multi-response Gaussian model. `intercepts` is a vector of nr reals;
 ;; `coefficients` is a vector of nr coefficient vectors (each length ni), one per
@@ -82,27 +87,19 @@
                       (mgaussian-result-intercepts r) (mgaussian-result-coefficients r)
                       (mgaussian-result-r-squared r) (mgaussian-result-num-passes r)))])
 
-;; The response matrix Y as a design matrix with one row per observation.
-(define (response-matrix Y no who)
-  (define y (as-design-matrix Y who "Y"))
-  (unless (= (design-matrix-nrows y) no)
-    (raise-arguments-error who "Y does not have one row per row of X"
-                           "rows of Y" (design-matrix-nrows y) "rows of X" no))
-  y)
-
 ;; --- public API ------------------------------------------------------------
 
 (define (mgaussian-fit X Y
+                       #:predictors [predictors #f]
                        #:lambda lambda
                        #:alpha [alpha 1.0]
                        #:standardize? [standardize? #t]
                        #:intercept? [intercept? #t]
                        #:thresh [thresh 1e-7]
                        #:max-iters [max-iters 100000])
-  (define x (as-design-matrix X 'mgaussian-fit "X"))
+  (define-values (x y names responses) (responses-fit-input 'mgaussian-fit X Y predictors))
   (define no (design-matrix-nrows x))
   (define ni (design-matrix-ncols x))
-  (define y (response-matrix Y no 'mgaussian-fit))
   (define nr (design-matrix-ncols y))
   (check-response-varies (design-matrix-data y) no nr intercept? 'mgaussian-fit)
   (define intercepts (make-f64vector nr 0.0))
@@ -118,8 +115,10 @@
                                intercepts beta))
   (check-jerr jerr 'mgaussian-fit)
   ;; beta is response-major: response r's predictor j at r*ni + j.
-  (mgaussian-result (unpack-vector intercepts nr) (unpack-columns beta ni nr)
-                    r-squared lam nlp))
+  (attach-data-names
+   (mgaussian-result (unpack-vector intercepts nr) (unpack-columns beta ni nr)
+                     r-squared lam nlp)
+   names #:responses responses))
 
 ;; --- prediction ------------------------------------------------------------
 
@@ -131,6 +130,7 @@
 ;; --- regularization path (#10) ---------------------------------------------
 
 (define (mgaussian-path X Y
+                        #:predictors [predictors #f]
                         #:lambda [lambda #f]
                         #:nlambda [nlambda 100]
                         #:lambda-min-ratio [lambda-min-ratio #f]
@@ -139,10 +139,9 @@
                         #:intercept? [intercept? #t]
                         #:thresh [thresh 1e-7]
                         #:max-iters [max-iters 100000])
-  (define x (as-design-matrix X 'mgaussian-path "X"))
+  (define-values (x y names responses) (responses-fit-input 'mgaussian-path X Y predictors))
   (define no (design-matrix-nrows x))
   (define ni (design-matrix-ncols x))
-  (define y (response-matrix Y no 'mgaussian-path))
   (define k (design-matrix-ncols y))
   (check-response-varies (design-matrix-data y) no k intercept? 'mgaussian-path)
   (define-values (nlam flmin ulam)
@@ -160,13 +159,16 @@
                                a0 beta dev alm))
   (check-jerr jerr 'mgaussian-path lmu)
   (define coefficients (unpack-column-groups beta ni k lmu))
-  (glmnet-path 'mgaussian (finish-lambdas alm lmu (not lambda))
-               (unpack-intercept-groups a0 k lmu) coefficients (unpack-vector dev lmu)
-               (count-nonzero-groups coefficients) nlp))
+  (attach-data-names
+   (glmnet-path 'mgaussian (finish-lambdas alm lmu (not lambda))
+                (unpack-intercept-groups a0 k lmu) coefficients (unpack-vector dev lmu)
+                (count-nonzero-groups coefficients) nlp)
+   names #:responses responses))
 
 ;; --- cross-validation (#27) ------------------------------------------------
 
 (define (mgaussian-cv X Y
+                      #:predictors [predictors #f]
                       #:type-measure [measure 'mse]
                       #:nfolds [nfolds 10]
                       #:fold-ids [fold-ids #f]
@@ -179,17 +181,18 @@
                       #:intercept? [intercept? #t]
                       #:thresh [thresh 1e-7]
                       #:max-iters [max-iters 100000])
-  (define x (as-design-matrix X 'mgaussian-cv "X"))
-  (define y (response-matrix Y (design-matrix-nrows x) 'mgaussian-cv))
+  (define-values (x y names responses) (responses-fit-input 'mgaussian-cv X Y predictors))
   (define (fit x y)
     (mgaussian-path x y
                     #:lambda lambda #:nlambda nlambda #:lambda-min-ratio lambda-min-ratio
                     #:alpha alpha #:standardize? standardize? #:intercept? intercept?
                     #:thresh thresh #:max-iters max-iters))
-  (define (fit-all) (fit x y))
+  (define (fit-all) (attach-data-names (fit x y) names #:responses responses))
   (define (fit-rows rows)
     (fit (design-matrix-select-rows x rows) (design-matrix-select-rows y rows)))
-  (cross-validate 'mgaussian-cv x (for/vector ([row (in-list (design-matrix->rows y))])
-                                    (list->vector row))
-                  fit-all fit-rows
-                  #:measure measure #:nfolds nfolds #:fold-ids fold-ids #:grouped? grouped?))
+  (attach-data-names
+   (cross-validate 'mgaussian-cv x (for/vector ([row (in-list (design-matrix->rows y))])
+                                     (list->vector row))
+                   fit-all fit-rows
+                   #:measure measure #:nfolds nfolds #:fold-ids fold-ids #:grouped? grouped?)
+   names #:responses responses))

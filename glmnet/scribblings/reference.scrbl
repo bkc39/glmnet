@@ -25,20 +25,20 @@ The fit procedures share their argument conventions:
 
 @itemlist[
  @item{@racket[X] is a @tech{design matrix}, one row per observation: a
-       @racket[design-matrix?] value, or a non-empty list or vector of
+       @racket[design-matrix?] value, a non-empty list or vector of
        equal-length rows of reals, each row a list or a vector (see
        @racket[design-matrix/c], @secref["ref-data"] and
-       @secref["ref-data-nested"]), or, for the Gaussian procedures, a
-       @racketmodname[math/matrix] matrix. Prediction helpers take new data in
-       the same forms, with as many columns as the fit has coefficients.}
- @item{A @tech{response} @racket[y], and a Cox model's @racket[times] and
+       @secref["ref-data-nested"]), or a @racketmodname[math/matrix] matrix.
+       Prediction helpers take new data in the same forms, with as many
+       columns as the fit has coefficients.}
+ @item{A @tech{response} @racket[y], and an unnamed Cox fit's
        @racket[statuses], is a non-empty list, vector, @racket[flvector] or
        @racket[f64vector] with one entry per row of @racket[X] (see
-       @racket[response/c]), or, for the Gaussian procedures, a
-       @racketmodname[math/array] array or a Polars series.}
- @item{The Gaussian procedures also take named data, a @tech{table} or a
-       Polars dataframe, whose response and predictors they select by name
-       (see @secref["ref-common-data"]).}
+       @racket[response/c]), a @racketmodname[math/array] array or a Polars
+       series; a Cox status may also be a boolean, @racket[#t] for an event.}
+ @item{Every procedure also takes named data, a @tech{table} or a Polars
+       dataframe, whose response and predictors it selects by name (see
+       @secref["ref-common-data"]).}
  @item{@racket[#:lambda] is the penalty strength @math{λ ≥ 0}. It is
        required.}
  @item{@racket[#:alpha] is the mixing parameter @math{α ∈ [0, 1]}:
@@ -67,31 +67,52 @@ glmnet's reason. (R warns instead, and returns an empty model.)
 (require racket/contract
          (only-in polars dataframe series)
          (only-in math/matrix matrix)
-         (only-in math/array array))]
+         (only-in math/array array)
+         (only-in glmnet/datasets iris))]
 
-The Gaussian procedures, @racket[elnet-fit], @racket[ols], @racket[ridge],
-@racket[lasso], @racket[elastic-net], @racket[elnet-path] and
-@racket[elnet-cv], take their data as it is, and give the results of the
-explicit conversions of @secref["ref-data"], @secref["ref-data-math"] and
-@secref["ref-data-polars"]. Unnamed data is as above. Named data, a
-@tech{table} that is not a design matrix or a Polars dataframe, is read by
-column name: @racket[y] names the response column, and @racket[#:predictors],
-then required, lists the predictor columns in the order of the coefficients.
-Nothing is guessed: a column is used only when it is named, no row is
-dropped, and a missing value, a value that is not a real number or one that
-is not finite is an error naming its column and row. A design matrix is
-unnamed data, even when its columns have names. An association list whose
-columns are lists, such as @racket['(("x" 1 2) ("y" 3 4))], is also a list of
-rows: it is named data when @racket[y] names a column, and rows otherwise.
+The fit, path and cross-validation procedures take their data as it is, and
+give the results of the explicit conversions of @secref["ref-data"],
+@secref["ref-data-math"] and @secref["ref-data-polars"]. Unnamed data is as
+above. Named data, a @tech{table} that is not a design matrix or a Polars
+dataframe, is read by column name: @racket[y] names the response, and
+@racket[#:predictors], then required, lists the predictor columns in the order
+of the coefficients. Nothing is guessed: a column is used only when it is
+named, no row is dropped, and a missing value, a value that is not a real
+number or one that is not finite is an error naming its column and row. A
+design matrix is unnamed data, even when its columns have names. An
+association list whose columns are lists, such as @racket['(("x" 1 2) ("y" 3
+4))], is also a list of rows: it is named data when @racket[y] names columns,
+and rows otherwise.
+
+The response is one column, except for two families:
+
+@tabular[#:style 'boxed
+         #:sep @hspace[2]
+         #:row-properties '(bottom-border ())
+ (list (list @bold{Family}            @bold{@racket[y] for named data}               @bold{Unnamed data})
+       (list "Gaussian, Poisson"      "a numeric column"                             "a response")
+       (list "Binomial, multinomial"  "a column of class labels"                     "a response of class labels")
+       (list "Cox"                    @elem{@racket['("time" "status")], two columns} @elem{the times, and the statuses after them})
+       (list "Multi-response"         @elem{@racket['("y1" "y2")], a non-empty list}  "a matrix, one column per response"))]
+
+A binomial or multinomial response, a column, a list, a vector, a Polars
+series or a @racketmodname[math/array] array, may hold strings, symbols or
+booleans in place of class numbers. Its classes are then its levels, as a formula's
+factor response has them: strings and symbols sorted by @racket[string<?],
+which is R's order in the C locale (R in another locale sorts mixed-case
+labels differently), and @racket["FALSE"] before @racket["TRUE"]. A binomial response has exactly two.
+The fit remembers them, and @racket[predict] with @racket[#:type 'class],
+@racket[logistic-predict] and @racket[multinomial-predict] return them.
 
 A fit from named data remembers its predictors' names: @racket[predict] and
-@racket[elnet-predict] read new named data, and a design matrix with column
+the prediction helpers read new named data, and a design matrix with column
 names, by them, in any order, ignoring other columns, the response included,
 and other unnamed data by position. A fit from unnamed data reads only
 unnamed data. The result is the same struct as from the explicit conversions,
 and @racket[equal?] to it, though a copy made by @racket[struct-copy] does not
 remember the names; @racket[coef] keeps its layout, and
-@racket[plot-coefficient-path] labels the curves by name.
+@racket[plot-coefficient-path] labels the curves by name and a
+multi-response fit's panels by its responses' names.
 
 @racket[(require glmnet)] loads neither Polars nor @racketmodname[math/matrix];
 their values are recognised once the program has loaded the library itself.
@@ -109,12 +130,16 @@ their values are recognised once the program has loaded the library itself.
              (array #[21.0 22.8 21.4 18.7 18.1 14.3]))
         (ols '((2.62 110) (2.32 93) (3.215 110) (3.44 175) (3.46 105) (3.57 245))
              '(21.0 22.8 21.4 18.7 18.1 14.3)))
+(define flowers (multinomial-fit iris "Species" #:lambda 0.05
+                                 #:predictors '("Petal.Length" "Petal.Width")))
+(multinomial-predict flowers (hash "Petal.Length" '(1.4 4.5 6.0) "Petal.Width" '(0.2 1.5 2.5)))
 (eval:error (ols autos "mpg"))
 (eval:error (ols autos "mpg" #:predictors '("wt" "mpg")))]
 
 @defthing[data/c flat-contract?]{
-  The contract on the @racket[X] argument of the Gaussian procedures and the
-  new data of @racket[predict]: unnamed data, a design matrix, rows in any of
+  The contract on the @racket[X] argument of the fit, path and
+  cross-validation procedures and the new data of @racket[predict] and the
+  prediction helpers: unnamed data, a design matrix, rows in any of
   the nestings of @racket[design-matrix/c] or a @racketmodname[math/matrix]
   matrix, or named data, a @tech{table} or a Polars dataframe.
 
@@ -133,26 +158,65 @@ their values are recognised once the program has loaded the library itself.
   (named-data? (list (cons "x" '(1 2))))
   (named-data? (rows->design-matrix '((1 2)) #:column-names '(a b)))]}
 
-@defproc[(response-for/c [X data/c] [elem flat-contract?]) flat-contract?]{
+@defproc[(response-for/c [X data/c]
+                         [elem flat-contract?]
+                         [#:classes? classes? boolean? #f])
+         flat-contract?]{
   The contract on the @racket[y] argument, given @racket[X]. For named data,
   @racket[y] is the name of one of its columns, a string or a symbol, with a
   numeric dtype when @racket[X] is a dataframe. Otherwise, @racket[y] is
   @racket[(response/c elem)], or a @racketmodname[math/array] array, as
   @racket[array->response] takes, or a Polars series, whose entries are
-  checked as they are read. The Gaussian procedures use
+  checked as they are read. With @racket[classes?], for the binomial and
+  multinomial families, the column, or the list or vector, may also hold
+  strings and symbols, or booleans: class labels. The Gaussian procedures use
   @racket[(response-for/c X real?)].
 
   @examples[#:eval ev
   (contract-first-order-passes? (response-for/c autos real?) "mpg")
   (contract-first-order-passes? (response-for/c autos real?) "weight")
-  (contract-first-order-passes? (response-for/c '((1.0) (2.0)) real?) '(3 4))]}
+  (contract-first-order-passes? (response-for/c '((1.0) (2.0)) real?) '(3 4))
+  (contract-first-order-passes? (response-for/c '((1.0) (2.0)) (or/c 0 1) #:classes? #t)
+                                '(yes no))]}
+
+@defproc[(survival-for/c [X data/c]) flat-contract?]{
+  The contract on a Cox fit's @racket[y], given @racket[X]. For named data, a
+  list of the names of two of its columns, the time, numeric, and then the
+  status, numeric or boolean; otherwise the times,
+  @racket[(response-for/c X (>/c 0))].
+
+  @examples[#:eval ev
+  (define survival (list (cons "x" '(1 2 3)) (cons "t" '(5.0 3.0 6.0)) (cons "d" '(1 0 1))))
+  (contract-first-order-passes? (survival-for/c survival) '("t" "d"))
+  (contract-first-order-passes? (survival-for/c survival) "t")]}
+
+@defproc[(statuses-for/c [X data/c] [y any/c]) flat-contract?]{
+  The contract on an unnamed Cox fit's @racket[statuses], given @racket[X] and
+  @racket[y]: @racket[(response-for/c X (or/c 0 1))], or booleans, @racket[#t]
+  for an event, as R's @tt{Surv} reads a logical status. Named data takes no
+  statuses argument, since @racket[y] names the status column.
+
+  @examples[#:eval ev
+  (contract-first-order-passes? (statuses-for/c '((1.0) (2.0)) '(5.0 3.0)) '(1 0))
+  (contract-first-order-passes? (statuses-for/c '((1.0) (2.0)) '(5.0 3.0)) '(#t #f))
+  (contract-first-order-passes? (statuses-for/c survival '("t" "d")) '(1 0 1))]}
+
+@defproc[(responses-for/c [X data/c]) flat-contract?]{
+  The contract on a multi-response fit's @racket[Y], given @racket[X]. For
+  named data, a non-empty list of distinct names of its numeric columns;
+  otherwise unnamed data with one column per response.
+
+  @examples[#:eval ev
+  (contract-first-order-passes? (responses-for/c autos) '("mpg" "hp"))
+  (contract-first-order-passes? (responses-for/c '((1.0) (2.0))) '((3.0 4.0) (5.0 6.0)))]}
 
 @defproc[(predictors-for/c [X data/c] [y any/c]) flat-contract?]{
   The contract on the @racket[#:predictors] argument, given @racket[X] and
   @racket[y]. For named data, a non-empty list of distinct names of its
-  columns, numeric ones for a dataframe, without the response @racket[y]; it
-  is required. For unnamed data, a design matrix with column names included,
-  only @racket[#f], since every column of @racket[X] is a predictor.
+  columns, numeric ones for a dataframe, without the response @racket[y], or
+  any of its names when it is a list; it is required. For unnamed data, a
+  design matrix with column names included, only @racket[#f], since every
+  column of @racket[X] is a predictor.
 
   @examples[#:eval ev
   (define car-predictors/c (predictors-for/c autos "mpg"))
@@ -1139,8 +1203,9 @@ The @tech{binomial family}: two-class logistic regression on 0/1 labels. See
   (logistic-result-coefficients fit)
   (logistic-result-dev-ratio fit)]}
 
-@defproc[(logistic-fit [X design-matrix/c]
-                       [y (response/c (or/c 0 1))]
+@defproc[(logistic-fit [X data/c]
+                       [y (response-for/c X (or/c 0 1) #:classes? #t)]
+                       [#:predictors predictors (predictors-for/c X y) #f]
                        [#:lambda lambda (>=/c 0)]
                        [#:alpha alpha (real-in 0 1) 1.0]
                        [#:standardize? standardize? boolean? #t]
@@ -1148,15 +1213,24 @@ The @tech{binomial family}: two-class logistic regression on 0/1 labels. See
                        [#:thresh thresh (>/c 0) 1e-7]
                        [#:max-iters max-iters exact-positive-integer? 100000])
          logistic-result?]{
-  Fits a two-class logistic elastic-net model of the labels @racket[y]. If a
-  class probability collapses, typically under perfect separation, the
-  @exnraise[exn:fail]; a larger @racket[lambda] usually fixes it.
+  Fits a two-class logistic elastic-net model of the labels @racket[y], 0 and
+  1, or two class labels (see @secref["ref-common-data"]), the second of
+  which is class 1. If a class probability collapses, typically under perfect
+  separation, the @exnraise[exn:fail]; a larger @racket[lambda] usually fixes
+  it.
 
   @examples[#:eval ev
-  (logistic-fit X y #:lambda 0.05)]}
+  (logistic-fit X y #:lambda 0.05)
+  (define cars+ (cons (cons "heavy" (for/list ([wt (in-vector (cdr (assoc "wt" mtcars)))])
+                                      (if (> wt 3.3) "yes" "no")))
+                      mtcars))
+  (define heavy-fit (logistic-fit cars+ "heavy" #:predictors '("mpg" "hp") #:lambda 0.05))
+  (logistic-predict heavy-fit (hash "mpg" '(15.0 30.0) "hp" '(200 70)))
+  (eval:error (logistic-fit iris "Species" #:lambda 0.05
+                            #:predictors '("Petal.Length" "Petal.Width")))]}
 
 @defproc[(logistic-predict-proba [fit logistic-result?]
-                                 [X design-matrix/c])
+                                 [X data/c])
          (listof (real-in 0 1))]{
   The class-1 probability @math{1 / (1 + exp(−(β₀ + xβ)))} for each row of
   @racket[X]: @racket[predict] with @racket[#:type 'response].
@@ -1165,11 +1239,12 @@ The @tech{binomial family}: two-class logistic regression on 0/1 labels. See
   (logistic-predict-proba fit '((2.0 5.0 2.0) (5.0 2.0 2.0)))]}
 
 @defproc[(logistic-predict [fit logistic-result?]
-                           [X design-matrix/c]
+                           [X data/c]
                            [#:threshold threshold (real-in 0 1) 0.5])
-         (listof (or/c 0 1))]{
+         (listof (or/c 0 1 string?))]{
   Hard labels: @racket[1] where @racket[logistic-predict-proba] is at least
-  @racket[threshold], otherwise @racket[0]. At the default threshold this is
+  @racket[threshold], otherwise @racket[0], or the classes' labels for a fit
+  of a response of labels. At the default threshold this is
   @racket[predict] with @racket[#:type 'class], except for a row whose
   probability is exactly @racket[0.5], which R and @racket[predict] label
   @racket[0].
@@ -1200,8 +1275,9 @@ labels. See @secref["ex-multinomial"].
   (define fit (multinomial-fit X y #:lambda 0.05))
   (multinomial-result-coefficients fit)]}
 
-@defproc[(multinomial-fit [X design-matrix/c]
-                          [y (response/c (and/c integer? (>=/c 0)))]
+@defproc[(multinomial-fit [X data/c]
+                          [y (response-for/c X (and/c integer? (>=/c 0)) #:classes? #t)]
+                          [#:predictors predictors (predictors-for/c X y) #f]
                           [#:lambda lambda (>=/c 0)]
                           [#:alpha alpha (real-in 0 1) 1.0]
                           [#:standardize? standardize? boolean? #t]
@@ -1212,15 +1288,19 @@ labels. See @secref["ex-multinomial"].
   Fits a @math{K}-class multinomial elastic-net model. The labels @racket[y]
   are integers, exact or inexact as in an @racket[flvector], and must cover
   @racket[0] to @math{K−1} with every class present; otherwise the
-  @exnraise[exn:fail]. As with @racket[logistic-fit], a collapsed class
-  probability raises @racket[exn:fail].
+  @exnraise[exn:fail]. They may instead be class labels, at least two (see
+  @secref["ref-common-data"]). As with @racket[logistic-fit], a collapsed
+  class probability raises @racket[exn:fail].
 
   @examples[#:eval ev
   (multinomial-result-intercepts (multinomial-fit X y #:lambda 0.05))
+  (multinomial-result-intercepts (multinomial-fit X '(a a b b c c) #:lambda 0.05))
+  (multinomial-result-intercepts
+   (multinomial-fit iris "Species" #:predictors '("Petal.Length" "Petal.Width") #:lambda 0.05))
   (eval:error (multinomial-fit X '(0 0 2 2 2 2) #:lambda 0.05))]}
 
 @defproc[(multinomial-predict-proba [fit multinomial-result?]
-                                    [X design-matrix/c])
+                                    [X data/c])
          (listof (listof (real-in 0 1)))]{
   The softmax class probabilities for each row of @racket[X]: one list of
   @math{K} entries, summing to 1, per row. This is @racket[predict] with
@@ -1230,10 +1310,11 @@ labels. See @secref["ex-multinomial"].
   (multinomial-predict-proba fit '((1.5 1.0) (3.5 5.5)))]}
 
 @defproc[(multinomial-predict [fit multinomial-result?]
-                              [X design-matrix/c])
-         (listof exact-nonnegative-integer?)]{
-  The most probable class for each row of @racket[X]: @racket[predict] with
-  @racket[#:type 'class]. On a tie the lowest class wins.
+                              [X data/c])
+         (listof (or/c exact-nonnegative-integer? string?))]{
+  The most probable class for each row of @racket[X], or its label for a fit
+  of a response of labels: @racket[predict] with @racket[#:type 'class]. On a
+  tie the lowest class wins.
 
   @examples[#:eval ev
   (multinomial-predict fit '((1.5 1.0) (5.5 1.0) (3.5 5.5)))]}
@@ -1260,26 +1341,36 @@ intercept, and so no @racket[#:intercept?] keyword. See @secref["ex-cox"].
   (define fit (cox-fit X times statuses #:lambda 0.1))
   (cox-result-coefficients fit)]}
 
-@defproc[(cox-fit [X design-matrix/c]
-                  [times (response/c (>/c 0))]
-                  [statuses (response/c (or/c 0 1))]
+@defproc[(cox-fit [X data/c]
+                  [y (survival-for/c X)]
+                  [statuses (statuses-for/c X y) @#,elem{none}]
+                  [#:predictors predictors (predictors-for/c X y) #f]
                   [#:lambda lambda (>=/c 0)]
                   [#:alpha alpha (real-in 0 1) 1.0]
                   [#:standardize? standardize? boolean? #t]
                   [#:thresh thresh (>/c 0) 1e-7]
                   [#:max-iters max-iters exact-positive-integer? 100000])
          cox-result?]{
-  Fits a Cox proportional-hazards elastic-net model. @racket[times] are
-  positive follow-up times and @racket[statuses] the matching event indicators:
-  @racket[1] for an observed event, @racket[0] for right-censoring. If no
-  status is @racket[1], the @exnraise[exn:fail].
+  Fits a Cox proportional-hazards elastic-net model of positive follow-up
+  times and the matching event indicators: @racket[1] or @racket[#t] for an
+  observed event, @racket[0] or @racket[#f] for right-censoring. For unnamed data, @racket[y] is the times
+  and @racket[statuses], then required, the indicators; for named data,
+  @racket[y] names the time and status columns, and there is no
+  @racket[statuses] argument. If no status is @racket[1], the
+  @exnraise[exn:fail].
 
   @examples[#:eval ev
   (cox-fit X times statuses #:lambda 0.5)
+  (define patients (list (cons "age" '(50 61 45 70 58 66 39 72))
+                         (cons "dose" '(1.0 2.0 1.0 2.0 1.0 2.0 1.0 2.0))
+                         (cons "months" times)
+                         (cons "died" statuses)))
+  (cox-fit patients '("months" "died") #:predictors '("age" "dose") #:lambda 0.05)
+  (eval:error (cox-fit patients '("months") #:predictors '("age") #:lambda 0.5))
   (eval:error (cox-fit X times '(0 0 0 0 0 0 0 0) #:lambda 0.1))]}
 
 @defproc[(cox-linear-predictor [fit cox-result?]
-                               [X design-matrix/c])
+                               [X data/c])
          (listof real?)]{
   The log relative hazard @math{xβ} for each row of @racket[X]:
   @racket[predict] with its defaults.
@@ -1288,7 +1379,7 @@ intercept, and so no @racket[#:intercept?] keyword. See @secref["ex-cox"].
   (cox-linear-predictor fit '((1.0 1.0) (3.0 1.0)))]}
 
 @defproc[(cox-relative-risk [fit cox-result?]
-                            [X design-matrix/c])
+                            [X data/c])
          (listof (>/c 0))]{
   The relative risk @math{exp(xβ)} for each row of @racket[X]: the factor by
   which the row's hazard exceeds the baseline hazard. This is @racket[predict]
@@ -1319,8 +1410,9 @@ The @tech{Poisson family}: counts with a log link. See @secref["ex-poisson"].
   (poisson-result-intercept fit)
   (poisson-result-coefficients fit)]}
 
-@defproc[(poisson-fit [X design-matrix/c]
-                      [y (response/c (>=/c 0))]
+@defproc[(poisson-fit [X data/c]
+                      [y (response-for/c X (>=/c 0))]
+                      [#:predictors predictors (predictors-for/c X y) #f]
                       [#:lambda lambda (>=/c 0)]
                       [#:alpha alpha (real-in 0 1) 1.0]
                       [#:standardize? standardize? boolean? #t]
@@ -1335,10 +1427,11 @@ The @tech{Poisson family}: counts with a log link. See @secref["ex-poisson"].
 
   @examples[#:eval ev
   (poisson-fit X y #:lambda 0.5)
+  (poisson-fit mtcars "carb" #:predictors '("hp" "wt") #:lambda 0.1)
   (eval:error (poisson-fit X '(0 0 0 0 0 0 0 0) #:lambda 0.5))]}
 
 @defproc[(poisson-predict-mean [fit poisson-result?]
-                               [X design-matrix/c])
+                               [X data/c])
          (listof (>/c 0))]{
   The fitted mean @math{exp(β₀ + xβ)} for each row of @racket[X]:
   @racket[predict] with @racket[#:type 'response].
@@ -1369,8 +1462,9 @@ jointly under a grouped penalty. See @secref["ex-mgaussian"].
   (mgaussian-result-intercepts fit)
   (mgaussian-result-coefficients fit)]}
 
-@defproc[(mgaussian-fit [X design-matrix/c]
-                        [Y design-matrix/c]
+@defproc[(mgaussian-fit [X data/c]
+                        [Y (responses-for/c X)]
+                        [#:predictors predictors (predictors-for/c X Y) #f]
                         [#:lambda lambda (>=/c 0)]
                         [#:alpha alpha (real-in 0 1) 1.0]
                         [#:standardize? standardize? boolean? #t]
@@ -1379,7 +1473,8 @@ jointly under a grouped penalty. See @secref["ex-mgaussian"].
                         [#:max-iters max-iters exact-positive-integer? 100000])
          mgaussian-result?]{
   Fits a multi-response Gaussian elastic-net model. @racket[Y] is a matrix with
-  one row per observation and one column per response. With @racket[alpha]
+  one row per observation and one column per response, or, for named data, the
+  names of the response columns. With @racket[alpha]
   above zero, the grouped lasso keeps or drops each predictor for every
   response at once. A constant column is fitted by its intercept alone, but
   when every column is constant (all zero, when @racket[intercept?] is
@@ -1387,10 +1482,12 @@ jointly under a grouped penalty. See @secref["ex-mgaussian"].
   @racket[elnet-fit].
 
   @examples[#:eval ev
-  (mgaussian-fit X Y #:lambda 0.5)]}
+  (mgaussian-fit X Y #:lambda 0.5)
+  (mgaussian-result-coefficients
+   (mgaussian-fit mtcars '("mpg" "qsec") #:predictors '("wt" "hp") #:lambda 0.5))]}
 
 @defproc[(mgaussian-predict [fit mgaussian-result?]
-                            [X design-matrix/c])
+                            [X data/c])
          (listof (listof real?))]{
   The predictions @math{a0_r + xβ_r} for each row of @racket[X]: one list per
   row, with one entry per response. This is @racket[predict] with its
@@ -1514,8 +1611,9 @@ These are R's @tt{glmnet.control} defaults (@tt{fdev = 1e-5},
   (glmnet-path-df (elnet-path autos "mpg" #:predictors '("wt" "hp") #:nlambda 5))
   (eval:error (elnet-path X y #:lambda '(0.1) #:max-iters 1))]}
 
-@defproc[(logistic-path [X design-matrix/c]
-                        [y (response/c (or/c 0 1))]
+@defproc[(logistic-path [X data/c]
+                        [y (response-for/c X (or/c 0 1) #:classes? #t)]
+                        [#:predictors predictors (predictors-for/c X y) #f]
                         [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) pair?)) #f]
                         [#:nlambda nlambda exact-positive-integer? 100]
                         [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>=/c 0) (</c 1))) #f]
@@ -1528,10 +1626,12 @@ These are R's @tt{glmnet.control} defaults (@tt{fdev = 1e-5},
   The binomial path, as @racket[logistic-fit] fits one point of it.
 
   @examples[#:eval ev
-  (glmnet-path-df (logistic-path X '(0 0 0 1 1 1) #:lambda '(0.3 0.1 0.03)))]}
+  (glmnet-path-df (logistic-path X '(0 0 0 1 1 1) #:lambda '(0.3 0.1 0.03)))
+  (glmnet-path-df (logistic-path cars+ "heavy" #:predictors '("mpg" "hp") #:nlambda 5))]}
 
-@defproc[(multinomial-path [X design-matrix/c]
-                           [y (response/c (and/c integer? (>=/c 0)))]
+@defproc[(multinomial-path [X data/c]
+                           [y (response-for/c X (and/c integer? (>=/c 0)) #:classes? #t)]
+                           [#:predictors predictors (predictors-for/c X y) #f]
                            [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) pair?)) #f]
                            [#:nlambda nlambda exact-positive-integer? 100]
                            [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>=/c 0) (</c 1))) #f]
@@ -1545,11 +1645,14 @@ These are R's @tt{glmnet.control} defaults (@tt{fdev = 1e-5},
 
   @examples[#:eval ev
   (define mpath (multinomial-path X '(0 0 1 1 2 2) #:lambda '(0.3 0.03)))
-  (vector-ref (glmnet-path-coefficients mpath) 1)]}
+  (vector-ref (glmnet-path-coefficients mpath) 1)
+  (glmnet-path-df (multinomial-path iris "Species" #:nlambda 5
+                                    #:predictors '("Petal.Length" "Petal.Width")))]}
 
-@defproc[(cox-path [X design-matrix/c]
-                   [times (response/c (>/c 0))]
-                   [statuses (response/c (or/c 0 1))]
+@defproc[(cox-path [X data/c]
+                   [y (survival-for/c X)]
+                   [statuses (statuses-for/c X y) @#,elem{none}]
+                   [#:predictors predictors (predictors-for/c X y) #f]
                    [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) pair?)) #f]
                    [#:nlambda nlambda exact-positive-integer? 100]
                    [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>=/c 0) (</c 1))) #f]
@@ -1564,10 +1667,13 @@ These are R's @tt{glmnet.control} defaults (@tt{fdev = 1e-5},
   @examples[#:eval ev
   (define cpath (cox-path X '(12.0 10.0 8.0 6.0 4.0 3.0) '(0 1 1 1 1 1)
                           #:lambda '(0.5 0.05)))
-  (glmnet-path-coefficients cpath)]}
+  (glmnet-path-coefficients cpath)
+  (glmnet-path-df (cox-path patients '("months" "died") #:predictors '("age" "dose")
+                            #:lambda '(0.5 0.05)))]}
 
-@defproc[(poisson-path [X design-matrix/c]
-                       [y (response/c (>=/c 0))]
+@defproc[(poisson-path [X data/c]
+                       [y (response-for/c X (>=/c 0))]
+                       [#:predictors predictors (predictors-for/c X y) #f]
                        [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) pair?)) #f]
                        [#:nlambda nlambda exact-positive-integer? 100]
                        [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>=/c 0) (</c 1))) #f]
@@ -1580,10 +1686,12 @@ These are R's @tt{glmnet.control} defaults (@tt{fdev = 1e-5},
   The Poisson path, as @racket[poisson-fit] fits one point of it.
 
   @examples[#:eval ev
-  (glmnet-path-df (poisson-path X '(1 2 2 3 5 8) #:lambda '(0.5 0.05)))]}
+  (glmnet-path-df (poisson-path X '(1 2 2 3 5 8) #:lambda '(0.5 0.05)))
+  (glmnet-path-df (poisson-path mtcars "carb" #:predictors '("hp" "wt") #:nlambda 5))]}
 
-@defproc[(mgaussian-path [X design-matrix/c]
-                         [Y design-matrix/c]
+@defproc[(mgaussian-path [X data/c]
+                         [Y (responses-for/c X)]
+                         [#:predictors predictors (predictors-for/c X Y) #f]
                          [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) pair?)) #f]
                          [#:nlambda nlambda exact-positive-integer? 100]
                          [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>=/c 0) (</c 1))) #f]
@@ -1600,7 +1708,8 @@ These are R's @tt{glmnet.control} defaults (@tt{fdev = 1e-5},
   (define gpath (mgaussian-path X '((3.0 9.0) (5.0 8.0) (7.0 7.0)
                                     (9.0 6.0) (11.0 5.0) (13.0 4.0))
                                 #:lambda '(1.0 0.1)))
-  (glmnet-path-intercepts gpath)]}
+  (glmnet-path-intercepts gpath)
+  (glmnet-path-df (mgaussian-path mtcars '("mpg" "qsec") #:predictors '("wt" "hp") #:nlambda 5))]}
 
 @section[#:tag "ref-cv"]{Cross-validation}
 
@@ -1619,7 +1728,8 @@ it passes on to each fit, and these:
        @racket[#:fold-ids] is given.}
  @item{@racket[#:fold-ids], R's @tt{foldid}, assigns the observations to folds:
        one fold id per row of @racket[X], counting from 0, in a list, vector,
-       @racket[flvector] or @racket[f64vector], as a response can be. Every id
+       @racket[flvector], @racket[f64vector], @racketmodname[math/array]
+       array or Polars series, as a response can be. Every id
        from 0 to the largest must appear, and there must be at least 3 (see
        @racket[fold-ids/c]).}
  @item{@racket[#:grouped?], R's @tt{grouped}, computes the error and its
@@ -1764,8 +1874,9 @@ carry the signal:
   (define halves (for/list ([i (in-range 60)]) (modulo i 2)))
   (eval:error (elnet-cv X60 y60 #:fold-ids halves))]}
 
-@defproc[(logistic-cv [X design-matrix/c]
-                      [y (response/c (or/c 0 1))]
+@defproc[(logistic-cv [X data/c]
+                      [y (response-for/c X (or/c 0 1) #:classes? #t)]
+                      [#:predictors predictors (predictors-for/c X y) #f]
                       [#:type-measure type-measure (or/c 'deviance 'class 'auc 'mse 'mae) 'deviance]
                       [#:nfolds nfolds (and/c exact-integer? (>=/c 3)) 10]
                       [#:fold-ids fold-ids fold-ids/c #f]
@@ -1790,10 +1901,15 @@ carry the signal:
   @examples[#:eval ev
   (define labels (for/list ([v (in-list y60)]) (if (> v 1.0) 1 0)))
   (logistic-cv X60 labels #:type-measure 'class)
-  (logistic-cv X60 labels #:type-measure 'auc #:nfolds 5)]}
+  (logistic-cv X60 labels #:type-measure 'auc #:nfolds 5)
+  (define heavy-cv
+    (logistic-cv cars+ "heavy" #:predictors '("mpg" "hp")
+                 #:fold-ids (for/list ([i (in-range 32)]) (modulo i 4))))
+  (predict heavy-cv (hash "mpg" '(15.0 30.0) "hp" '(200 70)) #:type 'class)]}
 
-@defproc[(multinomial-cv [X design-matrix/c]
-                         [y (response/c (and/c integer? (>=/c 0)))]
+@defproc[(multinomial-cv [X data/c]
+                         [y (response-for/c X (and/c integer? (>=/c 0)) #:classes? #t)]
+                         [#:predictors predictors (predictors-for/c X y) #f]
                          [#:type-measure type-measure (or/c 'deviance 'class 'mse 'mae) 'deviance]
                          [#:nfolds nfolds (and/c exact-integer? (>=/c 3)) 10]
                          [#:fold-ids fold-ids fold-ids/c #f]
@@ -1815,11 +1931,14 @@ carry the signal:
   (define classes
     (for/list ([v (in-list y60)])
       (cond [(< v -0.5) 0] [(< v 2.5) 1] [else 2])))
-  (multinomial-cv X60 classes #:type-measure 'class)]}
+  (multinomial-cv X60 classes #:type-measure 'class)
+  (multinomial-cv iris "Species" #:predictors '("Petal.Length" "Petal.Width")
+                  #:fold-ids (for/list ([i (in-range 150)]) (modulo i 3)) #:type-measure 'class)]}
 
-@defproc[(cox-cv [X design-matrix/c]
-                 [times (response/c (>/c 0))]
-                 [statuses (response/c (or/c 0 1))]
+@defproc[(cox-cv [X data/c]
+                 [y (survival-for/c X)]
+                 [statuses (statuses-for/c X y) @#,elem{none}]
+                 [#:predictors predictors (predictors-for/c X y) #f]
                  [#:type-measure type-measure (or/c 'deviance 'C) 'deviance]
                  [#:nfolds nfolds (and/c exact-integer? (>=/c 3)) 10]
                  [#:fold-ids fold-ids fold-ids/c #f]
@@ -1851,6 +1970,9 @@ carry the signal:
       (if (zero? (modulo i 5)) 0 1)))
   (cox-cv X60 times statuses)
   (cox-cv X60 times statuses #:type-measure 'C)
+  (define survival60 (hash "time" times "status" statuses
+                           "x1" (map car X60) "x2" (map cadr X60)))
+  (cox-cv survival60 '("time" "status") #:predictors '("x1" "x2"))
   (define thirds (for/list ([i (in-range 60)]) (modulo i 3)))
   (define fold-0-censored
     (for/list ([i (in-range 60)])
@@ -1858,8 +1980,9 @@ carry the signal:
   (eval:error
    (cox-cv X60 times fold-0-censored #:fold-ids thirds #:grouped? #f))]}
 
-@defproc[(poisson-cv [X design-matrix/c]
-                     [y (response/c (>=/c 0))]
+@defproc[(poisson-cv [X data/c]
+                     [y (response-for/c X (>=/c 0))]
+                     [#:predictors predictors (predictors-for/c X y) #f]
                      [#:type-measure type-measure (or/c 'deviance 'mse 'mae) 'deviance]
                      [#:nfolds nfolds (and/c exact-integer? (>=/c 3)) 10]
                      [#:fold-ids fold-ids fold-ids/c #f]
@@ -1881,10 +2004,13 @@ carry the signal:
   (define counts
     (for/list ([v (in-list y60)])
       (inexact->exact (round (exp (* 0.3 v))))))
-  (poisson-cv X60 counts)]}
+  (poisson-cv X60 counts)
+  (poisson-cv (hash "count" counts "x1" (map car X60) "x2" (map cadr X60)) "count"
+              #:predictors '("x1" "x2"))]}
 
-@defproc[(mgaussian-cv [X design-matrix/c]
-                       [Y design-matrix/c]
+@defproc[(mgaussian-cv [X data/c]
+                       [Y (responses-for/c X)]
+                       [#:predictors predictors (predictors-for/c X Y) #f]
                        [#:type-measure type-measure (or/c 'mse 'deviance 'mae) 'mse]
                        [#:nfolds nfolds (and/c exact-integer? (>=/c 3)) 10]
                        [#:fold-ids fold-ids fold-ids/c #f]
@@ -1905,7 +2031,9 @@ carry the signal:
   (define Y60
     (for/list ([row (in-list X60)] [v (in-list y60)])
       (list v (- (list-ref row 1) (list-ref row 3)))))
-  (mgaussian-cv X60 Y60)]}
+  (mgaussian-cv X60 Y60)
+  (mgaussian-cv mtcars '("mpg" "qsec") #:predictors '("wt" "hp")
+                #:fold-ids (for/list ([i (in-range 32)]) (modulo i 4)))]}
 
 @defproc[(random-fold-ids [n exact-positive-integer?]
                           [#:nfolds nfolds exact-positive-integer? 10])
@@ -1933,8 +2061,9 @@ carry the signal:
   The contract on the @racket[#:fold-ids] argument of every cross-validation
   procedure. It accepts @racket[#f], for folds drawn by
   @racket[random-fold-ids], or fold ids: a non-empty list, vector,
-  @racket[flvector] or @racket[f64vector] of non-negative integers, exact or,
-  as in an @racket[flvector], inexact, that use every fold from 0 to the
+  @racket[flvector], @racket[f64vector], @racketmodname[math/array] array or
+  Polars series of non-negative integers, exact or, as in an @racket[flvector],
+  inexact, that use every fold from 0 to the
   largest id, of which there are at least 3. A violation says which fold is
   missing. The procedures check the ids again on their own copy, with one id
   per observation.
@@ -2710,13 +2839,16 @@ family:
 @defproc[(glmnet-model-predictor-names [model glmnet-model?])
          (or/c #f (listof string?))]{
   The names of @racket[model]'s predictors, in the order of its coefficients,
-  or @racket[#f] if it does not name them. A @racket[formula-model] names them;
-  the results of the family procedures do not. When a model names its
-  predictors, @racket[coef] keys its coefficients by these names and
+  or @racket[#f] if it does not name them. A @racket[formula-model] names them,
+  and so does a fit from named data (see @secref["ref-common-data"]), which
+  remembers them; a fit from unnamed data does not. When a model, such as a
+  formula model, implements this method of @racket[gen:glmnet-model],
+  @racket[coef] keys its coefficients by these names and
   @racket[predict] reads the columns with these names from a table, except
   that a formula model builds its predictors, such as the interaction
   @racket["a:b"] or the transform @racket["(log a)"], from the table's
-  columns. The names must be distinct, one
+  columns; the names a fit from named data remembers leave @racket[coef]'s
+  layout as it is. The names must be distinct, one
   per predictor of the model's path; @racket[coef] and @racket[predict] raise
   an error for a model whose names are not.
 
@@ -2727,20 +2859,34 @@ family:
                        (cons "b" (map cadr X)) (cons "c" (map caddr X)))
                  #:lambda 0.05))
   (glmnet-model-predictor-names named-model)
+  (glmnet-model-predictor-names car-fit)
   (glmnet-model-predictor-names fit)]}
 
 @defproc[(glmnet-model-response-names [model glmnet-model?])
          (or/c #f (listof string?))]{
   The names of @racket[model]'s response columns, or @racket[#f] if it does not
   name them. For a @racket[formula-model], they are the columns of its
-  formula's response: for the Cox family the time and status columns. For the
-  multi-response family, @racket[coef] keys the coefficients of each response
-  by its name, and raises an error for a model that does not name each
-  response once.
+  formula's response: for the Cox family the time and status columns. For a
+  multi-response formula model, @racket[coef] keys the coefficients of each
+  response by its name, and raises an error for a model that does not name
+  each response once. A multi-response fit from named data remembers its
+  responses' names, which leave @racket[coef]'s layout as it is.
 
   @examples[#:eval ev
   (glmnet-model-response-names named-model)
   (glmnet-model-response-names path)]}
+
+@defproc[(glmnet-model-class-labels [model glmnet-model?])
+         (or/c #f (listof string?))]{
+  The labels of a binomial or multinomial @racket[model]'s classes, in the
+  order of the class indices, or @racket[#f] if it does not name them. A fit
+  of a response of strings, symbols or booleans, a formula model's included,
+  names them (see @secref["ref-common-data"]), and @racket[predict] with
+  @racket[#:type 'class] returns them; a fit of class numbers does not.
+
+  @examples[#:eval ev
+  (glmnet-model-class-labels flowers)
+  (glmnet-model-class-labels (multinomial-fit X '(0 1 2 0 1 2) #:lambda 0.05))]}
 
 @defproc[(deviance-ratio [model glmnet-model?]) (or/c real? (vectorof real?))]{
   The fraction of null deviance explained, which is @math{R²} for the Gaussian
@@ -2784,9 +2930,10 @@ family:
          (list "Poisson"                           @math{log μ = η}                  @math{μ = exp(η)}             "---"))]
 
   @racket['class] is an error for the families without classes. A class is its
-  label, @racket[0], @racket[1], …, except for a @racket[formula-model] whose
-  response holds strings, symbols or booleans, whose classes are the labels
-  of its levels, such as @racket["setosa"] (see @racket[formula-fit]). For one
+  label, @racket[0], @racket[1], …, except for a @racket[formula-model] or a
+  fit whose response holds strings, symbols or booleans, whose classes are
+  the labels of its levels, such as @racket["setosa"] (see
+  @racket[formula-fit] and @secref["ref-common-data"]). For one
   @math{λ}, the result has one entry per row of @racket[X]: a real, a class,
   or, for the multinomial and multi-response families, a list with one entry
   per class or response. When @racket[lambda] is a list, the result is a

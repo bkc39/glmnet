@@ -4,15 +4,19 @@
 ;; raw FFI.
 ;;
 ;; `logistic-fit` is the binomial-family analogue of `elnet-fit`: the same
-;; #:alpha / #:lambda knobs, but the response is a 0/1 class label and the fit
-;; models the log-odds of class 1. As with the Gaussian models, #:alpha 1.0 is
-;; the lasso (sparse) logistic, #:alpha 0.0 the ridge logistic, and values in
-;; between the elastic net. `logistic-predict-proba` / `logistic-predict` turn a
-;; fit plus new predictors into class-1 probabilities and hard 0/1 labels.
+;; #:alpha / #:lambda knobs, but the response is a 0/1 class label, or one of
+;; two labels (strings, symbols or booleans; the second is class 1), and the
+;; fit models the log-odds of class 1. As with the Gaussian models, #:alpha
+;; 1.0 is the lasso (sparse) logistic, #:alpha 0.0 the ridge logistic, and
+;; values in between the elastic net. `logistic-predict-proba` /
+;; `logistic-predict` turn a fit plus new predictors into class-1
+;; probabilities and hard labels.
 
 (require racket/contract
          ffi/vector
          "marshal.rkt"
+         (only-in "input.rkt" data/c response-for/c)
+         (submod "input.rkt" support)
          "model.rkt"
          (submod "model.rkt" support)
          "../foreign/raw/lognet.rkt"
@@ -27,47 +31,50 @@
  (struct-out logistic-result)
  (contract-out
   [logistic-fit
-   (->* (design-matrix/c (response/c label/c) #:lambda (>=/c 0))
-        (#:alpha (real-in 0 1)
-         #:standardize? boolean?
-         #:intercept? boolean?
-         #:thresh (>/c 0)
-         #:max-iters exact-positive-integer?)
-        logistic-result?)]
+   (fit/c (response-for/c X (or/c 0 1) #:classes? #t)
+          (#:lambda (>=/c 0))
+          (#:alpha (real-in 0 1)
+           #:standardize? boolean?
+           #:intercept? boolean?
+           #:thresh (>/c 0)
+           #:max-iters exact-positive-integer?)
+          logistic-result?)]
   [logistic-predict-proba
-   (-> logistic-result? design-matrix/c (listof (real-in 0 1)))]
+   (-> logistic-result? data/c (listof (real-in 0 1)))]
   [logistic-predict
-   (->* (logistic-result? design-matrix/c) (#:threshold (real-in 0 1))
-        (listof (or/c 0 1)))]))
+   (->* (logistic-result? data/c) (#:threshold (real-in 0 1))
+        (listof (or/c 0 1 string?)))]))
 
 (provide
  (contract-out
   [logistic-path
-   (->* (design-matrix/c (response/c label/c))
-           (#:lambda lambda-sequence/c
-            #:nlambda exact-positive-integer?
-            #:lambda-min-ratio lambda-min-ratio/c
-            #:alpha (real-in 0 1)
-            #:standardize? boolean?
-            #:intercept? boolean?
-            #:thresh (>/c 0)
-            #:max-iters exact-positive-integer?)
-        glmnet-path?)]
+   (fit/c (response-for/c X (or/c 0 1) #:classes? #t)
+          ()
+          (#:lambda lambda-sequence/c
+           #:nlambda exact-positive-integer?
+           #:lambda-min-ratio lambda-min-ratio/c
+           #:alpha (real-in 0 1)
+           #:standardize? boolean?
+           #:intercept? boolean?
+           #:thresh (>/c 0)
+           #:max-iters exact-positive-integer?)
+          glmnet-path?)]
   [logistic-cv
-   (->* (design-matrix/c (response/c label/c))
-        (#:type-measure (or/c 'deviance 'class 'auc 'mse 'mae)
-         #:nfolds nfolds/c
-         #:fold-ids fold-ids/c
-         #:grouped? boolean?
-         #:lambda cv-lambda-sequence/c
-         #:nlambda exact-positive-integer?
-         #:lambda-min-ratio lambda-min-ratio/c
-         #:alpha (real-in 0 1)
-         #:standardize? boolean?
-         #:intercept? boolean?
-         #:thresh (>/c 0)
-         #:max-iters exact-positive-integer?)
-        glmnet-cv?)]))
+   (fit/c (response-for/c X (or/c 0 1) #:classes? #t)
+          ()
+          (#:type-measure (or/c 'deviance 'class 'auc 'mse 'mae)
+           #:nfolds nfolds/c
+           #:fold-ids fold-ids/c
+           #:grouped? boolean?
+           #:lambda cv-lambda-sequence/c
+           #:nlambda exact-positive-integer?
+           #:lambda-min-ratio lambda-min-ratio/c
+           #:alpha (real-in 0 1)
+           #:standardize? boolean?
+           #:intercept? boolean?
+           #:thresh (>/c 0)
+           #:max-iters exact-positive-integer?)
+          glmnet-cv?)]))
 
 ;; A fitted two-class logistic model. `coefficients` is a vector of length ni on
 ;; the original predictor scale; `intercept` and the coefficients are on the
@@ -112,16 +119,16 @@
 ;; --- public API ------------------------------------------------------------
 
 (define (logistic-fit X y
+                      #:predictors [predictors #f]
                       #:lambda lambda
                       #:alpha [alpha 1.0]
                       #:standardize? [standardize? #t]
                       #:intercept? [intercept? #t]
                       #:thresh [thresh 1e-7]
                       #:max-iters [max-iters 100000])
-  (define x (as-design-matrix X 'logistic-fit "X"))
+  (define-values (x yv names classes) (class-fit-input 'logistic-fit X y predictors label/c 'binomial))
   (define no (design-matrix-nrows x))
   (define ni (design-matrix-ncols x))
-  (define yv (as-response y no 'logistic-fit "y" label/c))
   (define beta (make-f64vector ni 0.0))
   (define-values (intercept dev-ratio lam nlp jerr)
     (glmnet-lognet-solo/raw (exact->inexact alpha) no ni (design-matrix-data x) yv
@@ -132,7 +139,8 @@
                             max-iters
                             beta))
   (check-logistic-jerr jerr 'logistic-fit)
-  (logistic-result intercept (unpack-vector beta ni) dev-ratio lam nlp))
+  (attach-data-names (logistic-result intercept (unpack-vector beta ni) dev-ratio lam nlp)
+                        names #:classes classes))
 
 ;; --- prediction ------------------------------------------------------------
 
@@ -140,14 +148,17 @@
 (define (logistic-predict-proba result X)
   (predict-as 'logistic-predict-proba result X 'response))
 
-;; Hard 0/1 prediction: class 1 when P(y=1) >= threshold (default 0.5).
+;; Hard prediction: class 1 when P(y=1) >= threshold (default 0.5), else
+;; class 0, by label for a fit that names its classes.
 (define (logistic-predict result X #:threshold [threshold 0.5])
+  (define labels (or (model-class-labels result) '(0 1)))
   (for/list ([p (in-list (predict-as 'logistic-predict result X 'response))])
-    (if (>= p threshold) 1 0)))
+    (if (>= p threshold) (cadr labels) (car labels))))
 
 ;; --- regularization path (#10) ---------------------------------------------
 
 (define (logistic-path X y
+                       #:predictors [predictors #f]
                        #:lambda [lambda #f]
                        #:nlambda [nlambda 100]
                        #:lambda-min-ratio [lambda-min-ratio #f]
@@ -156,10 +167,10 @@
                        #:intercept? [intercept? #t]
                        #:thresh [thresh 1e-7]
                        #:max-iters [max-iters 100000])
-  (define x (as-design-matrix X 'logistic-path "X"))
+  (define-values (x yv names classes)
+    (class-fit-input 'logistic-path X y predictors label/c 'binomial))
   (define no (design-matrix-nrows x))
   (define ni (design-matrix-ncols x))
-  (define yv (as-response y no 'logistic-path "y" label/c))
   (define-values (nlam flmin ulam)
     (path-lambdas lambda nlambda lambda-min-ratio no ni))
   (define a0 (make-f64vector nlam 0.0))
@@ -174,13 +185,16 @@
                             a0 beta dev alm))
   (check-logistic-jerr jerr 'logistic-path lmu)
   (define coefficients (unpack-columns beta ni lmu))
-  (glmnet-path 'binomial (finish-lambdas alm lmu (not lambda))
-               (unpack-vector a0 lmu) coefficients (unpack-vector dev lmu)
-               (count-nonzero coefficients) nlp))
+  (attach-data-names
+   (glmnet-path 'binomial (finish-lambdas alm lmu (not lambda))
+                (unpack-vector a0 lmu) coefficients (unpack-vector dev lmu)
+                (count-nonzero coefficients) nlp)
+   names #:classes classes))
 
 ;; --- cross-validation (#27) ------------------------------------------------
 
 (define (logistic-cv X y
+                     #:predictors [predictors #f]
                      #:type-measure [measure 'deviance]
                      #:nfolds [nfolds 10]
                      #:fold-ids [fold-ids #f]
@@ -193,16 +207,18 @@
                      #:intercept? [intercept? #t]
                      #:thresh [thresh 1e-7]
                      #:max-iters [max-iters 100000])
-  (define x (as-design-matrix X 'logistic-cv "X"))
-  (define ys
-    (response->vector (as-response y (design-matrix-nrows x) 'logistic-cv "y" label/c)))
+  (define-values (x yv names classes)
+    (class-fit-input 'logistic-cv X y predictors label/c 'binomial))
+  (define ys (response->vector yv))
   (check-both-classes ys 'logistic-cv)
   (define (fit x y)
     (logistic-path x y
                    #:lambda lambda #:nlambda nlambda #:lambda-min-ratio lambda-min-ratio
                    #:alpha alpha #:standardize? standardize? #:intercept? intercept?
                    #:thresh thresh #:max-iters max-iters))
-  (define (fit-all) (fit x ys))
+  (define (fit-all) (attach-data-names (fit x ys) names #:classes classes))
   (define (fit-rows rows) (fit (design-matrix-select-rows x rows) (select ys rows)))
-  (cross-validate 'logistic-cv x ys fit-all fit-rows
-                  #:measure measure #:nfolds nfolds #:fold-ids fold-ids #:grouped? grouped?))
+  (attach-data-names
+   (cross-validate 'logistic-cv x ys fit-all fit-rows
+                   #:measure measure #:nfolds nfolds #:fold-ids fold-ids #:grouped? grouped?)
+   names #:classes classes))

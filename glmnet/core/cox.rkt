@@ -14,6 +14,8 @@
          racket/flonum
          ffi/vector
          "marshal.rkt"
+         (only-in "input.rkt" data/c survival-for/c statuses-for/c)
+         (submod "input.rkt" support)
          "model.rkt"
          (submod "model.rkt" support)
          "../foreign/raw/coxnet.rkt"
@@ -28,41 +30,47 @@
  (struct-out cox-result)
  (contract-out
   [cox-fit
-   (->* (design-matrix/c (response/c time/c) (response/c status/c) #:lambda (>=/c 0))
-        (#:alpha (real-in 0 1)
-         #:standardize? boolean?
-         #:thresh (>/c 0)
-         #:max-iters exact-positive-integer?)
-        cox-result?)]
-  [cox-linear-predictor (-> cox-result? design-matrix/c (listof real?))]
-  [cox-relative-risk    (-> cox-result? design-matrix/c (listof (>/c 0)))]))
+   (fit/c (survival-for/c X)
+          #:statuses (statuses-for/c X y)
+          (#:lambda (>=/c 0))
+          (#:alpha (real-in 0 1)
+           #:standardize? boolean?
+           #:thresh (>/c 0)
+           #:max-iters exact-positive-integer?)
+          cox-result?)]
+  [cox-linear-predictor (-> cox-result? data/c (listof real?))]
+  [cox-relative-risk    (-> cox-result? data/c (listof (>/c 0)))]))
 
 (provide
  (contract-out
   [cox-path
-   (->* (design-matrix/c (response/c time/c) (response/c status/c))
-           (#:lambda lambda-sequence/c
-            #:nlambda exact-positive-integer?
-            #:lambda-min-ratio lambda-min-ratio/c
-            #:alpha (real-in 0 1)
-            #:standardize? boolean?
-            #:thresh (>/c 0)
-            #:max-iters exact-positive-integer?)
-        glmnet-path?)]
+   (fit/c (survival-for/c X)
+          #:statuses (statuses-for/c X y)
+          ()
+          (#:lambda lambda-sequence/c
+           #:nlambda exact-positive-integer?
+           #:lambda-min-ratio lambda-min-ratio/c
+           #:alpha (real-in 0 1)
+           #:standardize? boolean?
+           #:thresh (>/c 0)
+           #:max-iters exact-positive-integer?)
+          glmnet-path?)]
   [cox-cv
-   (->* (design-matrix/c (response/c time/c) (response/c status/c))
-        (#:type-measure (or/c 'deviance 'C)
-         #:nfolds nfolds/c
-         #:fold-ids fold-ids/c
-         #:grouped? boolean?
-         #:lambda cv-lambda-sequence/c
-         #:nlambda exact-positive-integer?
-         #:lambda-min-ratio lambda-min-ratio/c
-         #:alpha (real-in 0 1)
-         #:standardize? boolean?
-         #:thresh (>/c 0)
-         #:max-iters exact-positive-integer?)
-        glmnet-cv?)]))
+   (fit/c (survival-for/c X)
+          #:statuses (statuses-for/c X y)
+          ()
+          (#:type-measure (or/c 'deviance 'C)
+           #:nfolds nfolds/c
+           #:fold-ids fold-ids/c
+           #:grouped? boolean?
+           #:lambda cv-lambda-sequence/c
+           #:nlambda exact-positive-integer?
+           #:lambda-min-ratio lambda-min-ratio/c
+           #:alpha (real-in 0 1)
+           #:standardize? boolean?
+           #:thresh (>/c 0)
+           #:max-iters exact-positive-integer?)
+          glmnet-cv?)]))
 
 ;; A fitted Cox model. `coefficients` is a dense vector of length ni on the
 ;; original predictor scale, on the log relative-hazard scale -- there is no
@@ -101,17 +109,17 @@
 
 ;; --- public API ------------------------------------------------------------
 
-(define (cox-fit X times statuses
+(define (cox-fit X y [statuses #f]
+                 #:predictors [predictors #f]
                  #:lambda lambda
                  #:alpha [alpha 1.0]
                  #:standardize? [standardize? #t]
                  #:thresh [thresh 1e-7]
                  #:max-iters [max-iters 100000])
-  (define x (as-design-matrix X 'cox-fit "X"))
+  (define-values (x tv sv names)
+    (survival-fit-input 'cox-fit X y statuses predictors time/c status/c))
   (define no (design-matrix-nrows x))
   (define ni (design-matrix-ncols x))
-  (define tv (as-response times no 'cox-fit "times" time/c))
-  (define sv (as-response statuses no 'cox-fit "statuses" status/c))
   (check-events sv 'cox-fit)
   (define beta (make-f64vector ni 0.0))
   (define-values (dev-ratio lam nlp jerr)
@@ -122,7 +130,7 @@
                             max-iters
                             beta))
   (check-cox-jerr jerr 'cox-fit)
-  (cox-result (unpack-vector beta ni) dev-ratio lam nlp))
+  (attach-data-names (cox-result (unpack-vector beta ni) dev-ratio lam nlp) names))
 
 ;; --- prediction ------------------------------------------------------------
 
@@ -137,7 +145,8 @@
 
 ;; --- regularization path (#10) ---------------------------------------------
 
-(define (cox-path X times statuses
+(define (cox-path X y [statuses #f]
+                  #:predictors [predictors #f]
                   #:lambda [lambda #f]
                   #:nlambda [nlambda 100]
                   #:lambda-min-ratio [lambda-min-ratio #f]
@@ -145,11 +154,10 @@
                   #:standardize? [standardize? #t]
                   #:thresh [thresh 1e-7]
                   #:max-iters [max-iters 100000])
-  (define x (as-design-matrix X 'cox-path "X"))
+  (define-values (x tv sv names)
+    (survival-fit-input 'cox-path X y statuses predictors time/c status/c))
   (define no (design-matrix-nrows x))
   (define ni (design-matrix-ncols x))
-  (define tv (as-response times no 'cox-path "times" time/c))
-  (define sv (as-response statuses no 'cox-path "statuses" status/c))
   (check-events sv 'cox-path)
   (define-values (nlam flmin ulam)
     (path-lambdas lambda nlambda lambda-min-ratio no ni))
@@ -164,13 +172,16 @@
                             beta dev alm))
   (check-cox-jerr jerr 'cox-path lmu)
   (define coefficients (unpack-columns beta ni lmu))
-  (glmnet-path 'cox (finish-lambdas alm lmu (not lambda))
-               #f coefficients (unpack-vector dev lmu)
-               (count-nonzero coefficients) nlp))
+  (attach-data-names
+   (glmnet-path 'cox (finish-lambdas alm lmu (not lambda))
+                #f coefficients (unpack-vector dev lmu)
+                (count-nonzero coefficients) nlp)
+   names))
 
 ;; --- cross-validation (#27) ------------------------------------------------
 
-(define (cox-cv X times statuses
+(define (cox-cv X y [statuses #f]
+                #:predictors [predictors #f]
                 #:type-measure [measure 'deviance]
                 #:nfolds [nfolds 10]
                 #:fold-ids [fold-ids #f]
@@ -182,10 +193,8 @@
                 #:standardize? [standardize? #t]
                 #:thresh [thresh 1e-7]
                 #:max-iters [max-iters 100000])
-  (define x (as-design-matrix X 'cox-cv "X"))
-  (define no (design-matrix-nrows x))
-  (define tv (as-response times no 'cox-cv "times" time/c))
-  (define sv (as-response statuses no 'cox-cv "statuses" status/c))
+  (define-values (x tv sv names)
+    (survival-fit-input 'cox-cv X y statuses predictors time/c status/c))
   (check-events sv 'cox-cv)
   (define ts (response->vector tv))
   (define ds (response->vector sv))
@@ -194,9 +203,11 @@
               #:lambda lambda #:nlambda nlambda #:lambda-min-ratio lambda-min-ratio
               #:alpha alpha #:standardize? standardize?
               #:thresh thresh #:max-iters max-iters))
-  (define (fit-all) (fit x ts ds))
+  (define (fit-all) (attach-data-names (fit x ts ds) names))
   (define (fit-rows rows)
     (fit (design-matrix-select-rows x rows) (select ts rows) (select ds rows)))
-  (cross-validate 'cox-cv x (for/vector ([t (in-vector ts)] [d (in-vector ds)]) (cons t d))
-                  fit-all fit-rows
-                  #:measure measure #:nfolds nfolds #:fold-ids fold-ids #:grouped? grouped?))
+  (attach-data-names
+   (cross-validate 'cox-cv x (for/vector ([t (in-vector ts)] [d (in-vector ds)]) (cons t d))
+                   fit-all fit-rows
+                   #:measure measure #:nfolds nfolds #:fold-ids fold-ids #:grouped? grouped?)
+   names))

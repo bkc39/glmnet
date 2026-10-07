@@ -13,6 +13,8 @@
          racket/flonum
          ffi/vector
          "marshal.rkt"
+         (only-in "input.rkt" data/c response-for/c)
+         (submod "input.rkt" support)
          "model.rkt"
          (submod "model.rkt" support)
          "../foreign/raw/fishnet.rkt"
@@ -27,44 +29,47 @@
  (struct-out poisson-result)
  (contract-out
   [poisson-fit
-   (->* (design-matrix/c (response/c count/c) #:lambda (>=/c 0))
-        (#:alpha (real-in 0 1)
-         #:standardize? boolean?
-         #:intercept? boolean?
-         #:thresh (>/c 0)
-         #:max-iters exact-positive-integer?)
-        poisson-result?)]
+   (fit/c (response-for/c X (>=/c 0))
+          (#:lambda (>=/c 0))
+          (#:alpha (real-in 0 1)
+           #:standardize? boolean?
+           #:intercept? boolean?
+           #:thresh (>/c 0)
+           #:max-iters exact-positive-integer?)
+          poisson-result?)]
   [poisson-predict-mean
-   (-> poisson-result? design-matrix/c (listof (>/c 0)))]))
+   (-> poisson-result? data/c (listof (>/c 0)))]))
 
 (provide
  (contract-out
   [poisson-path
-   (->* (design-matrix/c (response/c count/c))
-           (#:lambda lambda-sequence/c
-            #:nlambda exact-positive-integer?
-            #:lambda-min-ratio lambda-min-ratio/c
-            #:alpha (real-in 0 1)
-            #:standardize? boolean?
-            #:intercept? boolean?
-            #:thresh (>/c 0)
-            #:max-iters exact-positive-integer?)
-        glmnet-path?)]
+   (fit/c (response-for/c X (>=/c 0))
+          ()
+          (#:lambda lambda-sequence/c
+           #:nlambda exact-positive-integer?
+           #:lambda-min-ratio lambda-min-ratio/c
+           #:alpha (real-in 0 1)
+           #:standardize? boolean?
+           #:intercept? boolean?
+           #:thresh (>/c 0)
+           #:max-iters exact-positive-integer?)
+          glmnet-path?)]
   [poisson-cv
-   (->* (design-matrix/c (response/c count/c))
-        (#:type-measure (or/c 'deviance 'mse 'mae)
-         #:nfolds nfolds/c
-         #:fold-ids fold-ids/c
-         #:grouped? boolean?
-         #:lambda cv-lambda-sequence/c
-         #:nlambda exact-positive-integer?
-         #:lambda-min-ratio lambda-min-ratio/c
-         #:alpha (real-in 0 1)
-         #:standardize? boolean?
-         #:intercept? boolean?
-         #:thresh (>/c 0)
-         #:max-iters exact-positive-integer?)
-        glmnet-cv?)]))
+   (fit/c (response-for/c X (>=/c 0))
+          ()
+          (#:type-measure (or/c 'deviance 'mse 'mae)
+           #:nfolds nfolds/c
+           #:fold-ids fold-ids/c
+           #:grouped? boolean?
+           #:lambda cv-lambda-sequence/c
+           #:nlambda exact-positive-integer?
+           #:lambda-min-ratio lambda-min-ratio/c
+           #:alpha (real-in 0 1)
+           #:standardize? boolean?
+           #:intercept? boolean?
+           #:thresh (>/c 0)
+           #:max-iters exact-positive-integer?)
+          glmnet-cv?)]))
 
 ;; A fitted Poisson model. `intercept` and `coefficients` (a dense vector of
 ;; length ni on the original predictor scale) are on the log-mean scale.
@@ -98,16 +103,16 @@
 ;; --- public API ------------------------------------------------------------
 
 (define (poisson-fit X y
+                     #:predictors [predictors #f]
                      #:lambda lambda
                      #:alpha [alpha 1.0]
                      #:standardize? [standardize? #t]
                      #:intercept? [intercept? #t]
                      #:thresh [thresh 1e-7]
                      #:max-iters [max-iters 100000])
-  (define x (as-design-matrix X 'poisson-fit "X"))
+  (define-values (x yv names) (fit-input 'poisson-fit X y predictors count/c))
   (define no (design-matrix-nrows x))
   (define ni (design-matrix-ncols x))
-  (define yv (as-response y no 'poisson-fit "y" count/c))
   (check-some-count yv 'poisson-fit)
   (define beta (make-f64vector ni 0.0))
   (define-values (intercept dev-ratio lam nlp jerr)
@@ -119,7 +124,7 @@
                              max-iters
                              beta))
   (check-poisson-jerr jerr 'poisson-fit)
-  (poisson-result intercept (unpack-vector beta ni) dev-ratio lam nlp))
+  (attach-data-names (poisson-result intercept (unpack-vector beta ni) dev-ratio lam nlp) names))
 
 ;; --- prediction ------------------------------------------------------------
 
@@ -130,6 +135,7 @@
 ;; --- regularization path (#10) ---------------------------------------------
 
 (define (poisson-path X y
+                      #:predictors [predictors #f]
                       #:lambda [lambda #f]
                       #:nlambda [nlambda 100]
                       #:lambda-min-ratio [lambda-min-ratio #f]
@@ -138,10 +144,9 @@
                       #:intercept? [intercept? #t]
                       #:thresh [thresh 1e-7]
                       #:max-iters [max-iters 100000])
-  (define x (as-design-matrix X 'poisson-path "X"))
+  (define-values (x yv names) (fit-input 'poisson-path X y predictors count/c))
   (define no (design-matrix-nrows x))
   (define ni (design-matrix-ncols x))
-  (define yv (as-response y no 'poisson-path "y" count/c))
   (check-some-count yv 'poisson-path)
   (define-values (nlam flmin ulam)
     (path-lambdas lambda nlambda lambda-min-ratio no ni))
@@ -157,13 +162,16 @@
                              a0 beta dev alm))
   (check-poisson-jerr jerr 'poisson-path lmu)
   (define coefficients (unpack-columns beta ni lmu))
-  (glmnet-path 'poisson (finish-lambdas alm lmu (not lambda))
-               (unpack-vector a0 lmu) coefficients (unpack-vector dev lmu)
-               (count-nonzero coefficients) nlp))
+  (attach-data-names
+   (glmnet-path 'poisson (finish-lambdas alm lmu (not lambda))
+                (unpack-vector a0 lmu) coefficients (unpack-vector dev lmu)
+                (count-nonzero coefficients) nlp)
+   names))
 
 ;; --- cross-validation (#27) ------------------------------------------------
 
 (define (poisson-cv X y
+                    #:predictors [predictors #f]
                     #:type-measure [measure 'deviance]
                     #:nfolds [nfolds 10]
                     #:fold-ids [fold-ids #f]
@@ -176,15 +184,16 @@
                     #:intercept? [intercept? #t]
                     #:thresh [thresh 1e-7]
                     #:max-iters [max-iters 100000])
-  (define x (as-design-matrix X 'poisson-cv "X"))
-  (define ys
-    (response->vector (as-response y (design-matrix-nrows x) 'poisson-cv "y" count/c)))
+  (define-values (x yv names) (fit-input 'poisson-cv X y predictors count/c))
+  (define ys (response->vector yv))
   (define (fit x y)
     (poisson-path x y
                   #:lambda lambda #:nlambda nlambda #:lambda-min-ratio lambda-min-ratio
                   #:alpha alpha #:standardize? standardize? #:intercept? intercept?
                   #:thresh thresh #:max-iters max-iters))
-  (define (fit-all) (fit x ys))
+  (define (fit-all) (attach-data-names (fit x ys) names))
   (define (fit-rows rows) (fit (design-matrix-select-rows x rows) (select ys rows)))
-  (cross-validate 'poisson-cv x ys fit-all fit-rows
-                  #:measure measure #:nfolds nfolds #:fold-ids fold-ids #:grouped? grouped?))
+  (attach-data-names
+   (cross-validate 'poisson-cv x ys fit-all fit-rows
+                   #:measure measure #:nfolds nfolds #:fold-ids fold-ids #:grouped? grouped?)
+   names))

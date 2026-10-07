@@ -16,6 +16,8 @@
          racket/generic
          racket/list
          racket/match
+         (only-in racket/vector vector-map)
+         (only-in racket/flonum in-flvector)
          "terms.rkt"
          "model.rkt"
          (only-in (submod "model.rkt" support) prop:predictor-matrix prop:class-labels)
@@ -35,7 +37,8 @@
                   design-matrix->columns)
          (only-in (submod "../data.rkt" support)
                   design-matrix-nrows column-name->string table-names select-table-columns
-                  select-table-values one-dimensional-length))
+                  select-table-values one-dimensional-length table-column->flvector status->real)
+         (only-in (submod "input.rkt" support) one-dimensional-values))
 
 (define family/c (or/c 'gaussian 'binomial 'multinomial 'poisson 'cox 'mgaussian))
 
@@ -834,11 +837,13 @@
     (if (memq family-name '(binomial multinomial))
         (response-classes who column (car (select-table-values table (list column) who)))
         (values #f #f)))
-  (define y (and (not classes) (select-table-columns table responses who)))
+  (define y
+    (and (not classes) (not (eq? family-name 'cox)) (select-table-columns table responses who)))
   (define ys
-    (if classes
-        (list (for/list ([k (in-vector indices)]) (exact->inexact k)))
-        (design-matrix->columns y)))
+    (cond
+      [classes (list (for/list ([k (in-vector indices)]) (exact->inexact k)))]
+      [y (design-matrix->columns y)]
+      [else (survival-columns who table responses)]))
   (define y1 (car ys))
   (unless (= (length y1) (design-matrix-nrows x))
     (raise-arguments-error who "the response and the predictors have different lengths"
@@ -851,20 +856,13 @@
      [(gaussian) (list y1)]
      [(binomial)
       (cond
-        [classes
-         (unless (= (length classes) 2)
-           (raise-arguments-error who (if (null? (cdr classes))
-                                          "a binomial response needs two classes"
-                                          "a binomial response has two classes; the multinomial family takes more")
-                                  "column" column "classes" classes))]
+        [classes (check-classes who 'binomial classes (list "column" column))]
         [else (check-values who column y1 zero-or-one? "a binomial response must be 0 or 1")])
       (list y1)]
      [(multinomial)
       (cond
         [classes
-         (when (null? (cdr classes))
-           (raise-arguments-error who "a multinomial response needs at least two classes"
-                                  "column" column "classes" classes))
+         (check-classes who 'multinomial classes (list "column" column))
          (list (vector->list indices))]
         [else
          (check-values who column y1 (lambda (v) (and (integer? v) (>= v 0.0)))
@@ -882,6 +880,14 @@
      [(mgaussian) (list y)])
    classes))
 
+;; The time and status columns of a (surv time status) response, as lists of
+;; reals; a boolean status is 1 for #t, an event, as R's Surv reads it.
+(define (survival-columns who table responses)
+  (match-define (list time status) (select-table-values table responses who))
+  (for/list ([column (in-list (list time (vector-map status->real status)))]
+             [name (in-list responses)])
+    (for/list ([v (in-flvector (table-column->flvector column name who))]) v)))
+
 ;; An #:intercept? option that was not given.
 (define unsupplied-intercept (string->uninterned-symbol "unsupplied"))
 
@@ -893,7 +899,9 @@
 (define (fit-formula who select f table family-name options)
   (define spec (hash-ref families family-name))
   (define-values (mt x responses classes) (model-frame who f table family-name))
-  (define fold-ids (cond [(assq '#:fold-ids options) => cdr] [else #f]))
+  (define fold-ids
+    (cond [(assq '#:fold-ids options) => (lambda (option) (one-dimensional-values (cdr option)))]
+          [else #f]))
   (when (and fold-ids (not (= (one-dimensional-length fold-ids) (design-matrix-nrows x))))
     (raise-arguments-error who "fold-ids does not have one entry per row of the table"
                            "length of fold-ids" (one-dimensional-length fold-ids)
