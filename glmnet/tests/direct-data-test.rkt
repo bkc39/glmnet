@@ -372,7 +372,7 @@
        (eval '(let ([fit (ols '((1.0) (2.0) (3.0) (5.0)) '(1.0 3.0 2.0 5.0))])
                 (list (coef fit) (predict fit '((1.0) (2.0) (3.0) (5.0)))))))))
 
-  (test-case "(require glmnet) and a fit from plain data load neither Polars nor math/matrix"
+  (test-case "(require glmnet), fits and formulas from plain data load neither Polars nor math"
     (parameterize ([current-namespace (make-base-empty-namespace)])
       (namespace-require 'racket/base)
       (namespace-require 'glmnet)
@@ -380,6 +380,10 @@
       (eval '(predict (lasso (list (cons "x" '(1 2 4)) (cons "y" '(1 2 3))) "y"
                              #:predictors '("x") #:lambda 0.1)
                       (hash "x" '(3))))
+      (eval '(predict (formula-fit (y . ~ . x + (log x)) (list (cons "x" '(1 2 4)) (cons "y" '(1 2 3)))
+                                   #:lambda 0.1)
+                      (hash "x" '(3))))
+      (eval '(formula-path (~ y all) (hash "x" '(1 2 4 3) "z" '("a" "b" "a" "b") "y" '(1 2 3 3))))
       (for ([mod (in-list '(polars glmnet/data/polars math/array math/matrix glmnet/data/math
                                    typed/racket/base plot glmnet/plot))])
         (check-false (module-declared? mod #f) (format "~a is declared" mod))))))
