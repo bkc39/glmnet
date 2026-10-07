@@ -5,3 +5,6 @@ fortran/vendor/*.f linguist-generated=true
 glmnet/datasets/*.csv linguist-generated=true
 # A CSV test fixture whose byte-order mark and CRLF line endings are the point.
 glmnet/tests/fixtures/excel.csv -text
+# Racket and Scribble sources have LF line ends (the docs idiom gate's offsets).
+*.rkt text eol=lf
+*.scrbl text eol=lf

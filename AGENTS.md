@@ -290,12 +290,14 @@ something includes it.
 
 Resyntax reads neither `.scrbl` files nor lp2 programs, so
 `tests/docs-idiom-test.rkt` checks their block code (examples, racketblock,
-chunk; not the reference) for #59's idioms: a family accessor where `coef`,
-`predict` or `deviance-ratio` belongs, hand rounding, positional access and
-hand-written output. A hit names file:line, the idiom and the fix. Its
-allowlist holds the files not yet rewritten: a rewrite removes its file, a
-listed file with no hit left fails, and a file is never added.
-`racket glmnet/tests/docs-idiom-test.rkt` prints every hit.
+chunk; not the reference) for #59's idioms: a family or path accessor where
+`coef`, `predict` or `deviance-ratio` belongs, a last element by index
+arithmetic, hand rounding, positional access and hand-written output. A hit
+names file:line, the idiom and the fix. `allowed-hits` counts, per file and
+idiom, the hits not yet rewritten, and a count must equal the file's hits: a
+file gains none, a rewrite lowers its counts in the same commit, and a file
+not listed has none. `racket glmnet/tests/docs-idiom-test.rkt` prints every
+hit and the current counts.
 
 ## Local dev loop
 
