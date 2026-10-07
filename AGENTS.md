@@ -57,7 +57,9 @@ glmnet/                        Racket collection
   native-libs/candidates/<plat>/      committed prebuilt shared objects
 scripts/                       build-so.sh, test-local.sh (portable candidates);
                                export-datasets.R (glmnet/datasets/*.csv from R)
-flake.nix                      native + racket derivations, devShell, checks
+flake.nix                      native + racket derivations, devShells, checks
+nix/racket-linters.nix         Resyntax pinned by commit, for the shells and CI
+.racket-dev.rktd               the gates, for the racket-dev plugin's pre-push hook
 ```
 
 There is one package, one collection and one manual (arc #44, decision 4, as
@@ -258,15 +260,21 @@ different `α` (`parm`) and `λ`. Each new capability is shipped as one unit:
      `fortran/vendor/NOTICE.md`.
 
 **Gate (all green before the next feature):**
-`raco test ./glmnet/` · `raco scribble --htmls …/glmnet.scrbl` renders with no
-`collected information for key multiple times` warnings · `nix flake check` ·
-resyntax clean.
+`raco test ./glmnet/`, the docs idiom gate among the tests · `raco scribble
+--htmls …/glmnet.scrbl` renders with no `collected information for key multiple
+times` warnings · `nix flake check` · Resyntax clean on the changed `.rkt`
+files: `resyntax analyze --local-git-repository . origin/master` in a dev
+shell, as CI's `resyntax` job runs it. `.racket-dev.rktd` lists the gates.
 
 ## Documentation
 
 The manual follows racket-doc's own guide and reference, as rkt-polars does.
 Snippets are `@examples[#:eval ev #:label #f ...]` evaluated at build time with
-the evaluator from `scribblings/utils.rkt`; never paste output by hand. Use
+the evaluator from `scribblings/utils.rkt`, which evaluates in `racket` with
+glmnet required; never paste output by hand. A `require` in an example says
+where a binding comes from (`glmnet/plot`, `glmnet/datasets`, `glmnet/data/*`,
+`polars`, `math/matrix`), never fetches what `racket` provides; the lp2
+programs stay `racket/base` modules with explicit requires. Use
 `eval:error` for expected failures. Each `@deftech` is defined once, in
 `guide/concepts.scrbl`. Every `@section` gets an explicit `#:tag`; the `ex-*`
 tags name the example pages and stay stable. An example section changes when
@@ -279,6 +287,15 @@ glmnet/datasets)` or a module under `glmnet/data/` exports. A definition with
 `#:link-target? #f` does not count, nor does a `defstruct*` with
 `#:omit-constructor` for the constructor. A new `.scrbl` file counts once
 something includes it.
+
+Resyntax reads neither `.scrbl` files nor lp2 programs, so
+`tests/docs-idiom-test.rkt` checks their block code (examples, racketblock,
+chunk; not the reference) for #59's idioms: a family accessor where `coef`,
+`predict` or `deviance-ratio` belongs, hand rounding, positional access and
+hand-written output. A hit names file:line, the idiom and the fix. Its
+allowlist holds the files not yet rewritten: a rewrite removes its file, a
+listed file with no hit left fails, and a file is never added.
+`racket glmnet/tests/docs-idiom-test.rkt` prints every hit.
 
 ## Local dev loop
 
