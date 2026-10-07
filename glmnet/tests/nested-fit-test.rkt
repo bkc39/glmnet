@@ -235,9 +235,9 @@
                (lambda () (logistic-fit '((1.0) (2.0) (3.0) (4.0) (5.0) (6.0)) labels #:lambda 0.1))))
 
   (test-case "a positive Cox time that rounds to 0.0 is an error"
-    (check-exn #rx"^cox-fit: y has an element that is not \\(>/c 0\\) as a flonum\n  position: 1\n"
+    (check-exn #rx"^cox-fit: times has an element that is not \\(>/c 0\\) as a flonum\n  position: 1\n"
                (lambda () (cox-fit '((1.0 0.0) (0.0 1.0) (1.0 1.0) (0.0 0.0))
                                    (list 1 (expt 10 -400) 3 4) '(1 1 0 1) #:lambda 0.1)))
-    (check-exn #rx"^cox-path: y has an element that is not \\(>/c 0\\) as a flonum"
+    (check-exn #rx"^cox-path: times has an element that is not \\(>/c 0\\) as a flonum"
                (lambda () (cox-path '((1.0 0.0) (0.0 1.0) (1.0 1.0) (0.0 0.0))
                                     (vector 1 2 (expt 10 -400) 4) '(1 1 0 1))))))

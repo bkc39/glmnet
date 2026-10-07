@@ -81,7 +81,9 @@
          model-terms-column-names
          model-terms-factor-levels
          terms->design-matrix
-         response-classes)
+         value-kind
+         response-classes
+         check-classes)
 
 ;; --- term data -------------------------------------------------------------------
 
@@ -493,6 +495,19 @@
     [else
      (define classes (factor-levels who (factor-variable v) vs))
      (values classes (level-indices who v classes vs))]))
+
+;; Checks the classes of a binomial response, of which there are two, or a
+;; multinomial one, of which there are at least two; `fields` name the column,
+;; for named data.
+(define (check-classes who family classes fields)
+  (define (fail problem)
+    (apply raise-arguments-error who problem (append fields (list "classes" classes))))
+  (match* (family classes)
+    [('binomial (list _)) (fail "a binomial response needs two classes")]
+    [('binomial (list _ _)) (void)]
+    [('binomial _) (fail "a binomial response has two classes; the multinomial family takes more")]
+    [('multinomial (list _)) (fail "a multinomial response needs at least two classes")]
+    [(_ _) (void)]))
 
 ;; --- expansion -------------------------------------------------------------------
 

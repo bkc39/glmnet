@@ -17,6 +17,7 @@
          racket/match
          (only-in "../data.rkt" design-matrix-select-rows response/c)
          (only-in (submod "../data.rkt" support) one-dimensional-length one-dimensional->vector)
+         (only-in (submod "input.rkt" support) one-dimensional-values)
          (only-in "marshal.rkt" design-matrix-nrows design-matrix-ncols linear-predictor
                   current-warning-who current-warning-what log-fit-warning)
          "model.rkt"
@@ -142,23 +143,27 @@
 (define fold-id-list/c (response/c (and/c integer? (>=/c 0))))
 
 ;; A #:fold-ids argument: #f, for folds drawn at random, or fold ids from 0,
-;; exact or inexact integers in a list, vector, flvector or f64vector, that use
-;; every fold up to the largest, of which there are at least 3.
+;; exact or inexact integers in a list, vector, flvector, f64vector, Polars
+;; series or math array, that use every fold up to the largest, of which there
+;; are at least 3.
 (define fold-ids/c
   (make-flat-contract
    #:name 'fold-ids/c
    #:first-order
    (lambda (v)
+     (define ids (one-dimensional-values v))
      (or (not v)
-         (and (contract-first-order-passes? fold-id-list/c v)
-              (not (fold-ids-problem (fold-ids->vector v))))))
+         (and ids
+              (contract-first-order-passes? fold-id-list/c ids)
+              (not (fold-ids-problem (fold-ids->vector ids))))))
    #:late-neg-projection
    (lambda (blame)
      (define ids-projection ((get/build-late-neg-projection fold-id-list/c) blame))
      (lambda (v neg-party)
+       (define ids (or (one-dimensional-values v) v))
        (when v
-         (ids-projection v neg-party)
-         (match (fold-ids-problem (fold-ids->vector v))
+         (ids-projection ids neg-party)
+         (match (fold-ids-problem (fold-ids->vector ids))
            [#f (void)]
            [(list 'few _)
             (raise-blame-error blame #:missing-party neg-party v
@@ -177,11 +182,12 @@
 (define (resolve-folds who n nfolds fold-ids)
   (cond
     [fold-ids
-     (define length (one-dimensional-length fold-ids))
+     (define ids (one-dimensional-values fold-ids))
+     (define length (one-dimensional-length ids))
      (unless (= length n)
        (raise-arguments-error who "fold-ids does not have one entry per row of X"
                               "length of fold-ids" length "rows of X" n))
-     (define folds (fold-ids->vector fold-ids))
+     (define folds (fold-ids->vector ids))
      (match (fold-ids-problem folds)
        [#f folds]
        [(list 'few k) (raise-arguments-error who "cross-validation needs at least 3 folds" "folds" k)]

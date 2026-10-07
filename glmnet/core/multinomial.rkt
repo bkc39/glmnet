@@ -4,7 +4,8 @@
 ;;
 ;; `multinomial-fit` is the multiclass extension of `logistic-fit`: the same
 ;; #:alpha / #:lambda knobs, but the response is a list of integer class labels
-;; 0..K-1 and the fit returns K intercepts and K coefficient vectors (the
+;; 0..K-1, or of K labels (strings, symbols or booleans, in their sorted order),
+;; and the fit returns K intercepts and K coefficient vectors (the
 ;; symmetric multinomial parameterization). `multinomial-predict-proba` turns a
 ;; fit plus new predictors into per-class probabilities (softmax over the K
 ;; linear predictors); `multinomial-predict` takes the argmax.
@@ -251,7 +252,7 @@
                       #:lambda lambda #:nlambda nlambda #:lambda-min-ratio lambda-min-ratio
                       #:alpha alpha #:standardize? standardize? #:intercept? intercept?
                       #:thresh thresh #:max-iters max-iters))
-  (define (fit-all) (fit x labels))
+  (define (fit-all) (attach-data-names (fit x labels) names #:classes classes))
   (define (fit-rows rows) (fit (design-matrix-select-rows x rows) (select labels rows)))
   (attach-data-names
    (cross-validate 'multinomial-cv x labels fit-all fit-rows

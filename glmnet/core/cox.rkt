@@ -31,7 +31,7 @@
  (contract-out
   [cox-fit
    (fit/c (survival-for/c X)
-          #:statuses (statuses-for/c X)
+          #:statuses (statuses-for/c X y)
           (#:lambda (>=/c 0))
           (#:alpha (real-in 0 1)
            #:standardize? boolean?
@@ -45,7 +45,7 @@
  (contract-out
   [cox-path
    (fit/c (survival-for/c X)
-          #:statuses (statuses-for/c X)
+          #:statuses (statuses-for/c X y)
           ()
           (#:lambda lambda-sequence/c
            #:nlambda exact-positive-integer?
@@ -57,7 +57,7 @@
           glmnet-path?)]
   [cox-cv
    (fit/c (survival-for/c X)
-          #:statuses (statuses-for/c X)
+          #:statuses (statuses-for/c X y)
           ()
           (#:type-measure (or/c 'deviance 'C)
            #:nfolds nfolds/c
@@ -203,7 +203,7 @@
               #:lambda lambda #:nlambda nlambda #:lambda-min-ratio lambda-min-ratio
               #:alpha alpha #:standardize? standardize?
               #:thresh thresh #:max-iters max-iters))
-  (define (fit-all) (fit x ts ds))
+  (define (fit-all) (attach-data-names (fit x ts ds) names))
   (define (fit-rows rows)
     (fit (design-matrix-select-rows x rows) (select ts rows) (select ds rows)))
   (attach-data-names

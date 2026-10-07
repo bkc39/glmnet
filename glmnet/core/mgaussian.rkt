@@ -187,7 +187,7 @@
                     #:lambda lambda #:nlambda nlambda #:lambda-min-ratio lambda-min-ratio
                     #:alpha alpha #:standardize? standardize? #:intercept? intercept?
                     #:thresh thresh #:max-iters max-iters))
-  (define (fit-all) (fit x y))
+  (define (fit-all) (attach-data-names (fit x y) names #:responses responses))
   (define (fit-rows rows)
     (fit (design-matrix-select-rows x rows) (design-matrix-select-rows y rows)))
   (attach-data-names

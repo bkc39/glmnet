@@ -35,7 +35,7 @@ The fit procedures share their argument conventions:
        @racket[statuses], is a non-empty list, vector, @racket[flvector] or
        @racket[f64vector] with one entry per row of @racket[X] (see
        @racket[response/c]), a @racketmodname[math/array] array or a Polars
-       series.}
+       series; a Cox status may also be a boolean, @racket[#t] for an event.}
  @item{Every procedure also takes named data, a @tech{table} or a Polars
        dataframe, whose response and predictors it selects by name (see
        @secref["ref-common-data"]).}
@@ -95,10 +95,12 @@ The response is one column, except for two families:
        (list "Cox"                    @elem{@racket['("time" "status")], two columns} @elem{the times, and the statuses after them})
        (list "Multi-response"         @elem{@racket['("y1" "y2")], a non-empty list}  "a matrix, one column per response"))]
 
-A binomial or multinomial response may hold strings, symbols or booleans in
-place of class numbers. Its classes are then its levels, as a formula's
+A binomial or multinomial response, a column, a list, a vector, a Polars
+series or a @racketmodname[math/array] array, may hold strings, symbols or
+booleans in place of class numbers. Its classes are then its levels, as a formula's
 factor response has them: strings and symbols sorted by @racket[string<?],
-@racket["FALSE"] before @racket["TRUE"]. A binomial response has exactly two.
+which is R's order in the C locale (R in another locale sorts mixed-case
+labels differently), and @racket["FALSE"] before @racket["TRUE"]. A binomial response has exactly two.
 The fit remembers them, and @racket[predict] with @racket[#:type 'class],
 @racket[logistic-predict] and @racket[multinomial-predict] return them.
 
@@ -179,22 +181,25 @@ their values are recognised once the program has loaded the library itself.
 
 @defproc[(survival-for/c [X data/c]) flat-contract?]{
   The contract on a Cox fit's @racket[y], given @racket[X]. For named data, a
-  list of the names of two of its numeric columns, the time and then the
-  status; otherwise the times, @racket[(response-for/c X (>/c 0))].
+  list of the names of two of its columns, the time, numeric, and then the
+  status, numeric or boolean; otherwise the times,
+  @racket[(response-for/c X (>/c 0))].
 
   @examples[#:eval ev
   (define survival (list (cons "x" '(1 2 3)) (cons "t" '(5.0 3.0 6.0)) (cons "d" '(1 0 1))))
   (contract-first-order-passes? (survival-for/c survival) '("t" "d"))
   (contract-first-order-passes? (survival-for/c survival) "t")]}
 
-@defproc[(statuses-for/c [X data/c]) flat-contract?]{
-  The contract on an unnamed Cox fit's @racket[statuses], given @racket[X]:
-  @racket[(response-for/c X (or/c 0 1))]. Named data takes no statuses
-  argument, since @racket[y] names the status column.
+@defproc[(statuses-for/c [X data/c] [y any/c]) flat-contract?]{
+  The contract on an unnamed Cox fit's @racket[statuses], given @racket[X] and
+  @racket[y]: @racket[(response-for/c X (or/c 0 1))], or booleans, @racket[#t]
+  for an event, as R's @tt{Surv} reads a logical status. Named data takes no
+  statuses argument, since @racket[y] names the status column.
 
   @examples[#:eval ev
-  (contract-first-order-passes? (statuses-for/c '((1.0) (2.0))) '(1 0))
-  (contract-first-order-passes? (statuses-for/c survival) '(1 0 1))]}
+  (contract-first-order-passes? (statuses-for/c '((1.0) (2.0)) '(5.0 3.0)) '(1 0))
+  (contract-first-order-passes? (statuses-for/c '((1.0) (2.0)) '(5.0 3.0)) '(#t #f))
+  (contract-first-order-passes? (statuses-for/c survival '("t" "d")) '(1 0 1))]}
 
 @defproc[(responses-for/c [X data/c]) flat-contract?]{
   The contract on a multi-response fit's @racket[Y], given @racket[X]. For
@@ -1338,7 +1343,7 @@ intercept, and so no @racket[#:intercept?] keyword. See @secref["ex-cox"].
 
 @defproc[(cox-fit [X data/c]
                   [y (survival-for/c X)]
-                  [statuses (statuses-for/c X) @#,elem{none}]
+                  [statuses (statuses-for/c X y) @#,elem{none}]
                   [#:predictors predictors (predictors-for/c X y) #f]
                   [#:lambda lambda (>=/c 0)]
                   [#:alpha alpha (real-in 0 1) 1.0]
@@ -1347,8 +1352,8 @@ intercept, and so no @racket[#:intercept?] keyword. See @secref["ex-cox"].
                   [#:max-iters max-iters exact-positive-integer? 100000])
          cox-result?]{
   Fits a Cox proportional-hazards elastic-net model of positive follow-up
-  times and the matching event indicators: @racket[1] for an observed event,
-  @racket[0] for right-censoring. For unnamed data, @racket[y] is the times
+  times and the matching event indicators: @racket[1] or @racket[#t] for an
+  observed event, @racket[0] or @racket[#f] for right-censoring. For unnamed data, @racket[y] is the times
   and @racket[statuses], then required, the indicators; for named data,
   @racket[y] names the time and status columns, and there is no
   @racket[statuses] argument. If no status is @racket[1], the
@@ -1646,7 +1651,7 @@ These are R's @tt{glmnet.control} defaults (@tt{fdev = 1e-5},
 
 @defproc[(cox-path [X data/c]
                    [y (survival-for/c X)]
-                   [statuses (statuses-for/c X) @#,elem{none}]
+                   [statuses (statuses-for/c X y) @#,elem{none}]
                    [#:predictors predictors (predictors-for/c X y) #f]
                    [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) pair?)) #f]
                    [#:nlambda nlambda exact-positive-integer? 100]
@@ -1723,7 +1728,8 @@ it passes on to each fit, and these:
        @racket[#:fold-ids] is given.}
  @item{@racket[#:fold-ids], R's @tt{foldid}, assigns the observations to folds:
        one fold id per row of @racket[X], counting from 0, in a list, vector,
-       @racket[flvector] or @racket[f64vector], as a response can be. Every id
+       @racket[flvector], @racket[f64vector], @racketmodname[math/array]
+       array or Polars series, as a response can be. Every id
        from 0 to the largest must appear, and there must be at least 3 (see
        @racket[fold-ids/c]).}
  @item{@racket[#:grouped?], R's @tt{grouped}, computes the error and its
@@ -1931,7 +1937,7 @@ carry the signal:
 
 @defproc[(cox-cv [X data/c]
                  [y (survival-for/c X)]
-                 [statuses (statuses-for/c X) @#,elem{none}]
+                 [statuses (statuses-for/c X y) @#,elem{none}]
                  [#:predictors predictors (predictors-for/c X y) #f]
                  [#:type-measure type-measure (or/c 'deviance 'C) 'deviance]
                  [#:nfolds nfolds (and/c exact-integer? (>=/c 3)) 10]
@@ -2055,8 +2061,9 @@ carry the signal:
   The contract on the @racket[#:fold-ids] argument of every cross-validation
   procedure. It accepts @racket[#f], for folds drawn by
   @racket[random-fold-ids], or fold ids: a non-empty list, vector,
-  @racket[flvector] or @racket[f64vector] of non-negative integers, exact or,
-  as in an @racket[flvector], inexact, that use every fold from 0 to the
+  @racket[flvector], @racket[f64vector], @racketmodname[math/array] array or
+  Polars series of non-negative integers, exact or, as in an @racket[flvector],
+  inexact, that use every fold from 0 to the
   largest id, of which there are at least 3. A violation says which fold is
   missing. The procedures check the ids again on their own copy, with one id
   per observation.
@@ -2832,13 +2839,16 @@ family:
 @defproc[(glmnet-model-predictor-names [model glmnet-model?])
          (or/c #f (listof string?))]{
   The names of @racket[model]'s predictors, in the order of its coefficients,
-  or @racket[#f] if it does not name them. A @racket[formula-model] names them;
-  the results of the family procedures do not. When a model names its
-  predictors, @racket[coef] keys its coefficients by these names and
+  or @racket[#f] if it does not name them. A @racket[formula-model] names them,
+  and so does a fit from named data (see @secref["ref-common-data"]), which
+  remembers them; a fit from unnamed data does not. When a model, such as a
+  formula model, implements this method of @racket[gen:glmnet-model],
+  @racket[coef] keys its coefficients by these names and
   @racket[predict] reads the columns with these names from a table, except
   that a formula model builds its predictors, such as the interaction
   @racket["a:b"] or the transform @racket["(log a)"], from the table's
-  columns. The names must be distinct, one
+  columns; the names a fit from named data remembers leave @racket[coef]'s
+  layout as it is. The names must be distinct, one
   per predictor of the model's path; @racket[coef] and @racket[predict] raise
   an error for a model whose names are not.
 
@@ -2849,20 +2859,34 @@ family:
                        (cons "b" (map cadr X)) (cons "c" (map caddr X)))
                  #:lambda 0.05))
   (glmnet-model-predictor-names named-model)
+  (glmnet-model-predictor-names car-fit)
   (glmnet-model-predictor-names fit)]}
 
 @defproc[(glmnet-model-response-names [model glmnet-model?])
          (or/c #f (listof string?))]{
   The names of @racket[model]'s response columns, or @racket[#f] if it does not
   name them. For a @racket[formula-model], they are the columns of its
-  formula's response: for the Cox family the time and status columns. For the
-  multi-response family, @racket[coef] keys the coefficients of each response
-  by its name, and raises an error for a model that does not name each
-  response once.
+  formula's response: for the Cox family the time and status columns. For a
+  multi-response formula model, @racket[coef] keys the coefficients of each
+  response by its name, and raises an error for a model that does not name
+  each response once. A multi-response fit from named data remembers its
+  responses' names, which leave @racket[coef]'s layout as it is.
 
   @examples[#:eval ev
   (glmnet-model-response-names named-model)
   (glmnet-model-response-names path)]}
+
+@defproc[(glmnet-model-class-labels [model glmnet-model?])
+         (or/c #f (listof string?))]{
+  The labels of a binomial or multinomial @racket[model]'s classes, in the
+  order of the class indices, or @racket[#f] if it does not name them. A fit
+  of a response of strings, symbols or booleans, a formula model's included,
+  names them (see @secref["ref-common-data"]), and @racket[predict] with
+  @racket[#:type 'class] returns them; a fit of class numbers does not.
+
+  @examples[#:eval ev
+  (glmnet-model-class-labels flowers)
+  (glmnet-model-class-labels (multinomial-fit X '(0 1 2 0 1 2) #:lambda 0.05))]}
 
 @defproc[(deviance-ratio [model glmnet-model?]) (or/c real? (vectorof real?))]{
   The fraction of null deviance explained, which is @math{R²} for the Gaussian

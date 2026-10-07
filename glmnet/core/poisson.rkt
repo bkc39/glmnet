@@ -191,7 +191,7 @@
                   #:lambda lambda #:nlambda nlambda #:lambda-min-ratio lambda-min-ratio
                   #:alpha alpha #:standardize? standardize? #:intercept? intercept?
                   #:thresh thresh #:max-iters max-iters))
-  (define (fit-all) (fit x ys))
+  (define (fit-all) (attach-data-names (fit x ys) names))
   (define (fit-rows rows) (fit (design-matrix-select-rows x rows) (select ys rows)))
   (attach-data-names
    (cross-validate 'poisson-cv x ys fit-all fit-rows

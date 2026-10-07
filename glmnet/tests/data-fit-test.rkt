@@ -119,7 +119,7 @@
     (check-error (lambda () (logistic-fit '((1.0 +nan.0) (2.0 1.0)) '(0 1) #:lambda 0.1)) #rx"row: 0")
     (check-error (lambda () (multinomial-path '((1.0 2.0) (2.0 -inf.0)) '(0 1))) #rx"column: 1")
     (check-error (lambda () (cox-fit X '(1.0 2.0 +inf.0 4.0 5.0) '(1 1 1 1 1) #:lambda 0.1))
-                 #rx"y has an element that is not finite" #rx"position: 2")
+                 #rx"times has an element that is not finite" #rx"position: 2")
     (check-error (lambda () (poisson-fit X '(1 2 +inf.0 4 5) #:lambda 0.1))
                  #rx"y has an element that is not finite")
     (check-error (lambda () (mgaussian-fit X '((1.0 2.0) (2.0 1.0) (3.0 +nan.0) (4.0 3.0) (5.0 6.0))

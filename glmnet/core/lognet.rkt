@@ -4,11 +4,13 @@
 ;; raw FFI.
 ;;
 ;; `logistic-fit` is the binomial-family analogue of `elnet-fit`: the same
-;; #:alpha / #:lambda knobs, but the response is a 0/1 class label and the fit
-;; models the log-odds of class 1. As with the Gaussian models, #:alpha 1.0 is
-;; the lasso (sparse) logistic, #:alpha 0.0 the ridge logistic, and values in
-;; between the elastic net. `logistic-predict-proba` / `logistic-predict` turn a
-;; fit plus new predictors into class-1 probabilities and hard 0/1 labels.
+;; #:alpha / #:lambda knobs, but the response is a 0/1 class label, or one of
+;; two labels (strings, symbols or booleans; the second is class 1), and the
+;; fit models the log-odds of class 1. As with the Gaussian models, #:alpha
+;; 1.0 is the lasso (sparse) logistic, #:alpha 0.0 the ridge logistic, and
+;; values in between the elastic net. `logistic-predict-proba` /
+;; `logistic-predict` turn a fit plus new predictors into class-1
+;; probabilities and hard labels.
 
 (require racket/contract
          ffi/vector
@@ -214,7 +216,7 @@
                    #:lambda lambda #:nlambda nlambda #:lambda-min-ratio lambda-min-ratio
                    #:alpha alpha #:standardize? standardize? #:intercept? intercept?
                    #:thresh thresh #:max-iters max-iters))
-  (define (fit-all) (fit x ys))
+  (define (fit-all) (attach-data-names (fit x ys) names #:classes classes))
   (define (fit-rows rows) (fit (design-matrix-select-rows x rows) (select ys rows)))
   (attach-data-names
    (cross-validate 'logistic-cv x ys fit-all fit-rows

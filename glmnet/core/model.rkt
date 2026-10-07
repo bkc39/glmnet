@@ -67,8 +67,12 @@
         #:pre/name (model) "the model has at least one fitted λ" (fitted? model)
         [result lambda-arg/c])]
   [glmnet-model-named-lambda (-> glmnet-model? lambda-name/c (or/c #f (>=/c 0)))]
-  [glmnet-model-predictor-names (-> glmnet-model? (or/c #f (listof string?)))]
-  [glmnet-model-response-names (-> glmnet-model? (or/c #f (listof string?)))]
+  [rename remembered-predictor-names glmnet-model-predictor-names
+          (-> glmnet-model? (or/c #f (listof string?)))]
+  [rename remembered-response-names glmnet-model-response-names
+          (-> glmnet-model? (or/c #f (listof string?)))]
+  [rename model-class-labels glmnet-model-class-labels
+          (-> glmnet-model? (or/c #f (listof string?)))]
   [deviance-ratio (-> glmnet-model? (or/c real? (vectorof real? #:flat? #t)))]
   [predict
    (->i ([model glmnet-model?] [X data/c])
@@ -91,8 +95,7 @@
            prop:class-labels
            model-class-labels
            attach-data-names
-           data-predictor-names
-           data-response-names))
+           data-predictor-names))
 
 ;; What a fit through core/input.rkt remembers of its data: its predictors'
 ;; names, its classes' labels and its responses' names, each #f when it has
@@ -119,6 +122,15 @@
 (define data-predictor-names (data-name-ref data-input-predictors))
 (define data-class-labels (data-name-ref data-input-classes))
 (define data-response-names (data-name-ref data-input-responses))
+
+;; The public glmnet-model-predictor-names and glmnet-model-response-names:
+;; the names a model gives, as a formula model does, which key `coef`, or
+;; else those a fit from named data remembers, which do not.
+(define (remembered-predictor-names model)
+  (or (glmnet-model-predictor-names model) (data-predictor-names model)))
+
+(define (remembered-response-names model)
+  (or (glmnet-model-response-names model) (data-response-names model)))
 
 ;; How a model that names its predictors builds their design matrix from a
 ;; table for `predict`: a procedure of the model, the table and the name of the

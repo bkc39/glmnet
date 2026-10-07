@@ -42,10 +42,10 @@
 
 ;; For glmnet's data boundary (core/input.rkt) only: the conversions above with
 ;; the name of the procedure the user called. With #:checked? #t, the caller's
-;; contract has checked the column names and dtypes, as numeric-column-problem
+;; contract has checked the column names and dtypes, as column-dtype-problem
 ;; does; otherwise they are checked here.
 (module* support #f
-  (provide dataframe? series? column-names numeric-column-problem label-column-problem numeric-series?
+  (provide dataframe? series? column-names column-dtype-problem numeric-series? series->list
            dataframe->design-matrix dataframe-column->response series->response
            dataframe-column-values series-values))
 
@@ -152,15 +152,14 @@
                    #:row (for/first ([x (in-series s)] [i (in-naturals)] #:when (polars-null? x)) i)
                    #:column name)))
 
-;; What is wrong with df's column `name`, a string, as a numeric column, or #f.
-(define (numeric-column-problem df)
-  (dtype-problem df numeric-dtype?))
-
-;; What is wrong with df's column `name`, a string, as a column of values a
-;; table can hold, such as the class labels of a response: numbers, booleans,
-;; strings, or the symbols of a categorical or enum column; or #f.
-(define (label-column-problem df)
-  (dtype-problem df table-dtype?))
+;; What is wrong with df's column `name`, a string, as a column of `kind`, or
+;; #f: 'numeric, 'labels (values a table holds, such as class labels) or
+;; 'status (numbers or booleans).
+(define (column-dtype-problem df kind)
+  (dtype-problem df (case kind
+                      [(numeric) numeric-dtype?]
+                      [(labels) table-dtype?]
+                      [else (lambda (d) (or (eq? d 'boolean) (numeric-dtype? d)))])))
 
 (define (numeric-series? s)
   (numeric-dtype? (dtype s)))
@@ -235,26 +234,29 @@
     [else ys]))
 
 ;; The values of df's column `name`, a string, as a vector, as polars->table
-;; reads them: class labels, for a binomial or multinomial response.
+;; reads them: class labels, or the statuses of a Cox response.
 (define (dataframe-column-values who df name)
   (define s (ref df name))
-  (unless (table-dtype? (dtype s))
-    (raise-arguments-error who "the dataframe has a column whose values are not class labels"
-                           "column" name "dtype" (dtype s)))
-  (check-no-null who s name)
-  (cdar (dataframe->columns df #:columns (list name))))
+  (cond
+    [(not (table-dtype? (dtype s)))
+     (raise-arguments-error who "the dataframe has a column whose values are not class labels"
+                            "column" name "dtype" (dtype s))]
+    [else
+     (check-no-null who s name)
+     (cdar (dataframe->columns df #:columns (list name)))]))
 
 ;; The values of the series s, a response named `what` in errors, as a vector.
 (define (series-values who what s)
   (define d (dtype s))
-  (unless (table-dtype? d)
-    (raise-arguments-error who (format "~a is a series whose values are not class labels" what)
-                           "dtype" d))
-  (unless (zero? (null-count s))
-    (missing-error who what
-                   #:position (for/first ([x (in-series s)] [k (in-naturals)] #:when (polars-null? x))
-                                k)))
-  (for/vector ([x (in-series s)]) x))
+  (cond
+    [(not (table-dtype? d))
+     (raise-arguments-error who (format "~a is a series whose values are not class labels" what)
+                            "dtype" d)]
+    [(positive? (null-count s))
+     (missing-error who what
+                    #:position (for/first ([x (in-series s)] [k (in-naturals)] #:when (polars-null? x))
+                                 k))]
+    [else (for/vector ([x (in-series s)]) x)]))
 
 (define (polars->table df [columns (column-names df)])
   (define who 'polars->table)

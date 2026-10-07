@@ -220,7 +220,7 @@
                                    (series '(#t #f #t #f #f #t) #:name "event"))))
     (check-equal? (logistic-fit frame "event" #:predictors '("x") #:lambda 0.01)
                   (logistic-fit '((1.0) (2.0) (3.0) (4.0) (5.0) (6.0)) '(1 0 1 0 0 1) #:lambda 0.01))
-    ;; A categorical column holds symbols, which name the same classes as strings.
+    ;; Symbols, as a categorical column holds, name the same classes as strings.
     (define iris-symbols
       (for/list ([entry (in-list iris)])
         (if (equal? (car entry) "Species")
@@ -255,7 +255,7 @@
 
   (test-case "Cox: the response is a list of the time and status columns"
     (check-exn (blame-matching #rx"^cox-fit: contract violation"
-                               #rx"expected: a list of the names of two numeric columns of the table, the time and the status"
+                               #rx"expected: a list of the names of two columns of the table, the time and the status"
                                #rx"given: '\\(\"time\"\\), a list of one name"
                                #rx"in: the y argument of")
                (lambda () (cox-fit small-cox '("time") #:predictors '("x") #:lambda 0.1)))
@@ -265,8 +265,8 @@
                (lambda () (cox-cv small-cox "time" #:predictors '("x"))))
     (check-exn (blame-matching #rx"given: \"stat\", which is not a column of the dataframe")
                (lambda () (cox-fit cox-frame '("time" "stat") #:predictors '("V1") #:lambda 0.1)))
-    (check-exn (blame-matching #rx"given: \"status\", which is the response"
-                               #rx"in: the predictors argument of")
+    (check-exn (blame-matching #rx"given: column \"status\", which is the response"
+                               #rx"in: the #:predictors argument of")
                (lambda () (cox-fit small-cox '("time" "status") #:predictors '("x" "status")
                                    #:lambda 0.1)))
     (check-exn (blame-matching #rx"expected: no statuses argument, since y names the time and status columns of the table"
@@ -288,7 +288,7 @@
                                #rx"column: \"time\"\n  row: 1\n  element: 0.0")
                (lambda () (cox-path (table->polars (with "time" '(5.0 0.0 6.0 2.0))) '("time" "status")
                                     #:predictors '("x" "z"))))
-    (check-exn (blame-matching #rx"given: \"id\", a column of the dataframe that is not numeric")
+    (check-exn (blame-matching #rx"given: column \"id\", of dtype string")
                (lambda () (cox-fit (dataframe (list (series '("a" "b") #:name "id")
                                                     (series '(1.0 2.0) #:name "x")
                                                     (series '(1 1) #:name "status")))
@@ -306,7 +306,7 @@
                (lambda () (mgaussian-path mgaussian-table '("y1" y1) #:predictors '("V1"))))
     (check-exn (blame-matching #rx"given: \"y5\", which is not a column of the table")
                (lambda () (mgaussian-cv mgaussian-table '("y1" "y5") #:predictors '("V1"))))
-    (check-exn (blame-matching #rx"given: \"y2\", which is the response")
+    (check-exn (blame-matching #rx"given: column \"y2\", which is the response")
                (lambda () (mgaussian-fit mgaussian-table ys #:predictors '("V1" "y2") #:lambda 0.1)))
     (check-exn (error-matching #rx"^mgaussian-fit: the table has an element that is not finite"
                                #rx"column: \"y2\"\n  row: 1")
@@ -356,6 +356,113 @@
     (check-exn (error-matching #rx"^logistic-cv: a binomial response needs two classes"
                                #rx"classes: '\\(\"FALSE\"\\)")
                (lambda () (logistic-cv '((1.0) (2.0) (3.0)) '(#f #f #f)))))
+
+  ;; --- what a fit remembers ----------------------------------------------------------------
+
+  (test-case "the path inside a cross-validated fit returns class labels and reads by name"
+    (define new-iris (new-table iris+ iris-predictors 5))
+    (define b (logistic-cv iris+ "virginica" #:predictors iris-predictors #:fold-ids (folds 150 3)
+                           #:nlambda 10))
+    (check-equal? (predict (glmnet-cv-path b) new-iris #:type 'class #:lambda 0.01)
+                  (predict b new-iris #:type 'class #:lambda 0.01))
+    (check-not-false (andmap (lambda (c) (member c '("no" "yes")))
+                             (predict (glmnet-cv-path b) new-iris #:type 'class #:lambda 0.01)))
+    (define m (multinomial-cv iris "Species" #:predictors iris-predictors #:fold-ids (folds 150 3)
+                              #:nlambda 10))
+    (check-equal? (predict (glmnet-cv-path m) (table->polars new-iris) #:type 'class #:lambda 0.01)
+                  (make-list 5 "setosa"))
+    (define g (mgaussian-cv mgaussian-table '("y1" "y2") #:predictors (v-names 6)
+                            #:fold-ids (folds 100 4) #:nlambda 10))
+    (check-equal? (glmnet-model-response-names (glmnet-cv-path g)) '("y1" "y2")))
+
+  (test-case "the accessors read what a fit remembers, and coef keeps its layout"
+    (define m (multinomial-fit iris "Species" #:predictors iris-predictors #:lambda 0.05))
+    (define explicit (multinomial-fit (table->design-matrix iris iris-predictors)
+                                      (for/list ([s (in-list (column iris "Species"))])
+                                        (index-of species s))
+                                      #:lambda 0.05))
+    (check-equal? (glmnet-model-predictor-names m) iris-predictors)
+    (check-equal? (glmnet-model-class-labels m) species)
+    (check-false (glmnet-model-response-names m))
+    (check-equal? (coef m) (coef explicit))
+    (check-false (glmnet-model-predictor-names explicit))
+    (check-false (glmnet-model-class-labels explicit))
+    (define g (mgaussian-path mgaussian-table '("y2" "y1") #:predictors (v-names 6) #:nlambda 5))
+    (check-equal? (glmnet-model-response-names g) '("y2" "y1"))
+    (check-equal? (glmnet-model-class-labels (logistic-fit '((1.0) (2.0) (3.0) (4.0))
+                                                           '(#t #f #f #t) #:lambda 0.01))
+                  '("FALSE" "TRUE"))
+    (define formula (formula-fit (~ Species all) iris #:family 'multinomial #:lambda 0.05))
+    (check-equal? (glmnet-model-class-labels formula) species)
+    (check-not-equal? (coef formula) (coef m)))
+
+  ;; --- response forms ------------------------------------------------------------------------
+
+  (define X6 '((1.0 2.0) (2.0 1.0) (3.0 4.0) (4.0 3.0) (5.0 6.0) (6.0 4.0)))
+
+  (test-case "a math array of labels is a response of labels, as a list is"
+    (define labels '("p" "q" "p" "q" "q" "p"))
+    (check-equal? (logistic-fit X6 (list->array labels) #:lambda 0.01)
+                  (logistic-fit X6 labels #:lambda 0.01))
+    (check-equal? (logistic-predict (logistic-fit X6 (list->array labels) #:lambda 0.01) X6)
+                  (logistic-predict (logistic-fit X6 labels #:lambda 0.01) X6))
+    (define kinds '(a b c a b c))
+    (check-equal? (multinomial-path X6 (list->array kinds) #:nlambda 5)
+                  (multinomial-path X6 kinds #:nlambda 5))
+    (check-equal? (glmnet-model-class-labels (multinomial-path X6 (list->array kinds) #:nlambda 5))
+                  '("a" "b" "c")))
+
+  (test-case "a Cox status may be a boolean, #t for an event, as R's Surv reads it"
+    (define times '(5.0 3.0 6.0 2.0 4.0 1.0))
+    (define statuses '(1 0 1 1 0 1))
+    (define events (map (lambda (s) (= s 1)) statuses))
+    (define expected (cox-fit X6 times statuses #:lambda 0.05))
+    (check-equal? (cox-fit X6 times events #:lambda 0.05) expected)
+    (check-equal? (cox-fit X6 times (list->vector events) #:lambda 0.05) expected)
+    (check-equal? (cox-fit X6 times (series events #:name "d") #:lambda 0.05) expected)
+    (define table (list (cons "a" (list->vector (map car X6))) (cons "b" (list->vector (map cadr X6)))
+                        (cons "t" (list->vector times)) (cons "d" (list->vector events))))
+    (check-equal? (cox-fit table '("t" "d") #:predictors '("a" "b") #:lambda 0.05) expected)
+    (check-equal? (cox-fit (table->polars table) '("t" "d") #:predictors '("a" "b") #:lambda 0.05)
+                  expected)
+    (check-equal? (glmnet-model->path (formula-fit (~ (surv t d) (+ a b)) table #:family 'cox
+                                                   #:lambda 0.05))
+                  (glmnet-model->path expected))
+    (check-exn (blame-matching #rx"expected: a boolean, as the first element is"
+                               #rx"the element at position 2 of")
+               (lambda () (cox-fit X6 times '(#t #f 1 #t #f #t) #:lambda 0.05))))
+
+  (test-case "fold ids may be a Polars series or a math array, as a response may"
+    (define ids (folds 150 3))
+    (define expected
+      (logistic-cv iris+ "virginica" #:predictors iris-predictors #:fold-ids ids #:nlambda 5))
+    (check-equal? (logistic-cv iris+ "virginica" #:predictors iris-predictors #:nlambda 5
+                               #:fold-ids (series ids #:name "fold"))
+                  expected)
+    (check-equal? (logistic-cv iris+ "virginica" #:predictors iris-predictors #:nlambda 5
+                               #:fold-ids (list->array ids))
+                  expected)
+    (check-equal? (formula-cv (~ virginica (+ Sepal.Length Sepal.Width Petal.Length Petal.Width))
+                              iris+ #:family 'binomial #:nlambda 5
+                              #:fold-ids (series ids #:name "fold"))
+                  (formula-cv (~ virginica (+ Sepal.Length Sepal.Width Petal.Length Petal.Width))
+                              iris+ #:family 'binomial #:nlambda 5 #:fold-ids ids))
+    (check-exn (blame-matching #rx"cross-validation needs at least 3 folds"
+                               #rx"the #:fold-ids argument")
+               (lambda () (logistic-cv iris+ "virginica" #:predictors iris-predictors
+                                       #:fold-ids (series (folds 150 2) #:name "fold")))))
+
+  (test-case "unnamed Cox errors call the response times, and short statuses have no hint"
+    (check-exn (error-matching #rx"^cox-fit: times has an element that is not finite")
+               (lambda () (cox-fit X6 '(1.0 2.0 +inf.0 4.0 5.0 6.0) '(1 1 0 1 1 1) #:lambda 0.1)))
+    (check-exn (lambda (e)
+                 (and ((error-matching #rx"^cox-fit: statuses does not have one entry per row of X"
+                                       #rx"length of statuses: 2") e)
+                      (not (regexp-match? #rx"hint" (exn-message e)))))
+               (lambda () (cox-fit X6 '(1.0 2.0 3.0 4.0 5.0 6.0) '(1 0) #:lambda 0.1)))
+    (check-exn (error-matching #rx"^cox-fit: times does not have one entry per row of X"
+                               #rx"hint: rows are observations")
+               (lambda () (cox-fit X6 '(1.0 2.0) '(1 0 1 1 0 1) #:lambda 0.1))))
 
   ;; --- loading ---------------------------------------------------------------------------
 
