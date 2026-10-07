@@ -11,7 +11,8 @@
          racket/flonum
          ffi/vector
          (only-in "../data.rkt" design-matrix/c response/c)
-         (submod "../data.rkt" support))
+         (submod "../data.rkt" support)
+         (only-in (submod "input.rkt" support) unnamed->design-matrix))
 
 (provide design-matrix/c response/c
          design-matrix-data design-matrix-nrows design-matrix-ncols
@@ -33,14 +34,22 @@
 
 ;; --- prediction ------------------------------------------------------------
 
-;; The new-data argument of a prediction helper, as a design matrix with one
-;; column per coefficient.
+;; The new-data argument of a prediction helper, unnamed data, as a design
+;; matrix with one column per coefficient.
 (define (prediction-matrix X ni who)
-  (define x (as-design-matrix X who "X"))
-  (unless (= (design-matrix-ncols x) ni)
-    (raise-arguments-error who "X does not have one column per coefficient"
-                           "columns of X" (design-matrix-ncols x) "coefficients" ni))
-  x)
+  (define x (unnamed->design-matrix who "X" X))
+  (define no (design-matrix-nrows x))
+  (define nc (design-matrix-ncols x))
+  (cond
+    [(= nc ni) x]
+    [(= no ni)
+     (raise-arguments-error who "X does not have one column per coefficient"
+                            "columns of X" nc "coefficients" ni "rows of X" no
+                            "hint" (unquoted-printing-string
+                                    "rows are observations; is X transposed?"))]
+    [else
+     (raise-arguments-error who "X does not have one column per coefficient"
+                            "columns of X" nc "coefficients" ni)]))
 
 ;; intercept + x_i . beta for row i of the design matrix x.
 (define (linear-predictor x i intercept beta)

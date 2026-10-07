@@ -36,6 +36,11 @@ glmnet/                        Racket collection
                                mtcars and iris, from datasets/*.csv
   datasets/*.csv               R's data, written by scripts/export-datasets.R
   core/*.rkt                   one module per family; marshal.rkt, path.rkt shared
+  core/input.rkt               the one boundary from the user's data (unnamed: design
+                               matrices, nested rows, math/matrix; named: tables,
+                               Polars dataframes) to a design matrix and a response;
+                               recognises Polars and math values only once the program
+                               has loaded them, through each adapter's support submodule
   core/model.rkt               gen:glmnet-model: predict / coef / deviance-ratio / in-path on any result
   core/cv.rkt                  cross-validation (R's cv.glmnet) behind every family's *-cv
   core/formula.rkt             formula front end: (~ y all) on a table -> any family,
@@ -211,8 +216,10 @@ different `α` (`parm`) and `λ`. Each new capability is shipped as one unit:
    `define-glmnet` (`_f64vector`/`_s32vector` buffers, `(_ptr o …)` scalar outs;
    no allocator/finalizer — these are pure calls). Add a contracted wrapper in
    `core/` (inputs through the design-matrix layer, `data.rkt`, via
-   `core/marshal.rkt`; `jerr` check; a result struct that implements
-   `gen:glmnet-model` from `core/model.rkt`, so `predict`, `coef` and printing
+   `core/marshal.rkt`, or, for a procedure that takes data directly, the
+   contract `fit/c` and the conversion `fit-input` of `core/input.rkt`, with
+   `with-data-predictors` on the result; `jerr` check; a result struct that
+   implements `gen:glmnet-model` from `core/model.rkt`, so `predict`, `coef` and printing
    work on it; prediction helpers are `predict` at a fixed `#:type`).
 5. **Test the Racket binding.** `glmnet/tests/*-test.rkt` rackunit: round-trip vs
    closed-form / known values, `jerr` error surfacing, shape-mismatch contract

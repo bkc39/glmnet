@@ -20,8 +20,10 @@
          "marshal.rkt"
          "path.rkt"
          (submod "path.rkt" support)
-         (only-in "../data.rkt" design-matrix? table?)
-         (only-in (submod "../data.rkt" support) select-table-columns))
+         (only-in "../data.rkt" table?)
+         (only-in (submod "../data.rkt" support) select-table-columns)
+         (only-in "input.rkt" data/c named-data?)
+         (only-in (submod "input.rkt" support) named->design-matrix))
 
 (define lambda-arg/c (or/c (>=/c 0) (and/c (listof (>=/c 0)) pair?)))
 (define lambda-name/c (or/c 'lambda-min 'lambda-1se))
@@ -69,7 +71,7 @@
   [glmnet-model-response-names (-> glmnet-model? (or/c #f (listof string?)))]
   [deviance-ratio (-> glmnet-model? (or/c real? (vectorof real? #:flat? #t)))]
   [predict
-   (->i ([model glmnet-model?] [X (or/c design-matrix/c table?)])
+   (->i ([model glmnet-model?] [X data/c])
         (#:type [type type/c] #:lambda [s (or/c lambda-arg/c lambda-name/c)])
         #:pre/name (model) "the model has at least one fitted λ" (fitted? model)
         [result list?])]
@@ -87,7 +89,28 @@
            predict-as
            prop:predictor-matrix
            prop:class-labels
-           model-class-labels))
+           model-class-labels
+           with-data-predictors
+           data-predictor-names))
+
+;; The names of the predictors of a model fitted from named data (core/input.rkt),
+;; which `predict` reads named data by. They are an impersonator property of a
+;; chaperone of the result, so that the result is the struct it would be
+;; without them, positional fields, `equal?` and `coef` included.
+(define-values (prop:data-predictors data-predictors? data-predictors-ref)
+  (make-impersonator-property 'data-predictors))
+
+;; model, remembering `names`, or model itself when names is #f. Every result
+;; type is transparent, so struct-info finds its type.
+(define (with-data-predictors model names)
+  (cond
+    [names
+     (define-values (type skipped?) (struct-info model))
+     (chaperone-struct model type prop:data-predictors names)]
+    [else model]))
+
+(define (data-predictor-names model)
+  (and (data-predictors? model) (data-predictors-ref model)))
 
 ;; How a model that names its predictors builds their design matrix from a
 ;; table for `predict`: a procedure of the model, the table and the name of the
@@ -354,9 +377,12 @@
 ;; The new data X as a design matrix with one column per predictor of the
 ;; model's path p: for a model with named predictors, the design matrix that
 ;; the model builds from the table X, or the columns of X with those names, in
-;; the model's order; otherwise X itself, column for column.
+;; the model's order; for a model fitted from named data, the columns of named
+;; data X with its predictors' names; otherwise unnamed data X, column for
+;; column.
 (define (model-matrix who model X p)
   (define names (model-predictor-names who model p))
+  (define data-names (data-predictor-names model))
   (cond
     [names
      (unless (table? X)
@@ -365,9 +391,11 @@
      (if (predictor-matrix? model)
          ((predictor-matrix-ref model) model X who)
          (select-table-columns X names who))]
-    [(and (table? X) (not (design-matrix? X)))
-     (raise-arguments-error who "the model's predictors are not named, so X must be a design matrix"
-                            "X" X)]
+    [(and data-names (named-data? X)) (named->design-matrix who X data-names)]
+    [(named-data? X)
+     (raise-arguments-error
+      who (string-append "the model's predictors are not named, so X must be a design matrix, "
+                         "rows or a matrix, not a table or a dataframe"))]
     [else (prediction-matrix X (path-num-predictors p) who)]))
 
 ;; `predict`, with `who` named in errors; the family prediction helpers are
