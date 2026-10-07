@@ -81,12 +81,15 @@ as `glmnet/data/csv`, and the example datasets are `glmnet/datasets`;
 names:
 
 - the guide's Data chapter, `guide/data.scrbl` (tag `data`), has a section
-  `data-<format>` for each format and `data-datasets` for the datasets;
+  `data-<format>` for each format, which fits the format directly, and
+  `data-datasets` for the datasets; the format's conversions go in the one
+  table and examples of `data-explicit`, the explicit route;
 - the reference has a top-level section `ref-data-<format>` for each, with
   its `@defmodule`, after `ref-data` (the design-matrix layer) and before
   `ref-datasets`;
 - the Concepts section `concepts-data` holds only what every fitter accepts:
-  the design matrix, the response forms and named data;
+  unnamed data (matrices, rows, design matrices) with a response, and named
+  data (tables, dataframes) with the response and `#:predictors` named;
 - the literate example `examples/13-data-sources.rkt` (guide page
   `guide/examples/data-sources.scrbl`, tag `ex-data-sources`) fits R's
   `mtcars` from every format, and its harness checks that each gives the
