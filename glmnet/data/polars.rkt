@@ -45,8 +45,9 @@
 ;; contract has checked the column names and dtypes, as numeric-column-problem
 ;; does; otherwise they are checked here.
 (module* support #f
-  (provide dataframe? series? column-names numeric-column-problem
-           dataframe->design-matrix dataframe-column->response series->response))
+  (provide dataframe? series? column-names numeric-column-problem label-column? numeric-series?
+           dataframe->design-matrix dataframe-column->response series->response
+           dataframe-column-values series-values))
 
 ;; --- dtypes --------------------------------------------------------------------
 
@@ -155,6 +156,15 @@
 (define (numeric-column-problem df)
   (dtype-problem df numeric-dtype?))
 
+;; Whether df's column `name`, a string, holds values a table can: numbers,
+;; booleans, strings, or the symbols of a categorical or enum column, such as
+;; the class labels of a response.
+(define (label-column? df name)
+  (table-dtype? (dtype (ref df name))))
+
+(define (numeric-series? s)
+  (numeric-dtype? (dtype s)))
+
 ;; Checks that df has rows and, unless checked? is #t, a numeric column with
 ;; each of `names`, strings.
 (define (check-numeric-columns who df names checked?)
@@ -223,6 +233,28 @@
                                  k))]
     [bad (element-error who what "not finite" (cdr bad) #:position (car bad))]
     [else ys]))
+
+;; The values of df's column `name`, a string, as a vector, as polars->table
+;; reads them: class labels, for a binomial or multinomial response.
+(define (dataframe-column-values who df name)
+  (define s (ref df name))
+  (unless (table-dtype? (dtype s))
+    (raise-arguments-error who "the dataframe has a column whose values are not class labels"
+                           "column" name "dtype" (dtype s)))
+  (check-no-null who s name)
+  (cdar (dataframe->columns df #:columns (list name))))
+
+;; The values of the series s, a response named `what` in errors, as a vector.
+(define (series-values who what s)
+  (define d (dtype s))
+  (unless (table-dtype? d)
+    (raise-arguments-error who (format "~a is a series whose values are not class labels" what)
+                           "dtype" d))
+  (unless (zero? (null-count s))
+    (missing-error who what
+                   #:position (for/first ([x (in-series s)] [k (in-naturals)] #:when (polars-null? x))
+                                k)))
+  (for/vector ([x (in-series s)]) x))
 
 (define (polars->table df [columns (column-names df)])
   (define who 'polars->table)
