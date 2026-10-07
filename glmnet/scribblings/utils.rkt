@@ -31,7 +31,7 @@
                     glmnet/data/polars
                     (only-in polars
                              dataframe? series? dataframe series read-csv ref column-names
-                             dtype polars-null dataframe->f64vector cast)
+                             dtype polars-null dataframe->f64vector cast series->list)
                     (prefix-in pl: (only-in polars head))
                     glmnet/datasets
                     racket
