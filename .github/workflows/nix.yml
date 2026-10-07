@@ -51,13 +51,13 @@ jobs:
             # nix bash has no compgen; an unmatched glob stays literal
             stamps=("$PLTUSERHOME"/.linters-*)
             if [ ! -e "${stamps[0]}" ]; then
-              echo "::error::The ci shell could not install the pinned Resyntax; see its log above."
+              echo "::error::The ci shell could not install the pinned Resyntax or lint/; see its log above."
               exit 1
             fi
             # || keeps set -e from exiting before $out is shown
             rc=0
-            out=$(resyntax analyze --local-git-repository . "$BASE_REF" \
-                    --analyzer-timeout 30000 2>&1) || rc=$?
+            out=$(resyntax analyze --refactoring-suite glmnet-lint/style project-style \
+                    --local-git-repository . "$BASE_REF" --analyzer-timeout 30000 2>&1) || rc=$?
             echo "$out"
             if [ "$rc" -ne 0 ]; then
               echo "::error::Resyntax exited $rc without completing the analysis."
@@ -71,7 +71,7 @@ jobs:
               status=1
             fi
             if grep -qE "resyntax: .*\.rkt:[0-9]+:[0-9]+ \[" <<<"$out"; then
-              echo "::error::Resyntax found refactoring suggestions. Run: resyntax fix --local-git-repository . origin/$BASE_NAME"
+              echo "::error::Resyntax found refactoring suggestions. Run: resyntax fix --refactoring-suite glmnet-lint/style project-style --local-git-repository . origin/$BASE_NAME"
               status=1
             fi
             timeouts=$(grep -c "timed out" <<<"$out" || true)
