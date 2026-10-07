@@ -56,7 +56,7 @@
          'words
          (only-in (submod "../data.rkt" support)
                   column-name->string table-names select-table-values table-column->flvector
-                  flvectors->design-matrix))
+                  flvectors->design-matrix absent-columns absent-columns-error))
 
 (provide (all-from-out 'words)
          column-name?
@@ -688,16 +688,9 @@
 (define (table-reader who mt table)
   (define needed (model-terms-inputs mt))
   (define available (table-names table who))
-  (define present (for/hash ([name (in-list available)]) (values name #t)))
-  (define missing (filter (lambda (name) (not (hash-ref present name #f))) needed))
-  (match missing
-    ['() (void)]
-    [(list name)
-     (raise-arguments-error who "the table has no column with this name"
-                            "column" name "columns of the table" available)]
-    [names
-     (raise-arguments-error who "the table has no columns with these names"
-                            "columns" names "columns of the table" available)])
+  (define absent (absent-columns needed available))
+  (when absent
+    (absent-columns-error who "table" absent available))
   (define by-name
     (for/hash ([name (in-list needed)] [vs (in-list (select-table-values table needed who))])
       (values name vs)))

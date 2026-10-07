@@ -37,8 +37,8 @@
 ;; for a prediction, (new-data->design-matrix who X names); fold ids as a
 ;; sequence, (one-dimensional-values v); and, for the formula front end, a
 ;; table or a dataframe X's column names, (named-column-names who X), the
-;; columns `names` of it as a table, (named->table who X names [numeric]), and
-;; what errors call it, (named-data-kind X).
+;; columns `names` of it as a table, (named->table who X names #:responses
+;; #:present?), and what errors call it, (named-data-kind X).
 (module* support #f
   (provide fit/c fit-input class-fit-input survival-fit-input responses-fit-input
            new-data->design-matrix one-dimensional-values
@@ -536,11 +536,15 @@
       (table-names X who)
       ((adapter-ref form 'column-names) X)))
 
-(define (named->table who X names [numeric '()])
+;; responses maps response columns to their kinds; present? when X is known to
+;; have every column.
+(define (named->table who X names #:responses [responses '()] #:present? [present? #f])
   (define form (table-or-dataframe X))
   (if (eq? form 'table)
       X
-      ((adapter-ref form 'dataframe->table) who X (remove-duplicates names) numeric)))
+      ((adapter-ref form 'dataframe->table)
+       who X (remove-duplicates (append (map car responses) names))
+       #:responses responses #:present? present?)))
 
 (define (named-data-kind X) (if (table? X) "table" "dataframe"))
 

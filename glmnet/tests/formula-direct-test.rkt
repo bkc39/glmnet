@@ -185,12 +185,14 @@
     (check-exn (error-matching #rx"^formula-fit: the dataframe has a column whose dtype is not numeric, boolean, string, categorical or enum"
                                #rx"column: \"bought\"\n  dtype: 'date")
                (lambda () (formula-fit (~ mpg (- all id)) cars-frame #:lambda 0.1)))
-    (check-exn (error-matching #rx"^formula-cv: the dataframe has a column that is not numeric"
-                               #rx"column: \"id\"\n  dtype: 'string")
+    (check-exn (error-matching #rx"^formula-cv: the response column \"id\" is not numeric\n  dtype: 'string$")
                (lambda () (formula-cv (~ id wt) cars-frame #:fold-ids (folds 32 4))))
-    (check-exn (error-matching #rx"^formula-fit: the dataframe has a column that is not numeric"
-                               #rx"column: \"id\"")
+    (check-exn (error-matching #rx"^formula-fit: the response column \"id\" is not numeric\n  dtype: 'string$")
+               (lambda () (formula-fit (~ (id gear) wt) cars-frame #:family 'mgaussian #:lambda 0.1)))
+    (check-exn (error-matching #rx"^formula-fit: the response column \"id\" is not numeric or boolean\n  dtype: 'string$")
                (lambda () (formula-fit (~ (surv mpg id) wt) cars-frame #:family 'cox #:lambda 0.1)))
+    (check-exn (error-matching #rx"^formula-fit: the response column \"id\" is not numeric\n  dtype: 'string$")
+               (lambda () (formula-fit (~ (surv id am) wt) cars-frame #:family 'cox #:lambda 0.1)))
     (check-exn (error-matching #rx"^formula-cv: fold-ids does not have one entry per row of the dataframe"
                                #rx"rows of the dataframe: 32")
                (lambda () (formula-cv (~ mpg wt hp) cars-frame #:fold-ids '(0 1 2))))
@@ -201,6 +203,15 @@
                (lambda () (formula-fit (~ mpg wt) (head cars-frame 0) #:lambda 0.1)))
     (check-exn (blame-matching #rx"expected: \\(or/c table[?] named-data[?]\\)" #rx"given: 5")
                (lambda () (formula-fit (~ mpg wt) 5 #:lambda 0.1))))
+
+  (test-case "a table's response that is not numbers is an error of the response column"
+    (define message
+      #rx"^formula-fit: the response column \"id\" has an element that is not a real number\n  row: 0\n  element: \"car 0\"$")
+    (check-exn (error-matching message) (lambda () (formula-fit (~ id wt) cars #:lambda 0.1)))
+    (check-exn (error-matching message)
+               (lambda () (formula-fit (~ (id gear) wt) cars #:family 'mgaussian #:lambda 0.1)))
+    (check-exn (error-matching message)
+               (lambda () (formula-fit (~ (surv mpg id) wt) cars #:family 'cox #:lambda 0.1))))
 
   (test-case "predict reads the columns the terms read, by name"
     (define m (formula-fit (mpg . ~ . wt * hp + (factor cyl)) cars-frame #:lambda 0.1))

@@ -19,8 +19,6 @@
          racket/generic
          racket/list
          racket/match
-         (only-in racket/vector vector-map)
-         (only-in racket/flonum in-flvector)
          "terms.rkt"
          "model.rkt"
          (only-in (submod "model.rkt" support) prop:predictor-matrix prop:class-labels)
@@ -38,10 +36,10 @@
          "poisson.rkt"
          "mgaussian.rkt"
          (only-in "../data.rkt" table? design-matrix? design-matrix-column-names
-                  design-matrix->columns)
+                  columns->design-matrix)
          (only-in (submod "../data.rkt" support)
-                  design-matrix-nrows column-name->string select-table-columns
-                  select-table-values one-dimensional-length table-column->flvector status->real)
+                  design-matrix-nrows column-name->string
+                  select-table-values one-dimensional-length ->finite-flonum status->real)
          (only-in (submod "input.rkt" support)
                   one-dimensional-values named-column-names named->table named-data-kind))
 
@@ -607,21 +605,9 @@
     [(? list? names) (map column-name->string names)]
     [name (list (column-name->string name))]))
 
-;; The terms of formula f on `data`, a table or a dataframe: R's terms(),
-;; without a response column that stands alone as a term, which R's
-;; model.matrix drops with a warning, as this does, and with the levels of its
-;; factors, which the data's values decide. The response columns must be
-;; columns of the data and distinct, and so must every column the formula
-;; names, even one it removes, as R's model.frame evaluates them all. A
-;; transform must read a column, from which its rows come. The design
-;; matrix's column names must be distinct, and none "(Intercept)", as coef
-;; keys the coefficients by them and the intercept by that name. The second
-;; value holds the variables' values, which terms->design-matrix takes as
-;; #:evaluated on the third, the table the terms were read from: `data`
-;; itself, or the dataframe's columns that the terms read, and its response
-;; columns too when `responses-as` is 'numeric, which they must then be, or
-;; 'labels. Each transform is evaluated once, as R's model.frame evaluates it.
-(define (formula-expansion who f data [responses-as #f])
+;; R's terms() of f on `data`, their variables' values and the table they were
+;; read from; with #:family, also the response columns, as a fit reads them.
+(define (formula-expansion who f data #:family [family-name #f])
   (define kind (named-data-kind data))
   (define columns (named-column-names who data))
   (define responses (response-columns f))
@@ -647,9 +633,8 @@
     (log-fit-warning who "the response column ~s appeared on the right-hand side and was dropped"
                      (variable-label v)))
   (define table
-    (named->table who data
-                  (append (if responses-as responses '()) (model-terms-inputs kept))
-                  (if (eq? responses-as 'numeric) responses '())))
+    (named->table who data (model-terms-inputs kept)
+                  #:responses (response-kinds family-name responses) #:present? #t))
   (define-values (resolved evaluated) (resolve-levels/evaluated who kept table))
   (define names (model-terms-column-names resolved))
   (when (member "(Intercept)" names)
@@ -660,6 +645,17 @@
     (raise-arguments-error who "two columns of the formula's design matrix have the same name"
                            "name" same-name "formula" f))
   (values resolved evaluated table))
+
+;; The kind of each response column of a fit of the family, as named->table's
+;; #:responses; none without a family.
+(define (response-kinds family-name responses)
+  (for/list ([name (in-list responses)]
+             [kind (in-list (case family-name
+                              [(#f) '()]
+                              [(binomial multinomial) '(labels)]
+                              [(cox) '(numeric status)]
+                              [else (map (lambda (name) 'numeric) responses)]))])
+    (cons name kind)))
 
 (define (check-predictors who f mt)
   (when (null? (model-terms-terms mt))
@@ -847,24 +843,22 @@
 ;; response's two is the one whose probability the model gives. Otherwise
 ;; the classes are #f.
 (define (model-frame who f data family-name)
-  (define classes? (and (memq family-name '(binomial multinomial)) #t))
-  (define-values (mt evaluated table)
-    (formula-expansion who f data (if (or classes? (eq? family-name 'cox)) 'labels 'numeric)))
+  (define-values (mt evaluated table) (formula-expansion who f data #:family family-name))
   (check-predictors who f mt)
   (define x (terms->design-matrix who mt table #:evaluated evaluated))
   (define responses (response-columns f))
   (define column (car responses))
   (define-values (classes indices)
-    (if classes?
+    (if (memq family-name '(binomial multinomial))
         (response-classes who column (car (select-table-values table (list column) who)))
         (values #f #f)))
-  (define y
-    (and (not classes) (not (eq? family-name 'cox)) (select-table-columns table responses who)))
   (define ys
     (cond
       [classes (list (for/list ([k (in-vector indices)]) (exact->inexact k)))]
-      [y (design-matrix->columns y)]
-      [else (survival-columns who table responses)]))
+      [(eq? family-name 'cox)
+       (list (response-reals who table column)
+             (response-reals who table (cadr responses) status->real))]
+      [else (for/list ([name (in-list responses)]) (response-reals who table name))]))
   (define y1 (car ys))
   (unless (= (length y1) (design-matrix-nrows x))
     (raise-arguments-error who "the response and the predictors have different lengths"
@@ -898,16 +892,15 @@
       (check-values who column y1 positive? "a survival time must be positive")
       (check-values who (cadr responses) (cadr ys) zero-or-one? "an event status must be 0 or 1")
       (list y1 (cadr ys))]
-     [(mgaussian) (list y)])
+     [(mgaussian) (list (columns->design-matrix ys #:column-names responses))])
    classes))
 
-;; The time and status columns of a (surv time status) response, as lists of
-;; reals; a boolean status is 1 for #t, an event, as R's Surv reads it.
-(define (survival-columns who table responses)
-  (match-define (list time status) (select-table-values table responses who))
-  (for/list ([column (in-list (list time (vector-map status->real status)))]
-             [name (in-list responses)])
-    (for/list ([v (in-flvector (table-column->flvector column name who))]) v)))
+;; The response column `name` of the table as a list of flonums, each value
+;; read by ->real, as status->real reads a Cox status.
+(define (response-reals who table name [->real values])
+  (define what (format "the response column ~s" name))
+  (for/list ([x (in-vector (car (select-table-values table (list name) who)))] [i (in-naturals)])
+    (->finite-flonum (->real x) who what i #f)))
 
 ;; An #:intercept? option that was not given.
 (define unsupplied-intercept (string->uninterned-symbol "unsupplied"))
