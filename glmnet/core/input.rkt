@@ -22,11 +22,11 @@
  (contract-out
   [data/c flat-contract?]
   [named-data? (-> any/c boolean?)]
-  [response-for/c (->* (any/c flat-contract?) (#:classes? boolean?) flat-contract?)]
-  [survival-for/c (-> any/c flat-contract?)]
-  [statuses-for/c (-> any/c any/c flat-contract?)]
-  [responses-for/c (-> any/c flat-contract?)]
-  [predictors-for/c (-> any/c any/c flat-contract?)]))
+  [response-for/c (->* (data/c flat-contract?) (#:classes? boolean?) flat-contract?)]
+  [survival-for/c (-> data/c flat-contract?)]
+  [statuses-for/c (-> data/c any/c flat-contract?)]
+  [responses-for/c (-> data/c flat-contract?)]
+  [predictors-for/c (-> data/c any/c flat-contract?)]))
 
 ;; For the family modules and core/model.rkt only: the contract of a fitter,
 ;; (fit/c response-ctc [#:argument id] [#:statuses ctc] (mandatory-kw ctc ...)
@@ -88,7 +88,7 @@
                  (dynamic-require (library-adapter (adapter-library a)) name)))))
 
 ;; Each module registry's adapters, by library.
-(define adapters (make-weak-hasheq))
+(define adapters (make-ephemeron-hasheq))
 
 ;; lib's adapter in ns's module registry, loaded there when the program has
 ;; declared both lib and glmnet in it; otherwise #f.
