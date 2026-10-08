@@ -466,7 +466,7 @@
 
   ;; --- loading ---------------------------------------------------------------------------
 
-  (test-case "(require glmnet) and fits from tables of labels load neither Polars nor math/matrix"
+  (test-case "(require glmnet), and fits and formulas from tables of labels, load neither Polars nor math/matrix"
     (parameterize ([current-namespace (make-base-empty-namespace)])
       (namespace-require 'racket/base)
       (namespace-require 'glmnet)
@@ -478,6 +478,10 @@
       (eval '(cox-linear-predictor (cox-fit cells '("t" "d") #:predictors '("x" "z") #:lambda 0.1)
                                    cells))
       (eval '(mgaussian-path cells '("x" "z") #:predictors '("t")))
+      (eval '(predict (formula-fit (~ k x z) cells #:family 'multinomial #:lambda 0.1)
+                      (hash "x" '(3) "z" '(3)) #:type 'class))
+      (eval '(coef (formula-cv (~ (surv t d) x z) cells #:family 'cox #:fold-ids '(0 1 2 0 1 2)
+                                 #:nlambda 5)))
       (for ([mod (in-list '(polars glmnet/data/polars math/array math/matrix glmnet/data/math
                                    typed/racket/base plot glmnet/plot))])
         (check-false (module-declared? mod #f) (format "~a is declared" mod))))))

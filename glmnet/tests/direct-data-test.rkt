@@ -363,6 +363,31 @@
     (check-true (declared? ns 'glmnet/data/polars))
     (check-true (declared? ns 'glmnet/data/math)))
 
+  ;; Formulas on every plain table: an association list, a hash and a design
+  ;; matrix with column names, fitted, cross-validated and predicted from.
+  (define plain-formulas
+    '((define table (list (cons "a" #(1 3 5 2 4 6)) (cons "b" #(2 4 7 2 1 3))
+                          (cons "k" #("p" "q" "p" "q" "q" "p")) (cons "y" #(1 2 4 3 5 4))))
+      (define m (formula-fit (y . ~ . a * b + (log a) + (factor k)) table #:lambda 0.1))
+      (predict m (hash "a" '(2) "b" '(1) "k" '("q")))
+      (predict (formula-path (~ y all) (hash "a" '(1 3 5 2) "z" '("p" "q" "p" "q") "y" '(1 2 4 3)))
+               (hash "a" '(2) "z" '("q")) #:lambda 0.1)
+      (predict (formula-cv (~ k a b) table #:family 'binomial #:fold-ids '(0 1 2 0 1 2) #:nlambda 5)
+               table #:type 'class)
+      (formula-predictor-names (~ y a (factor k)) table)
+      (formula-design-matrix (~ y (: a b))
+                             (columns->design-matrix '((1 3 5) (2 4 7) (1 2 4))
+                                                     #:column-names '("a" "b" "y")))
+      (with-handlers ([exn:fail? void]) (formula-fit (~ y nope) table #:lambda 0.1))))
+
+  (test-case "a formula on a plain table never consults a library, though it is declared"
+    (define ns (glmnet-namespace '((for-label polars) math/array)))
+    (parameterize ([current-namespace ns])
+      (for-each eval plain-formulas))
+    (check-false (declared? ns 'glmnet/data/polars))
+    (check-false (declared? ns 'glmnet/data/math))
+    (check-false (declared? ns 'math/matrix)))
+
   (test-case "glmnet attached to another namespace reads the dataframes of that namespace"
     (define outer (glmnet-namespace '()))
     (define inner (make-base-namespace))
@@ -378,7 +403,7 @@
        (eval '(let ([fit (ols '((1.0) (2.0) (3.0) (5.0)) '(1.0 3.0 2.0 5.0))])
                 (list (coef fit) (predict fit '((1.0) (2.0) (3.0) (5.0)))))))))
 
-  (test-case "(require glmnet) and a fit from plain data load neither Polars nor math/matrix"
+  (test-case "(require glmnet), fits and formulas from plain data load neither Polars nor math"
     (parameterize ([current-namespace (make-base-empty-namespace)])
       (namespace-require 'racket/base)
       (namespace-require 'glmnet)
@@ -386,6 +411,10 @@
       (eval '(predict (lasso (list (cons "x" '(1 2 4)) (cons "y" '(1 2 3))) "y"
                              #:predictors '("x") #:lambda 0.1)
                       (hash "x" '(3))))
+      (eval '(predict (formula-fit (y . ~ . x + (log x)) (list (cons "x" '(1 2 4)) (cons "y" '(1 2 3)))
+                                   #:lambda 0.1)
+                      (hash "x" '(3))))
+      (eval '(formula-path (~ y all) (hash "x" '(1 2 4 3) "z" '("a" "b" "a" "b") "y" '(1 2 3 3))))
       (for ([mod (in-list '(polars glmnet/data/polars math/array math/matrix glmnet/data/math
                                    typed/racket/base plot glmnet/plot))])
         (check-false (module-declared? mod #f) (format "~a is declared" mod))))))

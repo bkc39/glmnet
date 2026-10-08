@@ -7,6 +7,7 @@
 ;; (mgaussian).
 
 (require racket/contract
+         (only-in racket/list remove-duplicates)
          racket/match
          (only-in racket/flonum for/flvector)
          (only-in racket/vector vector-map)
@@ -33,11 +34,15 @@
 ;; response and the predictors' names (#f for unnamed data), by fit-input,
 ;; class-fit-input (with the classes), survival-fit-input (the times and the
 ;; statuses) or responses-fit-input (the responses and their names); new data
-;; for a prediction, (new-data->design-matrix who X names); and fold ids as a
-;; sequence, (one-dimensional-values v).
+;; for a prediction, (new-data->design-matrix who X names); fold ids as a
+;; sequence, (one-dimensional-values v); and, for the formula front end, a
+;; table or a dataframe X's column names, (named-column-names who X), the
+;; columns `names` of it as a table, (named->table who X names #:responses
+;; #:present?), and what errors call it, (named-data-kind X).
 (module* support #f
   (provide fit/c fit-input class-fit-input survival-fit-input responses-fit-input
-           new-data->design-matrix one-dimensional-values))
+           new-data->design-matrix one-dimensional-values
+           named-column-names named->table named-data-kind))
 
 ;; --- libraries glmnet does not load ----------------------------------------------
 
@@ -517,6 +522,31 @@
      (raise-arguments-error
       who (string-append "the model's predictors are not named, so X must be a design matrix, "
                          "rows or a matrix, not a table or a dataframe"))]))
+
+;; --- formula data ------------------------------------------------------------------
+
+;; A table or a dataframe X as 'table or the dataframe's adapter: a table first,
+;; so that it never consults Polars.
+(define (table-or-dataframe X)
+  (if (table? X) 'table (library-value polars 'dataframe? X)))
+
+(define (named-column-names who X)
+  (define form (table-or-dataframe X))
+  (if (eq? form 'table)
+      (table-names X who)
+      ((adapter-ref form 'column-names) X)))
+
+;; responses maps response columns to their kinds; present? when X is known to
+;; have every column.
+(define (named->table who X names #:responses [responses '()] #:present? [present? #f])
+  (define form (table-or-dataframe X))
+  (if (eq? form 'table)
+      X
+      ((adapter-ref form 'dataframe->table)
+       who X (remove-duplicates (append (map car responses) names))
+       #:responses responses #:present? present?)))
+
+(define (named-data-kind X) (if (table? X) "table" "dataframe"))
 
 ;; The predictors of a fitter's arguments as a design matrix, their names, or
 ;; #f for unnamed data, and X's form.

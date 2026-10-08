@@ -42,7 +42,7 @@ glmnet/                        Racket collection
                                (see "The data boundary" below)
   core/model.rkt               gen:glmnet-model: predict / coef / deviance-ratio / in-path on any result
   core/cv.rkt                  cross-validation (R's cv.glmnet) behind every family's *-cv
-  core/formula.rkt             formula front end: (~ y all) on a table -> any family,
+  core/formula.rkt             formula front end: (~ y all) on a table or a dataframe -> any family,
                                a formula-model with name-keyed coef and predict
   core/terms.rkt               formula terms: R's terms() expansion (+ - * : ^, 0/1),
                                transforms (log x), (I expr), factors (strings,
@@ -102,8 +102,9 @@ set in `data.rkt`'s `support` submodule, which documents each procedure:
 copied or adopted, its length checked by contract), `element-error` and
 `missing-error` (the two error shapes, "<what> has an element that is not a
 real number / not finite" and "<what> has a missing value", with the fields
-column, row and element, or position), `->finite-flonum` and
-`default-column-names` (R's `V1` ... `Vn`). Column names are strings in every
+column, row and element, row and element, or position), `->finite-flonum`,
+`absent-columns-error` (the missing-columns error of a table and of a
+dataframe) and `default-column-names` (R's `V1` ... `Vn`). Column names are strings in every
 design matrix. `tests/docs-coverage-test.rkt` lists `glmnet/data/` itself, so
 a new format's exports are checked without editing the test. The datasets are CSV files that
 `scripts/export-datasets.R` writes from the pinned R; the `dataset-*` parity
@@ -170,6 +171,16 @@ matrix and a response for every fitter and for `predict`:
   the explicit adapters give, `equal?` to it and with the same `coef`;
   `predict` reads named data, and a design matrix with column names, by
   those names. `struct-copy` makes a plain struct, without them.
+- **Formulas.** The formula front end (#75) takes a table as it is, telling
+  it from a dataframe by `table?` first, so a formula on a table never
+  consults Polars. Of a dataframe it converts only the columns the formula
+  reads, as a table (`named->table`, the adapter's `dataframe->table`): those
+  its terms read and, for a fit, the responses. Each is checked once by the
+  adapter's `check-frame-columns`: its dtype is of its kind (a response
+  numeric, class labels for the binomial and multinomial families, a Cox
+  status numeric or boolean, any other column a dtype a table holds) and it
+  has no missing value; an error calls a response the response column. A
+  formula that reads no column reads no rows, as on a table.
 
 The formula language (#53) is R's, checked against R's `terms()` and
 `model.matrix()` by the parity goldens. A new kind of formula term, such as

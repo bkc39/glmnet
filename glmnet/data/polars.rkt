@@ -14,7 +14,8 @@
                   design-matrix-data design-matrix-nrows design-matrix-ncols
                   column-name? column-name->string select-table-values flat->design-matrix
                   element-error missing-error default-column-names
-                  name-set explain column-problem column-list-problem))
+                  name-set explain column-problem column-list-problem
+                  absent-columns absent-columns-error))
 
 (provide
  (contract-out
@@ -47,7 +48,7 @@
 (module* support #f
   (provide dataframe? series? column-names column-dtype-problem numeric-series? series->list
            dataframe->design-matrix dataframe-column->response series->response
-           dataframe-column-values series-values))
+           dataframe-column-values series-values dataframe->table))
 
 ;; --- dtypes --------------------------------------------------------------------
 
@@ -152,37 +153,56 @@
                    #:row (for/first ([x (in-series s)] [i (in-naturals)] #:when (polars-null? x)) i)
                    #:column name)))
 
-;; What is wrong with df's column `name`, a string, as a column of `kind`, or
-;; #f: 'numeric, 'labels (values a table holds, such as class labels) or
-;; 'status (numbers or booleans).
+;; The dtypes of a column of `kind`: 'numeric, 'labels (values a table holds,
+;; such as class labels) or 'status (numbers or booleans).
+(define (kind-dtype? kind)
+  (case kind
+    [(numeric) numeric-dtype?]
+    [(labels) table-dtype?]
+    [else (lambda (d) (or (eq? d 'boolean) (numeric-dtype? d)))]))
+
+(define kind-descriptions (hasheq 'numeric "numeric" 'status "numeric or boolean"))
+
+;; What is wrong with df's column `name`, a string, as a column of `kind`, or #f.
 (define (column-dtype-problem df kind)
-  (dtype-problem df (case kind
-                      [(numeric) numeric-dtype?]
-                      [(labels) table-dtype?]
-                      [else (lambda (d) (or (eq? d 'boolean) (numeric-dtype? d)))])))
+  (dtype-problem df (kind-dtype? kind)))
 
 (define (numeric-series? s)
   (numeric-dtype? (dtype s)))
 
-;; Checks that df has rows and, unless checked? is #t, a numeric column with
-;; each of `names`, strings.
-(define (check-numeric-columns who df names checked?)
-  (define present (if checked? '() (column-names df)))
-  (define known (name-set present))
-  (define absent
-    (and (not checked?) (findf (lambda (name) (not (hash-ref known name #f))) names)))
-  (define text
-    (and (not checked?) (not absent)
-         (findf (lambda (name) (not (numeric-dtype? (dtype (ref df name))))) names)))
+;; Checks that df has rows, unless `names` (strings) is empty, and that each
+;; name is a column, unless present?, of a dtype of its kind, (kind-of name),
+;; unless checked?, with no missing value. An error calls a column for which
+;; response? holds the response column.
+(define (check-frame-columns who df names kind-of
+                             #:response? [response? (lambda (name) #f)]
+                             #:checked? [checked? #f]
+                             #:present? [present? checked?])
+  (define (wrong-dtype? name)
+    (not ((kind-dtype? (kind-of name)) (dtype (ref df name)))))
   (cond
-    [(zero? (height df)) (raise-arguments-error who "the dataframe has no rows")]
-    [absent
-     (raise-arguments-error who "the dataframe has no column with this name"
-                            "column" absent "columns of the dataframe" present)]
-    [text
+    [(and (pair? names) (zero? (height df)))
+     (raise-arguments-error who "the dataframe has no rows")]
+    [(and (not present?) (absent-columns names (column-names df)))
+     => (lambda (absent) (absent-columns-error who "dataframe" absent (column-names df)))]
+    [(and (not checked?) (findf wrong-dtype? names))
+     => (lambda (name)
+          (dtype-error who name (dtype (ref df name)) (kind-of name) (response? name)))]
+    [else (for ([name (in-list names)]) (check-no-null who (ref df name) name))]))
+
+(define (dtype-error who name d kind response?)
+  (define kinds (hash-ref kind-descriptions kind table-dtypes))
+  (cond
+    [response?
+     (raise-arguments-error who (format "the response column ~s is not ~a" name kinds) "dtype" d)]
+    [(eq? kind 'numeric)
      (raise-arguments-error who "the dataframe has a column that is not numeric"
-                            "column" text "dtype" (dtype (ref df text)))]
-    [else (void)]))
+                            "column" name "dtype" d)]
+    [else
+     (raise-arguments-error who (format "the dataframe has a column whose dtype is not ~a" kinds)
+                            "column" name "dtype" d)]))
+
+(define (numeric-column name) 'numeric)
 
 ;; The position and value of the first entry of ys, from a series of dtype d,
 ;; that is not finite, or #f.
@@ -198,9 +218,7 @@
 
 (define (dataframe->design-matrix who df columns #:checked? [checked? #f])
   (define names (map column-name->string columns))
-  (check-numeric-columns who df names checked?)
-  (for ([name (in-list names)])
-    (check-no-null who (ref df name) name))
+  (check-frame-columns who df names numeric-column #:checked? checked?)
   (define-values (v nrows ncols) (dataframe->f64vector df #:columns names #:null 'error))
   (flat->design-matrix v nrows ncols names who "the dataframe" #:adopt? #t))
 
@@ -209,9 +227,9 @@
 
 (define (dataframe-column->response who df column #:checked? [checked? #f])
   (define name (column-name->string column))
-  (check-numeric-columns who df (list name) checked?)
+  (check-frame-columns who df (list name) numeric-column
+                       #:response? (lambda (name) #t) #:checked? checked?)
   (define s (ref df name))
-  (check-no-null who s name)
   (define ys (series->list s))
   (define bad (first-non-finite ys (dtype s)))
   (cond
@@ -244,6 +262,20 @@
     [else
      (check-no-null who s name)
      (cdar (dataframe->columns df #:columns (list name)))]))
+
+;; The columns of df with the given distinct `names`, strings, as a table, as
+;; polars->table reads them: what a formula reads of a dataframe. `responses`
+;; maps the names of response columns to their kinds; every other column holds
+;; labels, values a table holds.
+(define (dataframe->table who df names #:responses [responses '()] #:present? [present? #f])
+  (define (kind-of name)
+    (cond
+      [(assoc name responses) => cdr]
+      [else 'labels]))
+  (check-frame-columns who df names kind-of
+                       #:response? (lambda (name) (and (assoc name responses) #t))
+                       #:present? present?)
+  (dataframe->columns df #:columns names))
 
 ;; The values of the series s, a response named `what` in errors, as a vector.
 (define (series-values who what s)

@@ -1371,7 +1371,7 @@
     (check-exn #rx"^formula-cv: a multinomial response needs at least two classes\n  column: \"Species\""
                (lambda () (formula-cv (~ Species all) setosa #:family 'multinomial)))
     ;; A Gaussian response is numbers.
-    (check-exn #rx"^formula-fit: the table has an element that is not a real number\n  column: \"Species\""
+    (check-exn #rx"^formula-fit: the response column \"Species\" has an element that is not a real number\n  row: 0\n  element: \"setosa\"$"
                (lambda () (formula-fit (~ Species all) iris-species #:lambda 0.05))))
 
   (test-case "factor takes one column or Racket expression, and says so where it is written"
