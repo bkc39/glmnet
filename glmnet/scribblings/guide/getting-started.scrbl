@@ -5,9 +5,8 @@
 
 @title[#:tag "getting-started" #:style 'toc]{Getting started}
 
-This chapter fits a model to the mtcars dataset, reads its coefficients,
-and predicts from it. It starts with ordinary least squares, then introduces
-regularization and fitting from named columns.
+This chapter fits a model to R's mtcars data, reads its coefficients, chooses
+a penalty by cross-validation and predicts the fuel economy of a new car.
 
 @local-table-of-contents[]
 
@@ -15,12 +14,11 @@ regularization and fitting from named columns.
 
 @commandline{raco pkg install --auto glmnet datasets}
 
-The @tt{datasets} package supplies the real data used in this chapter and
-requires Racket 9.3 or later. Load the modelling library:
+The @tt{datasets} package supplies this chapter's data and requires Racket 9.3
+or later. Load the modelling library:
 
 @examples[#:eval ev #:label #f
 (require glmnet)
-(glmnet-capi-abi-version)
 ]
 
 @section[#:tag "gs-first-fit"]{A First Regression}
@@ -33,234 +31,195 @@ is:
 @centered{@math{min}@subscript{@math{β₀,β}} @math{1/(2n) ∑ᵢ₌₁ⁿ (yᵢ − β₀ − xᵢᵀβ)² + λ [α‖β‖₁ + (1−α)/2 ‖β‖₂²]}}
 
 The @tech{solution} gives the intercept @math{β₀} and the predictor
-coefficients @math{β}. Here @math{n} is the number of observations,
-@math{xᵢ} holds the features for observation @math{i}, and @math{yᵢ} is its
-observed response. The parameter @math{λ ≥ 0} controls the penalty's strength,
+coefficients @math{β}. Each of the @math{n} observations has predictors
+@math{xᵢ} and a response @math{yᵢ}. The penalty's strength is @math{λ ≥ 0},
 and @math{α ∈ [0, 1]} mixes the lasso and ridge penalties. Ordinary least
-squares (OLS) sets @math{λ = 0}, so only the squared-error term remains.
-See @secref["concepts-penalty"] for the other choices.
+squares (OLS) sets @math{λ = 0}; see @secref["concepts-penalty"] for the other
+choices.
 
-A @tech{design matrix} @math{X} holds the predictors: one row per observation
-and one column per feature. The response @math{y} is separate, with one
-value per row. The library accepts lists or vectors of rows, or a
-@racket[design-matrix?] value produced by one of its data adapters.
-
-Start with R's @tt{mtcars} dataset: 32 cars with measurements of fuel
-economy and vehicle characteristics. We will predict fuel economy
-(@tt{mpg}, miles per US gallon) from weight (@tt{wt}, in thousands of pounds)
-and horsepower (@tt{hp}). Load and display the Polars dataframe:
+R's @tt{mtcars} dataset measures 32 cars. Load it as a Polars dataframe:
 
 @examples[#:eval ev #:label #f
-(require datasets glmnet/data/polars (prefix-in pl: polars))
+(require datasets)
 (define cars (load-dataset 'mtcars #:format 'polars))
 cars
 ]
 
-The dataframe includes a text column, @tt{model}, identifying each car.
-Select the two numeric predictors by name with
-@racket[polars->design-matrix], and extract the numeric response with
-@racket[polars->response]:
+Predict fuel economy (@tt{mpg}, miles per US gallon) from weight (@tt{wt}, in
+thousands of pounds) and horsepower (@tt{hp}). @racket[ols] fits without a
+penalty; name the response column, then the predictor columns:
 
 @examples[#:eval ev #:label #f
-(define feature-names '("wt" "hp"))
-(define X (polars->design-matrix cars feature-names))
-(define y (polars->response cars "mpg"))
-(list (design-matrix-nrows X) (design-matrix-ncols X) (length y))
-]
-
-@racket[ols] fits a Gaussian model without a penalty. Fit it directly inside
-@racket[match-define]. The @racket[and] pattern binds the whole result as
-@racket[fit] and extracts its intercept, coefficients, fraction of variance
-explained (@math{R²}), penalty strength, and number of solver passes:
-
-@examples[#:eval ev #:label #f
-(match-define
-  (and fit (elnet-result β₀ β R² λ n-steps))
-  (ols X y))
+(define fit (ols cars "mpg" #:predictors '("wt" "hp")))
 fit
-(list β₀ β R² λ n-steps)
-]
-
-The intercept and coefficients describe the fitted linear relationship.
-With weight held constant, the horsepower coefficient describes the change
-in predicted fuel economy per additional horsepower; the weight coefficient
-holds horsepower constant. @math{R²} describes the fit to these observations,
-without estimating performance on new observations.
-
-@racket[coef] gives the intercept followed by the coefficients, in predictor
-column order, through the same interface for every family:
-
-@examples[#:eval ev #:label #f
 (coef fit)
 ]
 
-To shrink the coefficients, fit the same data with a penalty. For example,
-@racket[lasso] applies an L1 penalty and can set coefficients to zero:
+The fit prints its family, @math{λ}, the fraction of variance explained
+(@math{R²}) and how many coefficients are nonzero. @racket[coef] gives the
+intercept, then one coefficient per predictor, in the order named. Name them
+with @racket[match-define]:
 
 @examples[#:eval ev #:label #f
-(define penalized-fit (lasso X y #:lambda 1.0))
-penalized-fit
+(match-define (vector β₀ β-wt β-hp) (coef fit))
+(~r (* 100 β-hp) #:precision 2)
+(deviance-ratio fit)
+]
+
+@racket[(* 100 β-hp)] is the change in predicted fuel economy for 100 more
+horsepower at the same weight. @racket[deviance-ratio] is @math{R²}.
+
+A penalty shrinks the coefficients. @racket[lasso] applies the L1 penalty,
+which can set coefficients to zero; at @math{λ = 4} it drops horsepower:
+
+@examples[#:eval ev #:label #f
+(define penalized-fit (lasso cars "mpg" #:predictors '("wt" "hp") #:lambda 4.0))
 (coef penalized-fit)
 ]
 
-Fit a @tech{regularization path} to try many values of @math{λ} at once.
-@racket[elnet-path] uses the lasso penalty by default. Its summary shows the
-number of nonzero coefficients, percentage of deviance explained, and
-@math{λ} for each fitted value:
+A @tech{regularization path} fits many values of @math{λ} at once.
+@racket[elnet-path] uses the lasso penalty by default. Its summary shows, for
+each @math{λ}, the number of nonzero coefficients and the percentage of
+deviance explained:
 
 @examples[#:eval ev #:label #f
-(define path (elnet-path X y #:nlambda 12))
-path
+(elnet-path cars "mpg" #:predictors '("wt" "hp") #:nlambda 12)
 ]
-
-To choose a penalty using held-out observations, @racket[elnet-cv]
-cross-validates a path. It estimates prediction error at each @math{λ} and
-selects @tt{lambda.min} and @tt{lambda.1se}; @secref["concepts-cv"] explains
-how to use those results. For plots of paths and cross-validation curves,
-require @racketmodname[glmnet/plot] and see @secref["plots"].
 
 @subsection[#:tag "gs-plots"]{Plotting the fit and path}
 
-Load @racketmodname[glmnet/plot] for coefficient paths and Racket's
-@racketmodname[plot] for general plots. These examples return picts, which
-this manual and DrRacket display as images. @racket[plot-pict] draws an
-image rather than opening a plot window.
+@racketmodname[glmnet/plot] draws coefficient paths and cross-validation
+curves, and Racket's @racketmodname[plot] everything else. These examples
+return picts, which this manual and DrRacket show as images:
 
-@; Keep the displayed interactive require, but render picts without loading
-@; the GUI in raco setup's documentation worker places and sandbox namespace.
 @examples[#:eval ev #:label #f
-(eval:alts (require glmnet/plot plot)
-           (require glmnet/plot plot/no-gui))
+(eval:alts (require glmnet/plot plot (only-in polars ref series->list))
+           (require glmnet/plot plot/no-gui (only-in polars ref series->list)))
 ]
 
 @subsubsection[#:tag "gs-predicted-actual"]{Predicted versus actual values}
 
-Compare the OLS predictions with the observed responses. Points on the
-reference line have equal predicted and actual values:
+Points on the dashed line have equal predicted and actual values; points above
+it are underpredictions:
 
 @examples[#:eval ev #:label #f
-(define fitted (predict fit X))
+(define fitted (predict fit cars))
+(define actual (series->list (ref cars "mpg")))
 (plot-pict
  (list (function values #:color "gray" #:style 'short-dash)
-       (points (map vector fitted y) #:alpha 0.5 #:size 3))
+       (points (map vector fitted actual) #:alpha 0.5 #:size 3))
  #:x-label "Predicted fuel economy (mpg)"
  #:y-label "Actual fuel economy (mpg)"
  #:title "Mtcars: OLS predicted vs actual"
  #:width 640 #:height 360)
 ]
 
-Points above the line are underpredictions; points below it are
-overpredictions. These predictions use the training observations, so
-this plot does not estimate prediction error on new data.
+These are the cars the model was fitted to, so this plot, the next and
+@math{R²} describe the fit, not its error on new cars;
+@secref["gs-cv"] estimates that.
 
 @subsubsection[#:tag "gs-residuals"]{Residuals versus fitted values}
 
-For the OLS fit, a residual is the observed response minus its fitted value:
-@math{rᵢ = yᵢ − ŷᵢ}. Plot all 32 residuals against their fitted values, with
-a horizontal reference line at zero:
+A residual is the observed response minus its fitted value,
+@math{rᵢ = yᵢ − ŷᵢ}:
 
 @examples[#:eval ev #:label #f
-(define residuals (map - y fitted))
 (plot-pict
  (list (hrule 0 #:color "gray" #:style 'short-dash)
-       (points (map vector fitted residuals) #:alpha 0.5 #:size 3))
+       (points (map vector fitted (map - actual fitted)) #:alpha 0.5 #:size 3))
  #:x-label "Fitted fuel economy (mpg)"
  #:y-label "Residual (observed - fitted)"
  #:title "Mtcars: OLS residuals vs fitted"
  #:width 640 #:height 360)
 ]
 
-Curvature can suggest a missing nonlinear relationship; a widening spread
-can suggest that the residual variance changes with the fitted response.
-These are residuals on the training observations, so the plot is a model
-diagnostic rather than an estimate of prediction error on new data.
+Curvature suggests a missing nonlinear term; a widening spread suggests that
+the variance changes with the fitted response.
 
 @subsubsection[#:tag "gs-lasso-path"]{The lasso coefficient path}
 
-Fit a denser path to the same mtcars predictors and response, explicitly
-choosing the lasso penalty with @racket[#:alpha 1.0]:
-
 @examples[#:eval ev #:label #f
-(define lasso-path (elnet-path X y #:alpha 1.0))
-(plot-coefficient-path lasso-path #:label #t
+(plot-coefficient-path (elnet-path cars "mpg" #:predictors '("wt" "hp"))
+                       #:label #t
                        #:width 640 #:height 360
                        #:title "Mtcars: lasso coefficient path")
 ]
 
-Each curve is a predictor's coefficient as the penalty weakens from left to
-right. The horizontal axis is @math{−log λ}; the top axis counts the nonzero
-coefficients. The curve labels are predictor positions, starting at 1, in
-@racket[feature-names] order. See @secref["plots"] for other axis choices
-and cross-validation plots.
+Each curve is a predictor's coefficient, labelled with its name, as the
+penalty weakens from left to right. The horizontal axis is @math{−log λ}; the
+top axis counts the nonzero coefficients. See @secref["plots"] for the other
+plots.
+
+@subsection[#:tag "gs-cv"]{Choosing λ by cross-validation}
+
+@racket[elnet-cv] cross-validates a path: it fits the path without each fold
+of cars in turn and measures the error of predicting the fold. Fixed fold ids
+make the result repeatable:
+
+@examples[#:eval ev #:label #f
+(define cv
+  (elnet-cv cars "mpg" #:predictors '("wt" "hp")
+            #:fold-ids (for/list ([i 32]) (modulo i 8))))
+cv
+(glmnet-cv-lambda-min cv)
+(glmnet-cv-lambda-1se cv)
+]
+
+@tech{lambda-min} has the smallest cross-validated error; @tech{lambda-1se},
+the default for @racket[coef] and @racket[predict] on @racket[cv], is the
+largest @math{λ} within one standard error of it. @racket[plot-cv] draws the
+error curve, with the two marked:
+
+@examples[#:eval ev #:label #f
+(plot-cv cv #:width 640 #:height 360
+         #:title "Mtcars: cross-validated error")
+]
+
+@seclink["concepts-cv"]{Concepts} covers folds and error measures.
 
 @section[#:tag "gs-formulas"]{Fitting from named columns}
 
-A @tech{table} associates column names with their values. Convert the Polars
-dataframe with @racket[polars->table], then express the same model as a
-@tech{formula}. Name the response and the two predictors directly:
+A @tech{formula}, written with @racket[~], names the response and the
+predictors in one expression:
 
 @examples[#:eval ev #:label #f
-(define data (polars->table cars))
-(define named-fit
-  (formula-fit (~ mpg (+ wt hp)) data #:lambda 0 #:thresh 1e-10))
-named-fit
+(define named-fit (formula-fit (~ mpg (+ wt hp)) cars #:lambda 4.0))
 (coef named-fit)
-(equal? (predict named-fit data) (predict fit X))
+(equal? (predict named-fit cars) (predict penalized-fit cars))
 ]
 
-The formula predicts @racket[mpg] from @racket[wt] and @racket[hp], leaving
-the other columns out. With @racket[#:lambda 0], this fits the same OLS
-model as @racket[fit].
-@racket[#:thresh 1e-10] matches the tighter convergence threshold used by
-@racket[ols]. The coefficients are keyed by name, with the intercept under
-@racket["(Intercept)"] instead of occupying the first position in a list.
-@racket[#:family] chooses among the six families; @racket[formula-path] and
-@racket[formula-cv] fit a path and cross-validate one. See
-@secref["formulas"] for the formula interface.
+It is the lasso fit above, with its coefficients keyed by name. Formulas also
+build interactions, transforms and factors; @racket[#:family] chooses among
+the six families, and @racket[formula-path] and @racket[formula-cv] fit a path
+and cross-validate one. See @secref["formulas"].
 
 @section[#:tag "gs-models"]{Choosing a model}
 
-@racket[ols], @racket[ridge], @racket[lasso], and @racket[elastic-net] use the
-same Gaussian solver, @racket[elnet-fit], with different choices of
-@racket[#:alpha] and @racket[#:lambda]. They suit a numeric response such as
-the mtcars dataset's fuel economy.
+@racket[ols], @racket[ridge], @racket[lasso] and @racket[elastic-net] are one
+Gaussian solver, @racket[elnet-fit], with different @racket[#:alpha] and
+@racket[#:lambda]. They suit a numeric response such as fuel economy.
 
-The other families model different responses: binomial and multinomial
-models classify observations, Poisson models describe counts, Cox models
-use survival times and event indicators, and multi-response Gaussian models
-fit several numeric responses together. @secref["concepts-families"] lists
-the response forms, and @secref["examples"] has a worked example for each.
+The other families model other responses: binomial and multinomial models
+classify, Poisson models count, Cox models take survival times and event
+indicators, and multi-response Gaussian models fit several numeric responses
+together. @secref["concepts-families"] lists their responses, and
+@secref["examples"] works through each.
 
 @section[#:tag "gs-predicting"]{Predicting}
 
-@racket[predict] evaluates a fit on predictor rows in the same column order
-as @racket[X]. For a Gaussian model it returns the fitted response values.
-Here we use the first three cars to demonstrate prediction:
+@racket[predict] reads new data by the predictors' names, in any column order.
+Predict a car of 3,000 pounds and 150 horsepower:
 
 @examples[#:eval ev #:label #f
-(define prediction-X (design-matrix-select-rows X '(0 1 2)))
-(predict fit prediction-X)
+(define new-car '((wt 3.0) (hp 150)))
+(predict fit new-car)
+(predict named-fit new-car)
+(predict cv new-car)
 ]
 
-These rows were also used for fitting, so the predictions are fitted values,
-not a test of performance on unseen data. To predict new observations,
-prepare their weight and horsepower in the same units as the training data
-and in the same column order, and pass them to @racket[predict].
-
-For the formula model, supply a table of predictors. Their names determine
-which coefficients apply, so column order does not matter and the response
-column is unnecessary:
-
-@examples[#:eval ev #:label #f
-(define prediction-data
-  (polars->table (pl:head cars 3) (reverse feature-names)))
-(predict named-fit prediction-data)
-]
-
-A classifier also accepts @racket[#:type] to choose its linear predictor,
-probabilities (@racket['response]), or classes (@racket['class]); see
-@secref["concepts-predict"]. A path predicts at selected values of
-@math{λ}, including values between those it fitted.
+The penalized predictions, the lasso's and @racket[cv]'s at
+@tech{lambda-1se}, are pulled toward the mean fuel economy. A classifier's @racket[#:type] chooses its linear predictor,
+probabilities or classes; see @secref["concepts-predict"].
 
 @section[#:tag "gs-api-gaps"]{What is not there yet}
 

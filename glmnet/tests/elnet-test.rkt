@@ -152,4 +152,23 @@
 
   (test-case "alpha outside [0,1] is a contract error"
     (check-exn exn:fail:contract?
-               (lambda () (elnet-fit X y #:lambda 0.1 #:alpha 2.0)))))
+               (lambda () (elnet-fit X y #:lambda 0.1 #:alpha 2.0))))
+
+  ;; 200 rows of 50 near-collinear predictors, each z plus noise of 1e-3, and y = x1 + noise:
+  ;; at lambda 0 a threshold of 1e-10 does not converge within #:max-iters here, but R's
+  ;; default for glmnet(x, y, lambda = 0), 1e-7, converges in a few passes.
+  (define-values (collinear-rows collinear-y)
+    (parameterize ([current-pseudo-random-generator (make-pseudo-random-generator)])
+      (random-seed 3)
+      (define rows
+        (for/list ([i (in-range 200)])
+          (define z (random))
+          (for/list ([j (in-range 50)]) (+ z (* 1e-3 (random))))))
+      (values rows (for/list ([row (in-list rows)]) (+ (car row) (random))))))
+
+  (test-case "ridge and lasso at lambda 0 fit near-collinear data with their default threshold"
+    (for ([fitter (in-list (list ridge lasso))])
+      (check-true (elnet-result? (fitter collinear-rows collinear-y #:lambda 0))
+                  (symbol->string (object-name fitter))))
+    (check-true (elnet-result? (elnet-fit collinear-rows collinear-y #:lambda 0)))
+    (check-true (elnet-result? (elastic-net collinear-rows collinear-y #:alpha 0.5 #:lambda 0)))))

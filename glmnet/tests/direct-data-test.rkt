@@ -363,6 +363,13 @@
     (check-true (declared? ns 'glmnet/data/polars))
     (check-true (declared? ns 'glmnet/data/math)))
 
+  (test-case "a program that requires math/matrix alone fits its matrices"
+    (define ns (glmnet-namespace '(math/matrix)))
+    (check-false (declared? ns 'math/array))
+    (parameterize ([current-namespace ns])
+      (check-equal? (eval '(coef (ols (matrix [[1 2] [3 4] [5 7] [2 2]]) '(1 2 4 3))))
+                    (coef (ols '((1 2) (3 4) (5 7) (2 2)) '(1 2 4 3))))))
+
   ;; Formulas on every plain table: an association list, a hash and a design
   ;; matrix with column names, fitted, cross-validated and predicted from.
   (define plain-formulas

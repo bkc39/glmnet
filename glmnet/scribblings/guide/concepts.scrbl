@@ -5,8 +5,8 @@
 
 @title[#:tag "concepts" #:style 'toc]{Concepts}
 
-Every model family in @racketmodname[glmnet] shares one data layout, one
-penalty and one shape of result. This chapter covers those shared pieces; the
+Every model family in @racketmodname[glmnet] takes its data the same way, and
+shares one penalty and one shape of result. This chapter covers those shared pieces; the
 @secref["examples"] then take each family in turn.
 
 A @deftech{fit} is the result of estimating a model on a dataset. Its
@@ -15,174 +15,84 @@ model's objective function.
 
 @local-table-of-contents[]
 
-@section[#:tag "concepts-data"]{Data layout}
+@section[#:tag "concepts-data"]{Data}
 
-A @deftech{design matrix} holds the predictors: one row per observation and one
-column per predictor. Every fit and prediction procedure accepts it in either
-of two forms:
+Every fit, path and cross-validation procedure, and @racket[predict], takes
+its data in one of two ways: unnamed or named.
 
-@itemlist[
- @item{a non-empty list or vector of rows, each a list or vector of reals of
-       the same length; or}
- @item{a @racket[design-matrix?] value, which holds the matrix in the layout
-       the Fortran reads.}
-]
+@bold{Unnamed data} is the predictors, one row per observation and one column
+per predictor, with a separate response. The predictors are a
+@racketmodname[math/matrix] matrix, a list or vector of rows, each a list or
+vector, or a @tech{design matrix}:
 
 @examples[#:eval ev #:label #f
-(define X '((1.0 2.0)
-            (2.0 1.0)
-            (3.0 4.0)
-            (4.0 3.0)
-            (5.0 6.0)))
-(define y '(1 4 3 6 5))
-(elnet-result-coefficients (ols X y))
+(require math/matrix)
+(define X (matrix [[1.0 2.0] [2.0 1.0] [3.0 4.0] [4.0 3.0] [5.0 6.0]]))
+(define y '(1.2 3.9 3.1 5.8 5.1))
+(coef (ols X y))
+(equal? (ols X y) (ols (matrix->list* X) y))
 ]
 
-The Fortran reads a matrix as one array of doubles stored column by column:
-element @math{(i, j)} of a matrix with @math{n} rows is at index
-@math{i + jn}, counting from 0. A @racket[design-matrix?] value holds exactly
-that array, together with the numbers of rows and columns and, optionally,
-column names. @racket[rows->design-matrix] builds one from a list of rows:
+A @deftech{design matrix} is a @racket[design-matrix?] value: the predictors
+in the layout the solver reads, which every procedure converts its data to.
+Converting once yourself checks the data once, for many fits (see
+@secref["data-explicit"]).
 
-@examples[#:eval ev #:label #f
-(define D (rows->design-matrix X #:column-names '(x1 x2)))
-D
-(design-matrix-ref D 2 1)
-(design-matrix-column-names D)
-(require ffi/vector)
-(f64vector->list (design-matrix->f64vector D))
-]
-
-A fit on @racket[D] gives the same result as a fit on @racket[X]. The list is
-converted on every call, while @racket[D] was converted once. The solver copies
-its input before working on it, so one design matrix serves any number of
-fits:
-
-@examples[#:eval ev #:label #f
-(equal? (ols D y) (ols X y))
-(for/list ([lam (in-list '(1.0 0.1 0.01))])
-  (elnet-result-coefficients (lasso D y #:lambda lam)))
-]
-
-A fit from a matrix carries the column names along but does not use them; to
-fit from named columns, see @secref["concepts-named"].
-@racket[columns->design-matrix] builds a design matrix from columns, and
-@racket[f64vector->design-matrix] from an array that is already in the
-column-major layout. @racket[design-matrix->rows],
-@racket[design-matrix->columns] and @racket[design-matrix->f64vector] convert
-back:
-
-@examples[#:eval ev #:label #f
-(define C (columns->design-matrix '((1 2 3) (4 5 6))))
-(design-matrix->rows C)
-(define v (f64vector 1.0 2.0 3.0 4.0 5.0 6.0))
-(equal? (f64vector->design-matrix v 3 2) C)
-]
-
-Every conversion checks its input once, before any solver runs. The matrix
-must have at least one row and one column, every row must have the same length,
-and every entry must be a real, finite number. Exact numbers become flonums.
-An error names the offending row and column, counting from 0:
-
-@examples[#:eval ev #:label #f
-(design-matrix->rows (rows->design-matrix '((1 1/2) (-3 2.5))))
-(eval:error (rows->design-matrix '((1.0 2.0) (3.0))))
-(eval:error (ols '((1.0 2.0) (2.0 +nan.0) (3.0 4.0) (4.0 3.0) (5.0 6.0)) y))
-]
-
-Without the check, a @racket[+nan.0] or an infinity would reach the solver,
-which would return meaningless coefficients and no error. R's @tt{glmnet} also
-stops on a missing value in @tt{x}, but not on every non-finite value. In every
-family but Cox it fits an @tt{x} with an infinite entry, giving that column a
-zero coefficient. It fits a Poisson response with an infinite count and
-returns an empty model. Its @tt{predict} carries non-finite new data through to
-the predictions. Here each of these is an error.
-
-The @deftech{response} has one entry per row of the design matrix. It is a
-list, a vector, an @racket[flvector] or an @racket[f64vector], and its entries
-depend on the family:
+The @deftech{response} has one entry per row: a list, a vector, an
+@racket[flvector], an @racket[f64vector], a @racketmodname[math/array] array
+or a Polars series. Its entries depend on the family:
 
 @tabular[#:style 'boxed
          #:sep @hspace[2]
          #:row-properties '(bottom-border ())
  (list (list @bold{Family}                    @bold{Response})
        (list "Gaussian"                       "reals")
-       (list "Binomial"                       @elem{@racket[0]/@racket[1] class labels})
-       (list "Multinomial"                    @elem{class labels @math{0, …, K−1}, every class present})
+       (list "Binomial"                       @elem{@racket[0]/@racket[1], or two class labels: strings, symbols or booleans})
+       (list "Multinomial"                    @elem{class numbers @math{0, …, K−1}, every class present, or class labels})
        (list "Cox"                            @elem{positive times @emph{and}, separately, @racket[0]/@racket[1] event indicators})
        (list "Poisson"                        "non-negative counts")
-       (list "Multi-response Gaussian"        @elem{a matrix with one row per observation and one column per response, in any form of a @tech{design matrix}}))]
+       (list "Multi-response Gaussian"        "a matrix with one column per response, in any form of unnamed data"))]
 
-A response is checked in the same way as a design matrix, by
-@racket[response->f64vector]: every entry must be finite, and there must be one
-per row of the design matrix:
+Data is checked before the solver runs. Every entry must be a finite real,
+every row the same length, and the response one entry per row; an error names
+the row and the column. R's @tt{glmnet} stops on a missing value too, but fits
+some infinite ones; here each is an error:
 
 @examples[#:eval ev #:label #f
-(eval:error (ols X '(1.0 4.0 +inf.0 6.0 5.0)))
+(eval:error (ols (matrix [[1.0 2.0] [2.0 +nan.0] [3.0 4.0]]) '(1 4 3)))
 (eval:error (ols X '(1.0 2.0)))
 ]
 
-The rows of a design matrix, and the entries of a response, can be vectors as
-well as lists. A design matrix comes in four nestings, whose outer sequence
-always holds the rows, and a response in four one-dimensional forms:
-
-@tabular[#:style 'boxed
-         #:sep @hspace[2]
-         #:row-properties '(bottom-border ())
- (list (list @bold{Shape}                     @bold{Example})
-       (list "list of lists"                  @racket['((1.0 2.0) (2.0 1.0))])
-       (list "list of vectors"                @racket[(list #(1.0 2.0) #(2.0 1.0))])
-       (list "vector of lists"                @racket[(vector '(1.0 2.0) '(2.0 1.0))])
-       (list "vector of vectors"              @racket[#(#(1.0 2.0) #(2.0 1.0))])
-       (list "list, for a response"           @racket['(1.0 4.0)])
-       (list "vector"                         @racket[#(1.0 4.0)])
-       (list @racket[flvector]                @racket[(flvector 1.0 4.0)])
-       (list @racket[f64vector]               @racket[(f64vector 1.0 4.0)]))]
-
-Every shape fits exactly as the same lists do, and the prediction procedures
-read new data in any nesting:
-
-@examples[#:eval ev #:label #f
-(require racket/flonum)
-(define list-of-vectors (map list->vector X))
-(define vector-of-lists (list->vector X))
-(define Xv (list->vector (map list->vector X)))
-Xv
-(for/list ([rows (list X list-of-vectors vector-of-lists Xv)])
-  (equal? (ols rows y) (ols X y)))
-(for/list ([response (list (list->vector y)
-                           (flvector 1.0 4.0 3.0 6.0 5.0)
-                           (f64vector 1.0 4.0 3.0 6.0 5.0))])
-  (equal? (ols X response) (ols X y)))
-(elnet-predict (ols Xv (list->vector y)) (vector #(6.0 5.0) '(0.0 1.0)))
-]
-
-@racketmodname[glmnet/data/nested] converts the nestings to a
-@racket[design-matrix?] value and back (see @secref["data-nested"]).
-
-The Fortran reads a response as an @racket[f64vector], and every form of a
-response is copied into a fresh one. An @racket[flvector] holds the same
-doubles, but it could not be passed as it is in any case: the FFI does not
-accept an @racket[flvector] where it expects an @racket[f64vector].
-
 @subsection[#:tag "concepts-named"]{Named data}
 
-Data often comes as a @deftech{table}: named columns, one of which is the
-response. A table can be an association list or a hash from names to columns,
-or a design matrix with column names. A @deftech{formula}, written with
-@racket[~], names the response and the predictors:
+@bold{Named data} is a @deftech{table}, an association list or a hash from
+column names to columns, or a Polars dataframe. The second argument names the
+response column, and @racket[#:predictors], then required, the predictor
+columns. No other column is read:
 
 @examples[#:eval ev #:label #f
-(define table
-  (list (cons "y" y) (cons "x1" '(1 2 3 4 5)) (cons "x2" '(2 1 4 3 6))))
-(define model (formula-fit (~ y x1 x2) table #:lambda 0))
-(coef model)
+(define patients
+  '((age 34 51 67 45 29)
+    (dose 2.5 5.0 1.0 3.5 4.0)
+    (response 3.1 5.2 1.9 4.0 4.4)))
+(define by-name (ols patients "response" #:predictors '("age" "dose")))
+(coef by-name)
+(predict by-name '((dose 3.0) (age 40)))
 ]
 
-The model keys its coefficients by name, and predicts from a table by
-matching its columns by name. @secref["formulas"] covers tables, formulas and
-the models fitted from them, and @secref["data"] where data comes from: R
-glmnet's example datasets and CSV files.
+A fit from named data predicts from named data by column name, in any order.
+The Cox and multi-response families name several response columns (see
+@secref["ref-common-data"]).
+
+A @deftech{formula}, written with @racket[~], names the response and the
+predictors in one expression, and keys the coefficients by name:
+
+@examples[#:eval ev #:label #f
+(coef (formula-fit (~ response (+ age dose)) patients #:lambda 0.1))
+]
+
+@secref["formulas"] covers formulas, and @secref["data"] where data comes
+from.
 
 @section[#:tag "concepts-penalty"]{The penalty: @math{α} and @math{λ}}
 
@@ -199,15 +109,17 @@ is the same for all of them. It has two knobs:
        @math{α = 0} is the ridge (L2) penalty, which shrinks every coefficient
        but zeroes none; @math{α = 1} is the lasso (L1) penalty, which sets
        coefficients exactly to zero; values in between are the elastic net.
-       Every fit procedure defaults to @racket[1.0].}
+       @racket[elnet-fit] and the other families' fits default to
+       @racket[1.0].}
  @item{@bold{@racket[#:lambda], @math{λ ≥ 0}}, sets the penalty's strength.
-       A single fit requires it; to fit a whole sequence of values at once, use
-       a @tech{regularization path} (@secref["concepts-path"]). @math{λ = 0} is
-       the unpenalized fit.}
+       Every single fit but @racket[ols] requires it; to fit a whole sequence
+       of values at once, use a @tech{regularization path}
+       (@secref["concepts-path"]). @math{λ = 0} is the unpenalized fit.}
 ]
 
 The four Gaussian models are one routine, @racket[elnet-fit], with different
-arguments; the named procedures only fix @racket[#:alpha]:
+arguments: @racket[ols] fixes @math{λ = 0}, @racket[ridge] and @racket[lasso]
+fix @math{α}, and @racket[elastic-net] requires it:
 
 @tabular[#:style 'boxed
          #:sep @hspace[2]
@@ -219,9 +131,8 @@ arguments; the named procedures only fix @racket[#:alpha]:
        (list @racket[elastic-net]       "0 < α < 1"       "> 0"))]
 
 @examples[#:eval ev #:label #f
-(equal? (elnet-result-coefficients (lasso X y #:lambda 0.1))
-        (elnet-result-coefficients (elnet-fit X y #:alpha 1.0 #:lambda 0.1)))
-(eval:error (lasso X y))
+(equal? (lasso X y #:lambda 0.1) (elnet-fit X y #:alpha 1.0 #:lambda 0.1))
+(eval:error (elastic-net X y #:lambda 0.1))
 ]
 
 @section[#:tag "concepts-families"]{Model families}
@@ -263,48 +174,34 @@ All six fit procedures take the same keywords: @racket[#:lambda],
 @racket[cox-fit]), @racket[#:thresh] and @racket[#:max-iters].
 Each also has a path counterpart that fits many values of @math{λ} at once
 (see @secref["concepts-path"]), and a cross-validation counterpart that
-chooses among them (see @secref["concepts-cv"]). Each prediction helper is @racket[predict] with a
-fixed @racket[#:type]; @secref["concepts-predict"] covers @racket[predict] and
-@racket[coef], which work on every result.
+chooses among them (see @secref["concepts-cv"]). @racket[predict] and
+@racket[coef] work on every result (@secref["concepts-predict"]).
 
 @section[#:tag "concepts-results"]{Results}
 
-A fit returns a transparent struct. The fields follow one pattern across the
-families:
-
-@itemlist[
- @item{@bold{intercept} --- a real, or a vector of one per class or response
-       (@racket[multinomial-result-intercepts],
-       @racket[mgaussian-result-intercepts]). Cox results have none. As in R,
-       the multinomial intercepts are centred to sum to zero; adding the same
-       constant to each would not change any probability.}
- @item{@bold{coefficients} --- a dense vector with one entry per predictor, on
-       the original (unstandardized) scale; a predictor the penalty dropped is
-       exactly @racket[0.0]. Multinomial and multi-response results hold a
-       vector of such vectors, one per class or response.}
- @item{@bold{r-squared} or @bold{dev-ratio} --- the fraction of the null
-       deviance explained. For the Gaussian families this is @math{R²}.}
- @item{@bold{lambda} --- the penalty the solver used.}
- @item{@bold{num-passes} --- the number of coordinate-descent passes.}
-]
-
-A result prints as a one-line summary: its family, @math{λ}, deviance ratio,
-and how many of the predictors have a nonzero coefficient. The fields are read
-with the struct's accessors:
+A fit prints as a one-line summary: its family, @math{λ}, the deviance ratio
+and how many predictors have a nonzero coefficient. The generics of
+@secref["concepts-predict"] read it:
 
 @examples[#:eval ev #:label #f
 (define fit (ridge X y #:lambda 0.1))
 fit
-(elnet-result-r-squared fit)
+(match-define (vector β₀ β₁ β₂) (coef fit))
+β₁
+(deviance-ratio fit)
 ]
 
-Because the structs are transparent, @racket[equal?] compares them field by
-field and @racket[match] destructures them:
+@racket[coef] gives the intercept, then one coefficient per predictor, on the
+original (unstandardized) scale; a predictor the penalty dropped is exactly
+@racket[0.0]. Cox models have no intercept. The multinomial and
+multi-response families give one such vector per class or response; as in R,
+the multinomial intercepts are centred to sum to zero. @racket[deviance-ratio]
+is the fraction of the null deviance explained, @math{R²} for the Gaussian
+families.
 
-@examples[#:eval ev #:label #f
-(match-define (elnet-result a0 beta _ _ _) fit)
-(list a0 beta)
-]
+Each family's result is a transparent struct, so @racket[equal?] compares
+fits. Its fields, the intercept, coefficients, deviance ratio, @math{λ} and
+number of solver passes, have accessors (see @secref["ref-gaussian"]).
 
 @section[#:tag "concepts-path"]{Regularization paths}
 
@@ -321,67 +218,49 @@ Without @racket[#:lambda], glmnet chooses the sequence the way R does:
 @racket[#:nlambda] values (default @racket[100]) from @math{λ_max}, the
 smallest @math{λ} at which every coefficient is zero, down to
 @racket[#:lambda-min-ratio] times @math{λ_max} (default @racket[0.01] when there
-are fewer observations than predictors, otherwise @racket[1e-4]):
+are fewer observations than predictors, otherwise @racket[1e-4]). A path
+prints as R prints one: a row for each fitted @math{λ}, with the number of
+nonzero coefficients (@tt{Df}) and the percentage of the null deviance
+explained (@tt{%Dev}):
 
 @examples[#:eval ev #:label #f
-(vector-length (glmnet-path-lambda (elnet-path X y)))
 (define path (elnet-path X y #:nlambda 12))
-(vector-ref (glmnet-path-coefficients path) 0)
-(glmnet-path-df path)
-]
-
-A @racket[glmnet-path] holds one entry per fitted @math{λ} in each of its
-@racket[lambda], @racket[intercepts], @racket[coefficients],
-@racket[dev-ratio] and @racket[df] fields. At the first @math{λ} every
-coefficient is zero; @racket[df] counts the predictors in the model as the
-penalty relaxes, here @math{x₁} first and then @math{x₂}. The default path has
-50 values, not 100, because glmnet, like R, stops an automatic sequence once
-another @math{λ} would barely change the fit. For the Gaussian family that is
-when @math{R²} gains less than @racket[1e-5] of its own value from one
-@math{λ} to the next, or passes @racket[0.999]; the reference lists each
-family's rule (@secref["ref-path"]).
-
-A path prints as R prints one: a numbered row for each fitted @math{λ}, with
-the number of nonzero coefficients (@tt{Df}), the percentage of the null
-deviance explained (@tt{%Dev}) and @math{λ}:
-
-@examples[#:eval ev #:label #f
 path
 ]
 
-With @racket[#:lambda], the path fits those values, largest first:
+At the first @math{λ} every coefficient is zero, and the predictors enter as
+the penalty relaxes, here @math{x₁} first and then @math{x₂}. The path has
+fewer values than asked for because glmnet, like R, stops an automatic
+sequence once another @math{λ} would barely change the fit. For the Gaussian
+family that is when @math{R²} gains less than @racket[1e-5] of its own value
+from one @math{λ} to the next, or passes @racket[0.999]; the reference lists
+each family's rule (@secref["ref-path"]).
+
+@racket[in-path] walks a path, giving each fitted @math{λ} with its
+coefficients as @racket[coef] gives them. With @racket[#:lambda], the path
+fits those values, largest first:
 
 @examples[#:eval ev #:label #f
 (define user-path (elnet-path X y #:lambda '(0.01 0.5 0.1)))
-(glmnet-path-lambda user-path)
-(glmnet-path-coefficients user-path)
-]
-
-Each point agrees with the single fit at that @math{λ} to within the solver's
-tolerance. The early-stopping rule does not apply to a user sequence, but any
-path can still end early, for example where glmnet fails at one of its values
-by not converging within @racket[#:max-iters] passes. It then keeps the values
-before that one and logs a warning (@secref["concepts-convergence"]):
-
-@examples[#:eval ev #:label #f
-(glmnet-path-lambda (elnet-path X y #:lambda '(0.5 0.1 0.01) #:max-iters 1))
-]
-
-@racket[in-path] walks a path, giving each fitted @math{λ} with its
-coefficients as @racket[coef] gives them, intercept first:
-
-@examples[#:eval ev #:label #f
 (for ([(λ β) (in-path user-path)])
   (printf "λ = ~a: ~a\n" λ β))
 ]
 
+Each point agrees with the single fit at that @math{λ} to within the solver's
+tolerance. The early-stopping rule does not apply to a user sequence, but any
+path can still end early, for example where glmnet does not converge within
+@racket[#:max-iters] passes at one of its values. It then keeps the values
+before that one and logs a warning (@secref["concepts-convergence"]):
+
+@examples[#:eval ev #:label #f
+(elnet-path X y #:lambda '(0.5 0.1 0.01) #:max-iters 1)
+]
+
 @racket[predict] and @racket[coef] evaluate a path at any @math{λ}
 (@secref["concepts-predict"]). Cross-validation chooses among the values on a
-path (@secref["concepts-cv"]).
-
-To plot a path's coefficients against @math{λ}, as R's @tt{plot} does, use
-@racket[plot-coefficient-path] from @racketmodname[glmnet/plot]; see
-@secref["plot-path"].
+path (@secref["concepts-cv"]). @racket[plot-coefficient-path], from
+@racketmodname[glmnet/plot], plots a path's coefficients against @math{λ}, as
+R's @tt{plot} does (@secref["plot-path"]).
 
 @section[#:tag "concepts-predict"]{Predictions and coefficients}
 
@@ -389,10 +268,9 @@ Every result, whether a single fit or a @tech{regularization path}, is a
 @racket[glmnet-model?]. Three procedures work on all of them:
 
 @itemlist[
- @item{@racket[predict] evaluates the model on new rows, given as a
-       @tech{design matrix} with one column per predictor, as R's
-       @tt{predict} does, or, for a model fitted from a @tech{formula}, as a
-       @tech{table};}
+ @item{@racket[predict] evaluates the model on new data, as R's @tt{predict}
+       does: unnamed data with one column per predictor, or, for a model
+       fitted from named data or a @tech{formula}, named data;}
  @item{@racket[coef] returns the intercept, then one coefficient per
        predictor, as R's @tt{coef} does, keyed by name for a model fitted from
        a formula;}
@@ -402,7 +280,7 @@ Every result, whether a single fit or a @tech{regularization path}, is a
 
 @examples[#:eval ev #:label #f
 (define fit (lasso X y #:lambda 0.1))
-(predict fit '((6.0 5.0) (7.0 8.0)))
+(predict fit (matrix [[6.0 5.0] [7.0 8.0]]))
 (coef fit)
 (deviance-ratio fit)
 ]
@@ -428,9 +306,10 @@ two families that have classes:
 @examples[#:eval ev #:label #f
 (define labels '(0 1 0 1 1))
 (define clf (logistic-fit X labels #:lambda 0.05))
-(predict clf '((1.0 1.0) (5.0 5.0)))
-(predict clf '((1.0 1.0) (5.0 5.0)) #:type 'response)
-(predict clf '((1.0 1.0) (5.0 5.0)) #:type 'class)
+(define new-X (matrix [[1.0 1.0] [5.0 5.0]]))
+(predict clf new-X)
+(predict clf new-X #:type 'response)
+(predict clf new-X #:type 'class)
 (eval:error (predict fit X #:type 'class))
 ]
 
@@ -446,10 +325,9 @@ one entry per element, in the order given. Without @racket[#:lambda], a path
 gives one entry per fitted @math{λ}:
 
 @examples[#:eval ev #:label #f
-(glmnet-path-lambda user-path)
 (coef user-path #:lambda 0.1)
-(predict user-path '((6.0 5.0)))
-(predict user-path '((6.0 5.0)) #:lambda '(0.01 0.5))
+(predict user-path (matrix [[6.0 5.0]]))
+(predict user-path (matrix [[6.0 5.0]]) #:lambda '(0.01 0.5))
 ]
 
 A @math{λ} that was not fitted is handled as R handles it by default: the
@@ -529,16 +407,10 @@ signal, with @math{y = 1 + 3x₁ − 2x₂ + x₃} plus noise:
 @examples[#:eval ev #:label #f
 (random-seed 8)
 (define (noise) (- (* 2 (random)) 1))
-(define X60
-  (for/list ([i (in-range 60)])
-    (for/list ([j (in-range 8)])
-      (noise))))
-(define beta '(3.0 -2.0 1.0 0.0 0.0 0.0 0.0 0.0))
-(define y60
-  (for/list ([row (in-list X60)])
-    (+ 1.0
-       (for/sum ([b (in-list beta)] [x (in-list row)]) (* b x))
-       (noise))))
+(define X60 (build-matrix 60 8 (lambda (i j) (noise))))
+(define β (col-matrix [3.0 -2.0 1.0 0.0 0.0 0.0 0.0 0.0]))
+(define μ60 (matrix->list (matrix* X60 β)))
+(define y60 (for/list ([μ (in-list μ60)]) (+ 1.0 μ (noise))))
 (define cv (elnet-cv X60 y60))
 cv
 ]
@@ -562,13 +434,8 @@ coefficients:
 @examples[#:eval ev #:label #f
 (glmnet-cv-lambda-min cv)
 (glmnet-cv-lambda-1se cv)
-(define (round3 x)
-  (/ (round (* 1000 x)) 1000))
-(define (rounded v)
-  (for/list ([b (in-vector v)])
-    (round3 b)))
-(rounded (coef cv #:lambda 'lambda-min))
-(rounded (coef cv #:lambda 'lambda-1se))
+(coef cv #:lambda 'lambda-min)
+(coef cv #:lambda 'lambda-1se)
 ]
 
 The whole curve is in the result: @racket[glmnet-cv-lambda] holds the
@@ -577,14 +444,14 @@ candidates, and @racket[glmnet-cv-cvm], @racket[glmnet-cv-cvsd] and
 nonzero coefficients at each. Every fifth candidate, from the largest:
 
 @examples[#:eval ev #:label #f
-(for ([lam (in-vector (glmnet-cv-lambda cv))]
-      [err (in-vector (glmnet-cv-cvm cv))]
-      [se (in-vector (glmnet-cv-cvsd cv))]
-      [nz (in-vector (glmnet-cv-nzero cv))]
-      [i (in-naturals)]
-      #:when (zero? (remainder i 5)))
-  (printf "~a: λ = ~a, error = ~a ± ~a, nonzero = ~a\n"
-          i (round3 lam) (round3 err) (round3 se) nz))
+(define (every-fifth v) (in-vector v 0 #f 5))
+(for ([λ (every-fifth (glmnet-cv-lambda cv))]
+      [err (every-fifth (glmnet-cv-cvm cv))]
+      [se (every-fifth (glmnet-cv-cvsd cv))]
+      [nz (every-fifth (glmnet-cv-nzero cv))])
+  (printf "λ = ~a, error = ~a ± ~a, nonzero = ~a\n"
+          (~r λ #:precision '(= 3)) (~r err #:precision '(= 3))
+          (~r se #:precision '(= 3)) nz))
 ]
 
 The error falls quickly as the three real predictors enter, reaches its
@@ -601,8 +468,8 @@ path, so @racket[predict] and @racket[coef] work on it. As R's
 number. @racket[deviance-ratio] answers at @tech{lambda-1se}:
 
 @examples[#:eval ev #:label #f
-(define new-rows '((0.5 -0.5 0.0 0.0 0.0 0.0 0.0 0.0)
-                   (0.0 0.0 1.0 0.9 -0.9 0.9 -0.9 0.9)))
+(define new-rows (matrix [[0.5 -0.5 0.0 0.0 0.0 0.0 0.0 0.0]
+                           [0.0 0.0 1.0 0.9 -0.9 0.9 -0.9 0.9]]))
 (predict cv new-rows)
 (predict cv new-rows #:lambda 'lambda-min)
 (equal? (coef cv)
@@ -661,8 +528,8 @@ probabilities with 0/1 indicators of the classes. @racket['auc] and
 @racket['C] are better when larger, so @tech{lambda-min} maximizes them.
 
 @examples[#:eval ev #:label #f
-(define labels (for/list ([v (in-list y60)]) (if (> v 1.0) 1 0)))
-(logistic-cv X60 labels #:type-measure 'class #:fold-ids folds)
+(define labels60 (for/list ([v (in-list y60)]) (if (> v 1.0) 1 0)))
+(logistic-cv X60 labels60 #:type-measure 'class #:fold-ids folds)
 ]
 
 By default the errors are averaged within each fold first, which R calls
@@ -672,14 +539,8 @@ grouped when they average fewer than 3 observations, @racket['auc] needs an
 average of 10 observations per fold and otherwise falls back to
 @racket['deviance], and each of these changes logs a warning.
 
-For Cox models, the deviance of a fold is computed as R computes it. Grouped,
-it is the deviance of all the data less that of the fold's training data, at
-the fold's coefficients. Ungrouped, it is the deviance of the held-out fold
-alone, which is undefined when the fold has no event or when its first event
-is among its last two observations in time order; R stops then, and so does
-@racket[cox-cv], naming the fold. When the folds average fewer than 10
-observations, the Cox deviance is grouped even with @racket[#:grouped? #f],
-with a warning, as in R.
+For Cox models, a fold's deviance is computed as R computes it;
+@racket[cox-cv] gives the cases in which it is undefined.
 
 @section[#:tag "concepts-standardize"]{Standardization and the intercept}
 
@@ -691,30 +552,29 @@ measured in different units are penalized evenly. Pass
 penalized fit then changes:
 
 @examples[#:eval ev #:label #f
-(elnet-result-coefficients (ridge X y #:lambda 0.1))
-(elnet-result-coefficients (ridge X y #:lambda 0.1 #:standardize? #f))
+(coef (ridge X y #:lambda 0.1))
+(coef (ridge X y #:lambda 0.1 #:standardize? #f))
 ]
 
 Every family except Cox fits an unpenalized intercept. Pass
 @racket[#:intercept? #f] to force it to zero:
 
 @examples[#:eval ev #:label #f
-(elnet-result-intercept (ols X y #:intercept? #f))
-(elnet-result-coefficients (ols X y #:intercept? #f))
+(coef (ols X y #:intercept? #f))
 ]
 
 @section[#:tag "concepts-convergence"]{Convergence and errors}
 
 Coordinate descent cycles over the coefficients until no update moves the
 objective by more than @racket[#:thresh] (default @racket[1e-7]) times the null
-deviance, or until
-@racket[#:max-iters] passes (default @racket[100000]). @racket[ols] defaults to
-a tighter @racket[1e-10], because the unpenalized solution is approached slowly.
-The pass count is recorded in every result:
+deviance, or until @racket[#:max-iters] passes (default @racket[100000]).
+@racket[ols] defaults to a tighter @racket[1e-10], because the unpenalized
+solution is approached slowly. Every result records its passes; a tighter
+threshold takes more:
 
 @examples[#:eval ev #:label #f
-(elnet-result-num-passes (lasso X y #:lambda 0.1))
-(elnet-result-num-passes (lasso X y #:lambda 0.1 #:thresh 1e-12))
+(for/list ([thresh '(1e-7 1e-12)])
+  (elnet-result-num-passes (lasso X y #:lambda 0.1 #:thresh thresh)))
 ]
 
 Problems are reported in three ways:
@@ -739,39 +599,21 @@ Problems are reported in three ways:
 ]
 
 @examples[#:eval ev #:label #f
-(eval:error (ols '((1.0 2.0) (1.0 2.0) (1.0 2.0)) '(1.0 2.0 3.0)))
+(eval:error (ols (matrix [[1.0 2.0] [1.0 2.0] [1.0 2.0]]) '(1.0 2.0 3.0)))
 (eval:error (lasso X y #:lambda 0.01 #:max-iters 1))
 ]
 
 @section[#:tag "concepts-precision"]{The native library}
 
-@tt{libglmnetcompat} is R glmnet 4.1's own double-precision Fortran, the last
-release with every family in Fortran, behind a small C-ABI shim. When the
-package loads, it checks
-that the library's reals are 8 bytes (@racket[glmnet-default-real-bytes]) and
-that it exports the entry points this version expects
+The solver is R glmnet 4.1's own double-precision Fortran, the last release
+with every family in Fortran, in a native library, @tt{libglmnetcompat}, that
+the package installs prebuilt. When the package loads, it checks that the
+library's reals are 8 bytes (@racket[glmnet-default-real-bytes]) and that it
+exports the entry points this version expects
 (@racket[glmnet-capi-abi-version]).
 
-The pre-install hook stages the library from the first of these that exists:
-
-@itemlist[#:style 'ordered
- @item{the directory named by the @envvar{GLMNET_NATIVE_LIB_PATH} environment
-       variable (its @filepath{lib} subdirectory), as the Nix build sets it;}
- @item{a library already staged in @filepath{glmnet/native-libs/};}
- @item{the prebuilt candidate for the platform under
-       @filepath{glmnet/native-libs/candidates/}.}
-]
-
-To rebuild the library from source you need a Fortran toolchain:
-
-@verbatim|{
-  # via Nix (also runs the Fortran ctest suite)
-  nix build .#native
-
-  # or directly with CMake and gfortran
-  cmake -S fortran -B fortran/build -DBUILD_TESTING=ON
-  cmake --build fortran/build
-  ctest --test-dir fortran/build --output-on-failure
-}|
+To use a library built from source instead, set the
+@envvar{GLMNET_NATIVE_LIB_PATH} environment variable to the directory whose
+@filepath{lib} subdirectory holds it before installing the package.
 
 @(close-eval ev)

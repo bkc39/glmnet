@@ -117,6 +117,12 @@
                                                   #:lambda 0.05))
                   (mgaussian-fit mg '("y1" "y2") #:predictors '("V1" "V2") #:lambda 0.05)))
 
+  (test-case "a formula fit with default settings is the family procedure's with its defaults"
+    (define model (formula-fit (~ mpg (+ wt hp)) cars #:lambda 1.0))
+    (define fit (lasso cars "mpg" #:predictors '("wt" "hp") #:lambda 1.0))
+    (check-equal? (predict model cars) (predict fit cars))
+    (check-equal? (formula-model-fit model) fit))
+
   ;; --- what is read --------------------------------------------------------------------
 
   ;; mtcars as a dataframe with a date column and a column with a missing
