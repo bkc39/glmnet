@@ -3,8 +3,8 @@
  (gates
   (compile     "raco make -j 2 glmnet/main.rkt glmnet/plot.rkt glmnet/tests/*.rkt glmnet/examples/test/*.rkt")
   (docs-idioms "raco test glmnet/tests/docs-idiom-test.rkt")
-  (resyntax    "resyntax analyze --refactoring-suite glmnet-lint/style project-style --local-git-repository . ${RESYNTAX_BASE:-origin/master} --analyzer-timeout 30000")
+  (resyntax    "scripts/resyntax-gate.sh ${RESYNTAX_BASE:-origin/master}")
   (test        "raco test -j 2 glmnet/")
-  (docs        "raco scribble --htmls --dest /tmp/glmnet-doc glmnet/scribblings/glmnet.scrbl")
+  (docs        "raco scribble --htmls --dest doc glmnet/scribblings/glmnet.scrbl")
   (check       "nix flake check"))
  (push-gates (compile docs-idioms resyntax test)))

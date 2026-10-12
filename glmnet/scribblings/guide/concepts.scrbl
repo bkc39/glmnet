@@ -53,14 +53,17 @@ or a Polars series. Its entries depend on the family:
        (list "Poisson"                        "non-negative counts")
        (list "Multi-response Gaussian"        "a matrix with one column per response, in any form of unnamed data"))]
 
-Data is checked before the solver runs. Every entry must be a finite real,
-every row the same length, and the response one entry per row; an error names
-the row and the column. R's @tt{glmnet} stops on a missing value too, but fits
-some infinite ones; here each is an error:
+Data is checked before the solver runs. Every predictor and every numeric
+response entry must be a finite real, every row the same length, and the
+response one entry per row; an error names the row and the column. R's
+@tt{glmnet} stops on a missing value too, but fits some infinite ones; here
+each is an error. Class labels are all of one kind, strings and symbols or
+booleans, as the first label is:
 
 @examples[#:eval ev #:label #f
 (eval:error (ols (matrix [[1.0 2.0] [2.0 +nan.0] [3.0 4.0]]) '(1 4 3)))
 (eval:error (ols X '(1.0 2.0)))
+(eval:error (logistic-fit X '(yes no "yes" #t no) #:lambda 0.1))
 ]
 
 @subsection[#:tag "concepts-named"]{Named data}
