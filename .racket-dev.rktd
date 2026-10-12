@@ -5,6 +5,6 @@
   (docs-idioms "raco test glmnet/tests/docs-idiom-test.rkt")
   (resyntax    "scripts/resyntax-gate.sh ${RESYNTAX_BASE:-origin/master}")
   (test        "raco test -j 2 glmnet/")
-  (docs        "raco scribble --htmls --dest doc glmnet/scribblings/glmnet.scrbl")
+  (docs        "bash -c 'set -o pipefail; raco scribble --htmls --dest doc glmnet/scribblings/glmnet.scrbl 2>&1 | tee /dev/stderr | { ! grep \"multiple times\" >/dev/null; }'")
   (check       "nix flake check"))
  (push-gates (compile docs-idioms resyntax test)))

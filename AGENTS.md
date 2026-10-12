@@ -60,7 +60,8 @@ glmnet/                        Racket collection
   private/install-glmnet-native.rkt   pre-install hook (env -> staged -> candidate)
   native-libs/candidates/<plat>/      committed prebuilt shared objects
 scripts/                       build-so.sh, test-local.sh (portable candidates);
-                               export-datasets.R (glmnet/datasets/*.csv from R)
+                               export-datasets.R (glmnet/datasets/*.csv from R);
+                               resyntax-gate.sh (the Resyntax gate CI runs)
 flake.nix                      native + racket derivations, devShells, checks
 nix/racket-linters.nix         Resyntax pinned by commit, for the shells and CI
 lint/                          glmnet-lint: the Resyntax suite the gates run (not
@@ -324,9 +325,8 @@ different `α` (`parm`) and `λ`. Each new capability is shipped as one unit:
 `raco test ./glmnet/`, the docs idiom gate among the tests · `raco scribble
 --htmls …/glmnet.scrbl` renders with no `collected information for key multiple
 times` warnings · `nix flake check` · Resyntax clean on the changed `.rkt`
-files: `resyntax analyze --refactoring-suite glmnet-lint/style project-style
---local-git-repository . origin/master` in a dev shell, as CI's `resyntax` job
-runs it against the PR's base. `project-style` (`lint/style.rkt`, tested by
+files: `scripts/resyntax-gate.sh [BASE_REF [BASE_NAME]]` in a dev shell, as
+CI's `resyntax` job runs it against the PR's base. `project-style` (`lint/style.rkt`, tested by
 `raco test lint/`) is Resyntax's default suite without
 `always-throwing-cond-to-when` and `always-throwing-if-to-when`, which rewrite
 the owner's style, bindings lifted up and one flat `cond` with an `else`, into

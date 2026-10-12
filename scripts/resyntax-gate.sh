@@ -1,17 +1,10 @@
 #!/usr/bin/env bash
-# Resyntax with lint/'s suite over the diff from BASE_REF, red on a suggestion,
-# a file it could not analyze, or a run that did not complete. Run inside a
-# glmnet dev shell; CI's resyntax job and .racket-dev.rktd both call it.
-#
 #   scripts/resyntax-gate.sh [BASE_REF [BASE_NAME]]
-#
-# Resyntax exits 0 with suggestions, so they are matched in its output. Every
-# other failure also prints a line in the suggestion format, so a runner that
-# reads only those lines turns red on it too.
+# Resyntax exits 0 with suggestions, so they are matched in its output.
 set -euo pipefail
 
 base_ref=${1:-origin/master}
-base_name=${2:-master}
+fix_ref=${2:+origin/$2}
 
 fail() {
   echo "::error::$1"
@@ -49,7 +42,7 @@ if [ -n "$broken" ]; then
   status=1
 fi
 if grep -qE "resyntax: .*\.rkt:[0-9]+:[0-9]+ \[" <<<"$out"; then
-  echo "::error::Resyntax found refactoring suggestions. Run: resyntax fix --refactoring-suite glmnet-lint/style project-style --local-git-repository . origin/$base_name"
+  echo "::error::Resyntax found refactoring suggestions. Run: resyntax fix --refactoring-suite glmnet-lint/style project-style --local-git-repository . ${fix_ref:-$base_ref}"
   status=1
 fi
 timeouts=$(grep -c "timed out" <<<"$out" || true)

@@ -101,10 +101,7 @@ list, a vector, an @racket[flvector] or an @racket[f64vector] (see
 response, and a column of strings, symbols or booleans is a factor, as R's
 character and logical columns are (see @secref["formulas-factors"]). A fit
 from an association list or a hash reads the columns it names, and a formula
-the columns its terms use. A fit takes a design matrix, with column names or
-not, as unnamed data: it reads every column, and predicts from new data by
-position. A formula, and @racket[predict] from a fit to named data, read a
-design matrix's columns by name:
+the columns its terms use:
 
 @examples[#:eval ev #:label #f
 (define patients
@@ -113,10 +110,17 @@ design matrix's columns by name:
         (cons "dose" #(2.5 5.0 1.0 3.5))
         (cons "response" '(3.1 5.2 1.9 4.0))))
 (coef (lasso patients "response" #:predictors '("age" "dose") #:lambda 0.1))
-(coef (lasso (table->design-matrix patients '("age" "dose"))
-             (dict-ref patients "response")
-             #:lambda 0.1))
 (coef (formula-fit (response . ~ . age + dose + site) patients #:lambda 0.1))
+]
+
+A design matrix is unnamed data to a fit: it reads every column and predicts
+by position:
+
+@examples[#:eval ev #:label #f
+(define age+dose (table->design-matrix patients '("age" "dose")))
+(define by-position (lasso age+dose (dict-ref patients "response") #:lambda 0.1))
+(coef by-position)
+(predict by-position '((40 3.0)))
 ]
 
 @section[#:tag "data-nested"]{Lists and vectors}
