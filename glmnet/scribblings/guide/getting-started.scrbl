@@ -14,8 +14,8 @@ a penalty by cross-validation and predicts the fuel economy of a new car.
 
 @commandline{raco pkg install --auto glmnet datasets}
 
-The @tt{datasets} package supplies this chapter's data and requires Racket 9.3
-or later. Load the modelling library:
+Both packages require Racket 9.3 or later; @tt{datasets} supplies this
+chapter's data. Load the modelling library:
 
 @examples[#:eval ev #:label #f
 (require glmnet)

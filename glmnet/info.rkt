@@ -22,8 +22,8 @@
 ;; https://github.com/bkc39/rkt-polars/issues/144 (tests/polars-version-test.rkt
 ;; says so when the installed polars is too old).
 (define deps
-  '("base" "draw-lib" "math-lib" "pict-lib" "plot-lib" "polars" "scribble-lib"
-    "typed-racket-lib"))
+  '(("base" #:version "9.3") "draw-lib" "math-lib" "pict-lib" "plot-lib" "polars"
+    "scribble-lib" "typed-racket-lib"))
 ;; at-exp-lib provides scribble/reader, which tests/docs-coverage-test.rkt uses
 ;; to read the manual's sources. math-doc, pict-doc and plot-doc are for the
 ;; manual's links into their documentation; plot-gui-lib provides `plot`, the

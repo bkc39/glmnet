@@ -11,6 +11,8 @@ own Fortran.
 raco pkg install glmnet
 ```
 
+Requires Racket 9.3 or later.
+
 Prebuilt native libraries exist for Linux x86-64 and macOS arm64 only: the
 package's own `libglmnetcompat`, and the library that its dependency
 [rkt-polars](https://github.com/bkc39/rkt-polars) ships. On Intel macOS the
