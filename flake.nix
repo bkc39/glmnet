@@ -204,6 +204,9 @@
               if grep "multiple times" "$TMPDIR/scribble.log"; then
                 exit 1
               fi
+              if grep -rE "Rkt(Val|Stx)Link\"[^>]*>&#955;<" "$TMPDIR/glmnet-doc"; then
+                exit 1
+              fi
               runHook postCheck
             '';
 
