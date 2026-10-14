@@ -327,7 +327,7 @@ different `α` (`parm`) and `λ`. Each new capability is shipped as one unit:
 times` warnings · `nix flake check` · Resyntax clean on the changed `.rkt`
 files: `scripts/resyntax-gate.sh [BASE_REF [BASE_NAME]]` in a dev shell, as
 CI's `resyntax` job runs it against the PR's base. `project-style` (`lint/style.rkt`, tested by
-`raco test lint/`) is Resyntax's default suite without
+`raco test lint/`, the `lint-test` gate and a CI step) is Resyntax's default suite without
 `always-throwing-cond-to-when` and `always-throwing-if-to-when`, which rewrite
 the owner's style, bindings lifted up and one flat `cond` with an `else`, into
 `when`/`unless` stacks; the dev shells link `lint/`, and elsewhere `raco pkg

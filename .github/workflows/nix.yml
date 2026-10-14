@@ -33,7 +33,9 @@ jobs:
       - uses: DeterminateSystems/nix-installer-action@v22
       - name: Resyntax lint
         env:
-          # a master push lints the empty diff: a skipped required check never reports
-          BASE_REF: ${{ github.event.pull_request.base.sha || 'origin/master' }}
-          BASE_NAME: ${{ github.base_ref || 'master' }}
+          # a push lints its own commits: a skipped required check never reports
+          BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE_NAME: ${{ github.base_ref || github.ref_name }}
         run: nix develop .#ci --command scripts/resyntax-gate.sh "$BASE_REF" "$BASE_NAME"
+      - name: Test the lint suite
+        run: nix develop .#ci --command raco test lint/
