@@ -83,8 +83,7 @@ design matrix is unnamed data, even when its columns have names. An
 association list whose columns are lists, such as @racket['(("x" 1 2) ("y" 3
 4))], is also a list of rows: it is named data when @racket[y] names columns,
 and rows otherwise. A list of strings or symbols given to a binomial or
-multinomial fitter is class labels, never names, since its named response is
-one column.
+multinomial fitter is class labels, never column names.
 
 The response is one column, except for two families:
 
@@ -215,18 +214,22 @@ their values are recognised once the program has loaded the library itself.
 @defproc[(predictors-for/c [X data/c] [y any/c] [#:classes? classes? boolean? #f])
          flat-contract?]{
   The contract on the @racket[#:predictors] argument, given @racket[X] and
-  @racket[y], with @racket[classes?] as @racket[response-for/c] takes it. For
-  named data, a non-empty list of distinct names of its columns, numeric ones
-  for a dataframe, without the response @racket[y], or any of its names when it
-  is a list; it is required. For unnamed data, a
+  @racket[y]. For named data, a non-empty list of distinct names of its
+  columns, numeric ones for a dataframe, without the response @racket[y], or
+  any of its names when it is a list; it is required. For unnamed data, a
   design matrix with column names included, only @racket[#f], since every
-  column of @racket[X] is a predictor.
+  column of @racket[X] is a predictor. With @racket[classes?], as for the
+  binomial and multinomial families, a list @racket[y] is class labels: on an
+  association list whose columns are lists, @racket[X] is then rows, and only
+  @racket[#f] is accepted.
 
   @examples[#:eval ev
   (define car-predictors/c (predictors-for/c autos "mpg"))
   (contract-first-order-passes? car-predictors/c '("wt" hp))
   (contract-first-order-passes? car-predictors/c '("wt" "mpg"))
-  (contract-first-order-passes? car-predictors/c '("wt" "wt"))]}
+  (contract-first-order-passes? car-predictors/c '("wt" "wt"))
+  (contract-first-order-passes? (predictors-for/c '(("x" 1 2) ("d" 1 0)) '("d") #:classes? #t)
+                                '("x"))]}
 
 @section[#:tag "ref-data"]{Input data}
 

@@ -9,7 +9,7 @@
 (module+ test
   (require rackunit
            racket/vector
-           (only-in racket/contract exn:fail:contract:blame?)
+           (only-in racket/contract contract-first-order-passes? exn:fail:contract:blame?)
            (only-in math/array list->array)
            (only-in math/matrix list*->matrix)
            (only-in polars dataframe series polars-null)
@@ -237,7 +237,16 @@
     (check-equal? fit (ols '((1 2) (2 1) (3 4) (5 3)) '(1 3 2 5)))
     (check-equal? (predict fit '(("z" 1) ("x" 2))) (predict fit '((2 1))))
     (check-exn (error-matching #rx"^predict: the model's predictors are not named")
-               (lambda () (predict (ols '((1 2) (2 1) (3 4) (5 3)) '(1 3 2 5)) table))))
+               (lambda () (predict (ols '((1 2) (2 1) (3 4) (5 3)) '(1 3 2 5)) table)))
+    (define both '(("x" 1.0 2.0 3.0 4.0) ("t" 5.0 3.0 6.0 2.0) ("d" 1 0 1 1)))
+    (check-pred glmnet-path? (cox-path both '("t" "d") #:predictors '("x") #:nlambda 3))
+    (check-exn (blame-matching #rx"expected: the name of a numeric column of the table"
+                               #rx"given: '\\(\"t\" \"d\"\\)")
+               (lambda () (elnet-fit both '("t" "d") #:predictors '("x") #:lambda 0.1)))
+    (check-true (contract-first-order-passes? (predictors-for/c both '("d")) '("x")))
+    (check-false (contract-first-order-passes? (predictors-for/c both '("d") #:classes? #t) '("x")))
+    (check-true (contract-first-order-passes? (predictors-for/c both '("d") #:classes? #t) #f))
+    (check-true (contract-first-order-passes? (predictors-for/c both "d" #:classes? #t) '("x"))))
 
   (test-case "a text column is never read as numbers"
     (check-exn (blame-matching #rx"given: column \"model\", of dtype string")
