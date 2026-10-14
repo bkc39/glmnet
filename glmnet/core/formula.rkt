@@ -863,7 +863,7 @@
         [name (in-list responses)]
         #:unless (= (length y) (design-matrix-nrows x)))
     (raise-arguments-error who "the response and the predictors have different lengths"
-                           "column" name
+                           "response column" name
                            "response rows" (length y)
                            "predictor rows" (design-matrix-nrows x)))
   (define y1 (car ys))

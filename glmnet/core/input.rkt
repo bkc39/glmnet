@@ -651,7 +651,7 @@
 (define (check-column-length who form name n no)
   (unless (= n no)
     (raise-arguments-error who (format "the ~a's columns have different lengths" (data-kind form))
-                           "column" name "length" n "rows of the predictors" no)))
+                           "response column" name "length" n "rows of the predictors" no)))
 
 ;; The response column `name` of named data X, whose predictors are x. An
 ;; entry that does not satisfy elem is an error naming its column and row.
