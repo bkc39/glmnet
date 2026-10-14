@@ -47,9 +47,10 @@
 ;; --- libraries glmnet does not load ----------------------------------------------
 
 ;; A library whose values glmnet recognises, by its adapter's support
-;; submodule, only when a value is no plain form: the module that declares the
-;; values, resolved once, and the adapter.
-(struct library (module adapter [resolved #:mutable]))
+;; submodule, only when a value is no plain form: the public modules through
+;; which a program gets the values, resolved once, and the adapter. A program
+;; that has a value of the library has declared at least one of them.
+(struct library (modules adapter [resolved #:mutable]))
 
 (define here (variable-reference->module-path-index (#%variable-reference)))
 (define own-name (variable-reference->resolved-module-path (#%variable-reference)))
@@ -58,19 +59,23 @@
 (define (adapter-path relative)
   (module-path-index-join `(submod ,relative support) here))
 
-(define polars (library 'polars (adapter-path "../data/polars.rkt") 'unresolved))
-(define math (library 'math/array (adapter-path "../data/math.rkt") 'unresolved))
+(define polars (library '(polars) (adapter-path "../data/polars.rkt") 'unresolved))
+(define math (library '(math/array math/matrix) (adapter-path "../data/math.rkt") 'unresolved))
 
-;; The library's resolved module name, or #f when it is not installed.
-(define (library-name lib)
+;; The resolved names of the library's modules that are installed, none when
+;; the library is not.
+(define (library-names lib)
   (define resolved (library-resolved lib))
   (cond
     [(eq? resolved 'unresolved)
-     (define name
-       (with-handlers ([exn:fail? (lambda (e) #f)])
-         (module-path-index-resolve (module-path-index-join (library-module lib) #f))))
-     (set-library-resolved! lib name)
-     name]
+     (define names
+       (for*/list ([mod (in-list (library-modules lib))]
+                   [name (in-value (with-handlers ([exn:fail? (lambda (e) #f)])
+                                     (module-path-index-resolve (module-path-index-join mod #f))))]
+                   #:when name)
+         name))
+     (set-library-resolved! lib names)
+     names]
     [else resolved]))
 
 ;; An adapter loaded into the namespace ns, its exports fetched by name.
@@ -89,12 +94,11 @@
 ;; declared both lib and glmnet in it; otherwise #f.
 (define (registry-adapter lib ns)
   (define loaded (hash-ref! adapters (namespace-module-registry ns) make-hasheq))
-  (define name (library-name lib))
   (cond
     [(hash-ref loaded lib #f) => values]
-    [(and name
-          (parameterize ([current-namespace ns])
-            (and (module-declared? name #f) (module-declared? own-name #f))))
+    [(parameterize ([current-namespace ns])
+       (and (for/or ([name (in-list (library-names lib))]) (module-declared? name #f))
+            (module-declared? own-name #f)))
      (define a (adapter lib ns (make-hasheq)))
      (hash-set! loaded lib a)
      a]

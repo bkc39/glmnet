@@ -3,8 +3,9 @@
  (gates
   (compile     "raco make -j 2 glmnet/main.rkt glmnet/plot.rkt glmnet/tests/*.rkt glmnet/examples/test/*.rkt")
   (docs-idioms "raco test glmnet/tests/docs-idiom-test.rkt")
-  (resyntax    "resyntax analyze --refactoring-suite glmnet-lint/style project-style --local-git-repository . ${RESYNTAX_BASE:-origin/master} --analyzer-timeout 30000")
+  (resyntax    "scripts/resyntax-gate.sh ${RESYNTAX_BASE:-origin/master}")
+  (lint-test   "raco test lint/")
   (test        "raco test -j 2 glmnet/")
-  (docs        "raco scribble --htmls --dest /tmp/glmnet-doc glmnet/scribblings/glmnet.scrbl")
+  (docs        "bash -c 'set -o pipefail; raco scribble --htmls --dest doc glmnet/scribblings/glmnet.scrbl 2>&1 | tee /dev/stderr | { ! grep \"multiple times\" >/dev/null; } && ! grep -rE \"Rkt(Val|Stx)Link\\\"[^>]*>&#955;<\" doc/glmnet'")
   (check       "nix flake check"))
- (push-gates (compile docs-idioms resyntax test)))
+ (push-gates (compile docs-idioms resyntax lint-test test)))

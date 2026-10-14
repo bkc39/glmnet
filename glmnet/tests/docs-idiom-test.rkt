@@ -50,9 +50,6 @@
     ("examples/07-poisson.rkt" (hand-written-output . 1))
     ("examples/08-mgaussian.rkt" (hand-written-output . 1))
     ("examples/13-data-sources.rkt" (positional-access . 4))
-    ("scribblings/guide/concepts.scrbl"
-     (family-accessor . 9) (path-accessor . 2) (hand-rounding . 9))
-    ("scribblings/guide/data.scrbl" (family-accessor . 2) (positional-access . 1))
     ("scribblings/guide/examples/cox.scrbl"
      (family-accessor . 1) (path-accessor . 2) (hand-rounding . 6))
     ("scribblings/guide/examples/data-sources.scrbl" (positional-access . 3))

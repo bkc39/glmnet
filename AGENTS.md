@@ -60,7 +60,8 @@ glmnet/                        Racket collection
   private/install-glmnet-native.rkt   pre-install hook (env -> staged -> candidate)
   native-libs/candidates/<plat>/      committed prebuilt shared objects
 scripts/                       build-so.sh, test-local.sh (portable candidates);
-                               export-datasets.R (glmnet/datasets/*.csv from R)
+                               export-datasets.R (glmnet/datasets/*.csv from R);
+                               resyntax-gate.sh (the Resyntax gate CI runs)
 flake.nix                      native + racket derivations, devShells, checks
 nix/racket-linters.nix         Resyntax pinned by commit, for the shells and CI
 lint/                          glmnet-lint: the Resyntax suite the gates run (not
@@ -83,12 +84,15 @@ as `glmnet/data/csv`, and the example datasets are `glmnet/datasets`;
 names:
 
 - the guide's Data chapter, `guide/data.scrbl` (tag `data`), has a section
-  `data-<format>` for each format and `data-datasets` for the datasets;
+  `data-<format>` for each format, which fits the format directly, and
+  `data-datasets` for the datasets; the format's conversions go in the one
+  table and examples of `data-explicit`, the explicit route;
 - the reference has a top-level section `ref-data-<format>` for each, with
   its `@defmodule`, after `ref-data` (the design-matrix layer) and before
   `ref-datasets`;
 - the Concepts section `concepts-data` holds only what every fitter accepts:
-  the design matrix, the response forms and named data;
+  unnamed data (matrices, rows, design matrices) with a response, and named
+  data (tables, dataframes) with the response and `#:predictors` named;
 - the literate example `examples/13-data-sources.rkt` (guide page
   `guide/examples/data-sources.scrbl`, tag `ex-data-sources`) fits R's
   `mtcars` from every format, and its harness checks that each gives the
@@ -113,6 +117,15 @@ goldens check every number of every file against R's, bit for bit, the
 `csv-cells` golden how R's `read.csv` types each spelling of a cell, in a
 UTF-8 `LC_CTYPE` that `gen-reference.R` sets, since white space is
 locale-dependent in R and the Nix sandbox runs R in the C locale.
+
+Two conversion costs that the manual leaves out. A `math/array` array that is
+neither a flonum array nor a mutable array is read one element at a time
+through the contract Typed Racket puts on arrays it returns to untyped code,
+several times slower for a large matrix, and a lazy array slower still.
+`design-matrix->polars` goes through a vector of flonums per column, because
+rkt-polars makes a series only from a list or a vector; a series from an
+`f64vector` in one copy (bkc39/rkt-polars#145) would make it as fast as the
+way in.
 
 The library a format adapts is a real dependency in `info.rkt`, which
 `main.rkt` does not load. `glmnet/data/polars` depends on the catalog package
@@ -158,10 +171,12 @@ matrix and a response for every fitter and for `predict`:
   column, so a list there is class labels.
 - **Libraries glmnet does not load.** Only for a value that is none of the
   plain forms does it ask whether the value is a Polars dataframe or series,
-  or a `math/array` array: each library's module name is resolved once (an
-  uninstalled library is absent), and is checked with `module-declared?`,
-  never loading it, in the current namespace's module registry and in
-  glmnet's own. Where it is declared, together with glmnet, the adapter's
+  or a `math/array` array: each library's public modules (`polars`;
+  `math/array` and `math/matrix`, since `math/matrix` does not declare
+  `math/array`) are resolved once (an uninstalled library is absent), and
+  checked with `module-declared?`, never loading them, in the current
+  namespace's module registry and in glmnet's own. Where one is declared,
+  together with glmnet, the adapter's
   `support` submodule (`data/polars.rkt`, `data/math.rkt`) is loaded into that
   registry, so that its struct types are the program's, and its predicates
   and conversions are kept per registry. A plain value never loads Polars,
@@ -311,10 +326,9 @@ different `α` (`parm`) and `λ`. Each new capability is shipped as one unit:
 `raco test ./glmnet/`, the docs idiom gate among the tests · `raco scribble
 --htmls …/glmnet.scrbl` renders with no `collected information for key multiple
 times` warnings · `nix flake check` · Resyntax clean on the changed `.rkt`
-files: `resyntax analyze --refactoring-suite glmnet-lint/style project-style
---local-git-repository . origin/master` in a dev shell, as CI's `resyntax` job
-runs it against the PR's base. `project-style` (`lint/style.rkt`, tested by
-`raco test lint/`) is Resyntax's default suite without
+files: `scripts/resyntax-gate.sh [BASE_REF [BASE_NAME]]` in a dev shell, as
+CI's `resyntax` job runs it against the PR's base. `project-style` (`lint/style.rkt`, tested by
+`raco test lint/`, the `lint-test` gate and a CI step) is Resyntax's default suite without
 `always-throwing-cond-to-when` and `always-throwing-if-to-when`, which rewrite
 the owner's style, bindings lifted up and one flat `cond` with an `else`, into
 `when`/`unless` stacks; the dev shells link `lint/`, and elsewhere `raco pkg

@@ -196,8 +196,17 @@
               # literate examples' companion harnesses under glmnet/examples/test/.
               raco test ./glmnet/
 
-              # Render the Scribble docs to catch errors.
-              raco scribble --htmls --dest "$TMPDIR/glmnet-doc" glmnet/scribblings/glmnet.scrbl
+              # Render the Scribble docs to catch errors; raco scribble exits 0
+              # on a duplicated definition.
+              set -o pipefail
+              raco scribble --htmls --dest "$TMPDIR/glmnet-doc" glmnet/scribblings/glmnet.scrbl 2>&1 \
+                | tee "$TMPDIR/scribble.log"
+              if grep "multiple times" "$TMPDIR/scribble.log"; then
+                exit 1
+              fi
+              if grep -rE "Rkt(Val|Stx)Link\"[^>]*>&#955;<" "$TMPDIR/glmnet-doc"; then
+                exit 1
+              fi
               runHook postCheck
             '';
 
@@ -373,7 +382,7 @@
               echo "glmnet dev shell ready."
               echo "  Run all examples:  bash scripts/run-examples.sh"
               echo "  Run the tests:     raco test ./glmnet/"
-              echo "  Lint the changes:  resyntax analyze --refactoring-suite glmnet-lint/style project-style --local-git-repository . origin/master"
+              echo "  Lint the changes:  scripts/resyntax-gate.sh [BASE_REF [BASE_NAME]]"
             '';
           };
 
