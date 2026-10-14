@@ -367,6 +367,14 @@ before that one and logs a warning (@secref["concepts-convergence"]):
 (glmnet-path-lambda (elnet-path X y #:lambda '(0.5 0.1 0.01) #:max-iters 1))
 ]
 
+@racket[in-path] walks a path, giving each fitted @math{λ} with its
+coefficients as @racket[coef] gives them, intercept first:
+
+@examples[#:eval ev #:label #f
+(for ([(λ β) (in-path user-path)])
+  (printf "λ = ~a: ~a\n" λ β))
+]
+
 @racket[predict] and @racket[coef] evaluate a path at any @math{λ}
 (@secref["concepts-predict"]). Cross-validation chooses among the values on a
 path (@secref["concepts-cv"]).

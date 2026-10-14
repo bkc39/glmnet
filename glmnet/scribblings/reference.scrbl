@@ -1507,7 +1507,8 @@ it passes on to each fit, and these:
        observations, they are never grouped; @racket['auc] and @racket['C]
        are always computed per fold; and when the folds average fewer than 10
        observations, the Cox deviance is grouped. These adjustments, which R
-       also makes, log a warning.}
+       also makes, log a warning with the topic @racket['glmnet] that names
+       the procedure called.}
  @item{@racket[#:lambda] is as for the path fitter, but needs at least two
        values. Every fold's path is fitted at those values. Without it, each
        fold's path chooses its own sequence, as R's does, and is evaluated at
@@ -2709,6 +2710,21 @@ family:
   (coef named-model)
   (eval:error (coef (glmnet-path 'gaussian (vector) (vector) (vector)
                                  (vector) (vector) 0)))]}
+
+@defproc[(in-path [model glmnet-model?]) sequence?]{
+  A @tech[#:doc '(lib "scribblings/reference/reference.scrbl")]{sequence}
+  that walks @racket[model]'s @tech{regularization path}, with two values per
+  element: each fitted @math{λ}, in the path's order, and the coefficients at
+  that @math{λ} as @racket[coef] gives them, keyed by name for a model that
+  names its predictors. A single fit is a path with one @math{λ}, and a
+  @racket[glmnet-cv] walks its path of all the data. Nothing is interpolated:
+  each element holds the path's own fit at its @math{λ}.
+
+  @examples[#:eval ev
+  (for ([(λ β) (in-path path)])
+    (printf "~a: ~a\n" λ β))
+  (for/list ([(λ β) (in-path (formula-path (~ mpg (+ wt hp)) mtcars #:nlambda 4))])
+    β)]}
 
 @subsection[#:tag "ref-model-printing"]{Printing}
 

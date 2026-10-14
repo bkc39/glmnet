@@ -18,7 +18,7 @@
          (only-in "../data.rkt" design-matrix-select-rows response/c)
          (only-in (submod "../data.rkt" support) one-dimensional-length one-dimensional->vector)
          (only-in "marshal.rkt" design-matrix-nrows design-matrix-ncols linear-predictor
-                  current-warning-who current-warning-what)
+                  current-warning-who current-warning-what log-fit-warning)
          "model.rkt"
          "path.rkt"
          (submod "path.rkt" support))
@@ -509,15 +509,14 @@
   (define measure*
     (cond
       [(and (eq? measure 'auc) (< per-fold 10))
-       (log-warning "~a: fewer than 10 observations per fold for 'auc; using 'deviance instead"
-                    who)
+       (log-fit-warning who "fewer than 10 observations per fold for 'auc; using 'deviance instead")
        'deviance]
       [else measure]))
   (define cox-grouped?
     (cond
       [(not (and (eq? family 'cox) (eq? measure* 'deviance))) grouped?]
       [(and (not grouped?) (< per-fold 10))
-       (log-warning "~a: fewer than 10 observations per fold; the Cox deviance is grouped" who)
+       (log-fit-warning who "fewer than 10 observations per fold; the Cox deviance is grouped")
        #t]
       [else grouped?]))
   (when (and (eq? family 'cox) (eq? measure* 'deviance) (not cox-grouped?))
@@ -545,7 +544,7 @@
   (define grouped-stats?
     (cond
       [(and grouped-raw? (< per-fold 3))
-       (log-warning "~a: fewer than 3 observations per fold; the folds are not grouped" who)
+       (log-fit-warning who "fewer than 3 observations per fold; the folds are not grouped")
        #f]
       [else grouped-raw?]))
   (define-values (stats-raw stats-weights stats-counts)

@@ -8,7 +8,8 @@
 ;; also names lambdas, 'lambda-min and 'lambda-1se, which `predict` and `coef`
 ;; accept in place of a number. A model that names its predictors, such as a
 ;; formula model (#26), gets name-keyed coefficients from `coef` and has
-;; `predict` read a table by those names.
+;; `predict` read a table by those names. `in-path` walks a model's path, a λ
+;; and its coefficients at a time.
 
 (require racket/contract
          racket/generic
@@ -76,7 +77,8 @@
    (->i ([model glmnet-model?])
         (#:lambda [s (or/c lambda-arg/c lambda-name/c)])
         #:pre/name (model) "the model has at least one fitted λ" (fitted? model)
-        [result (or/c vector? list?)])]))
+        [result (or/c vector? list?)])]
+  [in-path (-> glmnet-model? sequence?)]))
 
 ;; For the family modules only; not part of the public API.
 (module* support #f
@@ -278,6 +280,24 @@
               (lambda (s)
                 (define-values (a0 beta) (point-at p interpolate s))
                 (name (coefficient-vector a0 beta)))))
+
+;; --- in-path -------------------------------------------------------------------
+
+;; Each fitted λ of the model's path with its coefficients, built as `coef`
+;; builds them, but from the path's own column at that λ.
+(define (in-path model)
+  (define p (glmnet-model->path model))
+  (define lams (glmnet-path-lambda p))
+  (define intercepts (glmnet-path-intercepts p))
+  (define coefficients (glmnet-path-coefficients p))
+  (define name (and (fitted? model) (coefficient-namer 'in-path model p)))
+  (define (step i)
+    (values (vector-ref lams i)
+            (name (coefficient-vector (and intercepts (vector-ref intercepts i))
+                                      (vector-ref coefficients i)))))
+  (make-do-sequence
+   (lambda ()
+     (values step add1 0 (lambda (i) (< i (vector-length lams))) #f #f))))
 
 ;; --- predict -------------------------------------------------------------------
 

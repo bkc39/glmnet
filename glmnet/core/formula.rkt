@@ -22,7 +22,7 @@
          "path.rkt"
          (submod "path.rkt" support)
          "cv.rkt"
-         (only-in "marshal.rkt" current-warning-who)
+         (only-in "marshal.rkt" current-warning-who log-fit-warning)
          (only-in (submod "cv.rkt" support)
                   nfolds/c cv-lambda-sequence/c write-cv)
          "elnet.rkt"
@@ -108,8 +108,6 @@
          #:thresh [thresh (>/c 0)]
          #:max-iters [max-iters exact-positive-integer?])
         [result formula-model?])]))
-
-(define-logger glmnet)
 
 ;; --- formulas ------------------------------------------------------------------
 
@@ -630,8 +628,8 @@
     (for-each check-column inputs))
   (define-values (kept dropped) (drop-response-terms mt))
   (for ([v (in-list dropped)])
-    (log-glmnet-warning "~a: the response column ~s appeared on the right-hand side and was dropped"
-                        who (variable-label v)))
+    (log-fit-warning who "the response column ~s appeared on the right-hand side and was dropped"
+                     (variable-label v)))
   (define-values (resolved evaluated) (resolve-levels/evaluated who kept table))
   (define names (model-terms-column-names resolved))
   (when (member "(Intercept)" names)
