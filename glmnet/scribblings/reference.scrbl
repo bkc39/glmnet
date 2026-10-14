@@ -28,12 +28,17 @@ The fit procedures share their argument conventions:
        @racket[design-matrix?] value, or a non-empty list or vector of
        equal-length rows of reals, each row a list or a vector (see
        @racket[design-matrix/c], @secref["ref-data"] and
-       @secref["ref-data-nested"]). Prediction helpers take new data in the
-       same forms, with as many columns as the fit has coefficients.}
+       @secref["ref-data-nested"]), or, for the Gaussian procedures, a
+       @racketmodname[math/matrix] matrix. Prediction helpers take new data in
+       the same forms, with as many columns as the fit has coefficients.}
  @item{A @tech{response} @racket[y], and a Cox model's @racket[times] and
        @racket[statuses], is a non-empty list, vector, @racket[flvector] or
        @racket[f64vector] with one entry per row of @racket[X] (see
-       @racket[response/c]).}
+       @racket[response/c]), or, for the Gaussian procedures, a
+       @racketmodname[math/array] array or a Polars series.}
+ @item{The Gaussian procedures also take named data, a @tech{table} or a
+       Polars dataframe, whose response and predictors they select by name
+       (see @secref["ref-common-data"]).}
  @item{@racket[#:lambda] is the penalty strength @math{λ ≥ 0}. It is
        required.}
  @item{@racket[#:alpha] is the mixing parameter @math{α ∈ [0, 1]}:
@@ -55,6 +60,105 @@ raises @racket[exn:fail] with a readable message. So does a fit for which
 glmnet fits no @math{λ} at all, for example because it does not converge within
 @racket[#:max-iters] passes; the message names the procedure called and gives
 glmnet's reason. (R warns instead, and returns an empty model.)
+
+@subsection[#:tag "ref-common-data"]{Data arguments}
+
+@examples[#:eval ev #:hidden
+(require racket/contract
+         (only-in polars dataframe series)
+         (only-in math/matrix matrix)
+         (only-in math/array array))]
+
+The Gaussian procedures, @racket[elnet-fit], @racket[ols], @racket[ridge],
+@racket[lasso], @racket[elastic-net], @racket[elnet-path] and
+@racket[elnet-cv], take their data as it is, and give the results of the
+explicit conversions of @secref["ref-data"], @secref["ref-data-math"] and
+@secref["ref-data-polars"]. Unnamed data is as above. Named data, a
+@tech{table} that is not a design matrix or a Polars dataframe, is read by
+column name: @racket[y] names the response column, and @racket[#:predictors],
+then required, lists the predictor columns in the order of the coefficients.
+Nothing is guessed: a column is used only when it is named, no row is
+dropped, and a missing value, a value that is not a real number or one that
+is not finite is an error naming its column and row. A design matrix is
+unnamed data, even when its columns have names. An association list whose
+columns are lists, such as @racket['(("x" 1 2) ("y" 3 4))], is also a list of
+rows: it is named data when @racket[y] names a column, and rows otherwise.
+
+A fit from named data remembers its predictors' names: @racket[predict] and
+@racket[elnet-predict] read new named data, and a design matrix with column
+names, by them, in any order, ignoring other columns, the response included,
+and other unnamed data by position. A fit from unnamed data reads only
+unnamed data. The result is the same struct as from the explicit conversions,
+and @racket[equal?] to it, though a copy made by @racket[struct-copy] does not
+remember the names; @racket[coef] keeps its layout, and
+@racket[plot-coefficient-path] labels the curves by name.
+
+@racket[(require glmnet)] loads neither Polars nor @racketmodname[math/matrix];
+their values are recognised once the program has loaded the library itself.
+
+@examples[#:eval ev
+(define autos
+  (dataframe (list (series '(21.0 22.8 21.4 18.7 18.1 14.3) #:name "mpg")
+                   (series '(2.62 2.32 3.215 3.44 3.46 3.57) #:name "wt")
+                   (series '(110 93 110 175 105 245) #:name "hp"))))
+(define car-fit (ols autos "mpg" #:predictors '("wt" "hp")))
+(coef car-fit)
+(predict car-fit (hash "hp" '(150) "wt" '(3.0) "model" '("new")))
+(predict car-fit '((3.0 150)))
+(equal? (ols (matrix [[2.62 110] [2.32 93] [3.215 110] [3.44 175] [3.46 105] [3.57 245]])
+             (array #[21.0 22.8 21.4 18.7 18.1 14.3]))
+        (ols '((2.62 110) (2.32 93) (3.215 110) (3.44 175) (3.46 105) (3.57 245))
+             '(21.0 22.8 21.4 18.7 18.1 14.3)))
+(eval:error (ols autos "mpg"))
+(eval:error (ols autos "mpg" #:predictors '("wt" "mpg")))]
+
+@defthing[data/c flat-contract?]{
+  The contract on the @racket[X] argument of the Gaussian procedures and the
+  new data of @racket[predict]: unnamed data, a design matrix, rows in any of
+  the nestings of @racket[design-matrix/c] or a @racketmodname[math/matrix]
+  matrix, or named data, a @tech{table} or a Polars dataframe.
+
+  @examples[#:eval ev
+  (contract-first-order-passes? data/c '((1.0 2.0) (3.0 4.0)))
+  (contract-first-order-passes? data/c autos)
+  (contract-first-order-passes? data/c (hash "x" '(1 2)))
+  (contract-first-order-passes? data/c '(1.0 2.0))]}
+
+@defproc[(named-data? [v any/c]) boolean?]{
+  Returns @racket[#t] if @racket[v] is named data: a @tech{table} that is not
+  a design matrix, or a Polars dataframe.
+
+  @examples[#:eval ev
+  (named-data? autos)
+  (named-data? (list (cons "x" '(1 2))))
+  (named-data? (rows->design-matrix '((1 2)) #:column-names '(a b)))]}
+
+@defproc[(response-for/c [X data/c] [elem flat-contract?]) flat-contract?]{
+  The contract on the @racket[y] argument, given @racket[X]. For named data,
+  @racket[y] is the name of one of its columns, a string or a symbol, with a
+  numeric dtype when @racket[X] is a dataframe. Otherwise, @racket[y] is
+  @racket[(response/c elem)], or a @racketmodname[math/array] array, as
+  @racket[array->response] takes, or a Polars series, whose entries are
+  checked as they are read. The Gaussian procedures use
+  @racket[(response-for/c X real?)].
+
+  @examples[#:eval ev
+  (contract-first-order-passes? (response-for/c autos real?) "mpg")
+  (contract-first-order-passes? (response-for/c autos real?) "weight")
+  (contract-first-order-passes? (response-for/c '((1.0) (2.0)) real?) '(3 4))]}
+
+@defproc[(predictors-for/c [X data/c] [y any/c]) flat-contract?]{
+  The contract on the @racket[#:predictors] argument, given @racket[X] and
+  @racket[y]. For named data, a non-empty list of distinct names of its
+  columns, numeric ones for a dataframe, without the response @racket[y]; it
+  is required. For unnamed data, a design matrix with column names included,
+  only @racket[#f], since every column of @racket[X] is a predictor.
+
+  @examples[#:eval ev
+  (define car-predictors/c (predictors-for/c autos "mpg"))
+  (contract-first-order-passes? car-predictors/c '("wt" hp))
+  (contract-first-order-passes? car-predictors/c '("wt" "mpg"))
+  (contract-first-order-passes? car-predictors/c '("wt" "wt"))]}
 
 @section[#:tag "ref-data"]{Input data}
 
@@ -907,8 +1011,9 @@ fixed @racket[#:alpha]. See @secref["ex-ols"], @secref["ex-ridge"],
   (elnet-result-intercept fit)
   (elnet-result-coefficients fit)]}
 
-@defproc[(elnet-fit [X design-matrix/c]
-                    [y (response/c real?)]
+@defproc[(elnet-fit [X data/c]
+                    [y (response-for/c X real?)]
+                    [#:predictors predictors (predictors-for/c X y) #f]
                     [#:lambda lambda (>=/c 0)]
                     [#:alpha alpha (real-in 0 1) 1.0]
                     [#:standardize? standardize? boolean? #t]
@@ -917,17 +1022,21 @@ fixed @racket[#:alpha]. See @secref["ex-ols"], @secref["ex-ridge"],
                     [#:max-iters max-iters exact-positive-integer? 100000])
          elnet-result?]{
   Fits a Gaussian elastic-net model of the response @racket[y], one real per
-  row of @racket[X], at a single @racket[lambda]. As in R, a constant
+  row of @racket[X], at a single @racket[lambda]. @racket[X] and @racket[y]
+  are unnamed data, or named data with the response and @racket[predictors]
+  named, as in @secref["ref-common-data"]. As in R, a constant
   @racket[y] (all zero, when @racket[intercept?] is @racket[#f]) has nothing to
   standardize and raises @racket[exn:fail]. The four models below call
   @racket[elnet-fit], and its errors name the one called.
 
   @examples[#:eval ev
   (elnet-fit X y #:alpha 0.5 #:lambda 0.5)
+  (elnet-fit autos "mpg" #:predictors '("wt" "hp") #:alpha 0.5 #:lambda 0.5)
   (eval:error (lasso X '(2.0 2.0 2.0 2.0 2.0 2.0) #:lambda 0.5))]}
 
-@defproc[(ols [X design-matrix/c]
-              [y (response/c real?)]
+@defproc[(ols [X data/c]
+              [y (response-for/c X real?)]
+              [#:predictors predictors (predictors-for/c X y) #f]
               [#:standardize? standardize? boolean? #t]
               [#:intercept? intercept? boolean? #t]
               [#:thresh thresh (>/c 0) 1e-10]
@@ -941,10 +1050,12 @@ fixed @racket[#:alpha]. See @secref["ex-ols"], @secref["ex-ridge"],
   @examples[#:eval ev
   (elnet-result-coefficients
    (ols '((1.0 2.0) (2.0 1.0) (3.0 4.0) (4.0 3.0) (5.0 6.0))
-        '(1.0 4.0 3.0 6.0 5.0)))]}
+        '(1.0 4.0 3.0 6.0 5.0)))
+  (elnet-result-coefficients (ols autos "mpg" #:predictors '("wt" "hp")))]}
 
-@defproc[(ridge [X design-matrix/c]
-                [y (response/c real?)]
+@defproc[(ridge [X data/c]
+                [y (response-for/c X real?)]
+                [#:predictors predictors (predictors-for/c X y) #f]
                 [#:lambda lambda (>=/c 0)]
                 [#:standardize? standardize? boolean? #t]
                 [#:intercept? intercept? boolean? #t]
@@ -956,10 +1067,12 @@ fixed @racket[#:alpha]. See @secref["ex-ols"], @secref["ex-ridge"],
   to zero.
 
   @examples[#:eval ev
-  (elnet-result-coefficients (ridge X y #:lambda 0.1))]}
+  (elnet-result-coefficients (ridge X y #:lambda 0.1))
+  (elnet-result-coefficients (ridge autos "mpg" #:predictors '("wt" "hp") #:lambda 1.0))]}
 
-@defproc[(lasso [X design-matrix/c]
-                [y (response/c real?)]
+@defproc[(lasso [X data/c]
+                [y (response-for/c X real?)]
+                [#:predictors predictors (predictors-for/c X y) #f]
                 [#:lambda lambda (>=/c 0)]
                 [#:standardize? standardize? boolean? #t]
                 [#:intercept? intercept? boolean? #t]
@@ -970,10 +1083,12 @@ fixed @racket[#:alpha]. See @secref["ex-ols"], @secref["ex-ridge"],
   exactly to zero, more of them as @racket[lambda] grows.
 
   @examples[#:eval ev
-  (elnet-result-coefficients (lasso X y #:lambda 0.5))]}
+  (elnet-result-coefficients (lasso X y #:lambda 0.5))
+  (elnet-result-coefficients (lasso autos "mpg" #:predictors '("wt" "hp") #:lambda 1.0))]}
 
-@defproc[(elastic-net [X design-matrix/c]
-                      [y (response/c real?)]
+@defproc[(elastic-net [X data/c]
+                      [y (response-for/c X real?)]
+                      [#:predictors predictors (predictors-for/c X y) #f]
                       [#:alpha alpha (real-in 0 1)]
                       [#:lambda lambda (>=/c 0)]
                       [#:standardize? standardize? boolean? #t]
@@ -986,16 +1101,20 @@ fixed @racket[#:alpha]. See @secref["ex-ols"], @secref["ex-ridge"],
   @racket[lasso].
 
   @examples[#:eval ev
-  (elnet-result-coefficients (elastic-net X y #:alpha 0.5 #:lambda 0.5))]}
+  (elnet-result-coefficients (elastic-net X y #:alpha 0.5 #:lambda 0.5))
+  (elnet-result-coefficients
+   (elastic-net autos "mpg" #:predictors '("wt" "hp") #:alpha 0.5 #:lambda 1.0))]}
 
 @defproc[(elnet-predict [fit elnet-result?]
-                        [X design-matrix/c])
+                        [X data/c])
          (listof real?)]{
   The fitted value @math{β₀ + xβ} for each row of @racket[X]: @racket[predict]
-  with its defaults.
+  with its defaults. A fit from named data reads named @racket[X] by its
+  predictors' names.
 
   @examples[#:eval ev
-  (elnet-predict fit '((7.0 6.0 49.0) (0.0 0.0 0.0)))]}
+  (elnet-predict fit '((7.0 6.0 49.0) (0.0 0.0 0.0)))
+  (elnet-predict car-fit (list (cons "wt" '(3.0 2.5)) (cons "hp" '(150 100))))]}
 
 @section[#:tag "ref-binomial"]{Binomial models}
 
@@ -1374,8 +1493,9 @@ These are R's @tt{glmnet.control} defaults (@tt{fdev = 1e-5},
   (glmnet-path-coefficients path)
   (glmnet-path-df path)]}
 
-@defproc[(elnet-path [X design-matrix/c]
-                     [y (response/c real?)]
+@defproc[(elnet-path [X data/c]
+                     [y (response-for/c X real?)]
+                     [#:predictors predictors (predictors-for/c X y) #f]
                      [#:lambda lambda (or/c #f (and/c (listof (>=/c 0)) pair?)) #f]
                      [#:nlambda nlambda exact-positive-integer? 100]
                      [#:lambda-min-ratio lambda-min-ratio (or/c #f (and/c real? (>=/c 0) (</c 1))) #f]
@@ -1391,6 +1511,7 @@ These are R's @tt{glmnet.control} defaults (@tt{fdev = 1e-5},
   (vector-length (glmnet-path-lambda (elnet-path X y)))
   (glmnet-path-df (elnet-path X y #:alpha 0.0 #:nlambda 5))
   (glmnet-path-lambda (elnet-path X y #:nlambda 5 #:lambda-min-ratio 0.1))
+  (glmnet-path-df (elnet-path autos "mpg" #:predictors '("wt" "hp") #:nlambda 5))
   (eval:error (elnet-path X y #:lambda '(0.1) #:max-iters 1))]}
 
 @defproc[(logistic-path [X design-matrix/c]
@@ -1613,8 +1734,9 @@ carry the signal:
   (predict cv '((0.5 -0.5 0.0 0.0 0.0 0.0 0.0 0.0)))
   (deviance-ratio cv)]}
 
-@defproc[(elnet-cv [X design-matrix/c]
-                   [y (response/c real?)]
+@defproc[(elnet-cv [X data/c]
+                   [y (response-for/c X real?)]
+                   [#:predictors predictors (predictors-for/c X y) #f]
                    [#:type-measure type-measure (or/c 'mse 'deviance 'mae) 'mse]
                    [#:nfolds nfolds (and/c exact-integer? (>=/c 3)) 10]
                    [#:fold-ids fold-ids fold-ids/c #f]
@@ -1634,6 +1756,11 @@ carry the signal:
 
   @examples[#:eval ev
   (elnet-cv X60 y60 #:type-measure 'mae #:alpha 0.5)
+  (define car-cv
+    (elnet-cv mtcars "mpg" #:predictors '("wt" "hp" "qsec")
+              #:fold-ids (for/list ([i (in-range 32)]) (modulo i 4))))
+  (coef car-cv)
+  (predict car-cv (list (cons "qsec" '(17.0)) (cons "hp" '(150)) (cons "wt" '(3.0))))
   (define halves (for/list ([i (in-range 60)]) (modulo i 2)))
   (eval:error (elnet-cv X60 y60 #:fold-ids halves))]}
 
@@ -2625,7 +2752,7 @@ family:
   (deviance-ratio path)]}
 
 @defproc[(predict [model glmnet-model?]
-                  [X (or/c design-matrix/c table?)]
+                  [X data/c]
                   [#:type type (or/c 'link 'response 'class) 'link]
                   [#:lambda lambda (or/c (>=/c 0) (and/c (listof (>=/c 0)) pair?)
                                          'lambda-min 'lambda-1se)
@@ -2640,9 +2767,10 @@ family:
   @racket[formula-model], the table needs the columns that the formula's terms
   read, from which @racket[predict] builds the design matrix as
   @racket[formula-design-matrix] does, transforms included; an error names the
-  missing ones. A model
-  that does not name its predictors reads @racket[X] by position, and so does
-  not take an association list or a hash. @racket[type] chooses what is
+  missing ones. A fit from named data (see @secref["ref-common-data"]) reads
+  named @racket[X], a table or a dataframe, by its predictors' names, and
+  unnamed @racket[X] by position. Any other model reads @racket[X] by
+  position, and so does not take named data. @racket[type] chooses what is
   predicted:
 
   @tabular[#:style 'boxed
@@ -2841,7 +2969,8 @@ cross-validated fit @racket[cv] of @secref["ref-cv"], and the formula model
          @racket['dev] for the fraction of deviance explained.}
    @item{@racket[label] labels each curve at the end of the path: @racket[#f]
          for no labels, @racket[#t] for the predictor's name if the model names
-         its predictors, as a @racket[formula-model] does, and otherwise its
+         its predictors, as a @racket[formula-model] and a fit from named data
+         (see @secref["ref-common-data"]) do, and otherwise its
          position counting from 1, or the names of the predictors, as a list or
          as the column names of a design matrix. A design matrix without column
          names gives positions.}
@@ -2868,6 +2997,8 @@ cross-validated fit @racket[cv] of @secref["ref-cv"], and the formula model
   @examples[#:eval ev
   (plot-coefficient-path path #:xvar 'norm #:label '("x1" "x2" "x3")
                          #:width 400 #:height 300 #:title "Lasso path")
+  (plot-coefficient-path (elnet-path mtcars "mpg" #:predictors '("wt" "hp" "qsec"))
+                         #:label #t #:width 400 #:height 300)
   (eval:error (plot-coefficient-path (elnet-path X y #:lambda '(10.0 5.0))))
   (eval:error (plot-coefficient-path (elnet-path X y #:lambda '(0.0))))]}
 

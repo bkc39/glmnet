@@ -12,12 +12,14 @@
 ;; `gen:glmnet-model` (core/model.rkt), so `predict`, `coef` and
 ;; `deviance-ratio` work on any of them. core/formula.rkt is the formula front
 ;; end, which fits any family from a table by column name. `data.rkt` is the
-;; design-matrix layer every fitter reads its input through, and `foreign.rkt`
+;; design-matrix layer every fitter reads its input through, core/input.rkt
+;; the boundary that takes the user's data in any format to it, and `foreign.rkt`
 ;; also re-exports the Phase 0 connectivity checks. The plots, plot.rkt, are
 ;; `(require glmnet/plot)` and are not re-exported here, so that fitting a
 ;; model does not load plot-lib.
 
 (require "data.rkt"
+         "core/input.rkt"
          "core/elnet.rkt"
          "core/lognet.rkt"
          "core/multinomial.rkt"
@@ -31,6 +33,7 @@
          "foreign.rkt")
 
 (provide (all-from-out "data.rkt")
+         (all-from-out "core/input.rkt")
          (all-from-out "core/elnet.rkt")
          (all-from-out "core/lognet.rkt")
          (all-from-out "core/multinomial.rkt")

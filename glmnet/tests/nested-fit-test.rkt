@@ -168,8 +168,9 @@
   (test-case "a matrix of the wrong shape names the accepted shapes"
     (check-blame (lambda () (ols (flvector 1.0 2.0) yg))
                  #rx"^ols: contract violation"
-                 #rx"expected: \\(or/c design-matrix\\? \\(listof \\(or/c list\\? vector\\?\\)\\) \\(vectorof \\(or/c list\\? vector\\?\\)\\)\\)"
-                 #rx"in: the 1st argument of")
+                 #rx"expected: \\(or/c design-matrix\\? \\(listof \\(or/c list\\? vector\\?\\)\\) \\(vectorof \\(or/c list\\? vector\\?\\)\\)"
+                 #rx"\\(and/c array\\? matrix\\?\\) table\\? dataframe\\?\\)"
+                 #rx"in: the X argument of")
     (check-blame (lambda () (mgaussian-fit Xr #(1.0 2.0) #:lambda 1.0))
                  #rx"expected: \\(or/c design-matrix\\? \\(listof \\(or/c list\\? vector\\?\\)\\)"
                  #rx"in: the 2nd argument of"))

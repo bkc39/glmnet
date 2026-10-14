@@ -36,6 +36,10 @@ glmnet/                        Racket collection
                                mtcars and iris, from datasets/*.csv
   datasets/*.csv               R's data, written by scripts/export-datasets.R
   core/*.rkt                   one module per family; marshal.rkt, path.rkt shared
+  core/input.rkt               the one boundary from the user's data (unnamed: design
+                               matrices, nested rows, math/matrix; named: tables,
+                               Polars dataframes) to a design matrix and a response
+                               (see "The data boundary" below)
   core/model.rkt               gen:glmnet-model: predict / coef / deviance-ratio / in-path on any result
   core/cv.rkt                  cross-validation (R's cv.glmnet) behind every family's *-cv
   core/formula.rkt             formula front end: (~ y all) on a table -> any family,
@@ -143,6 +147,30 @@ The library a format adapts is a real dependency in `info.rkt`, which
      `rkt-polars.packages.${system}.racket-deps.overrideAttrs (_: {
      outputHash = "<got>"; })` in `installPolars`, and drop the override at 1.
 
+The data boundary, `core/input.rkt` (#74), takes the user's data to a design
+matrix and a response for every fitter and for `predict`:
+
+- **Plain forms first.** A design matrix, nested rows and a table are
+  recognised with no library check. An association list whose columns are
+  lists is also rows: it is named data when the response argument names
+  columns, and rows otherwise.
+- **Libraries glmnet does not load.** Only for a value that is none of the
+  plain forms does it ask whether the value is a Polars dataframe or series,
+  or a `math/array` array: each library's module name is resolved once (an
+  uninstalled library is absent), and is checked with `module-declared?`,
+  never loading it, in the current namespace's module registry and in
+  glmnet's own. Where it is declared, together with glmnet, the adapter's
+  `support` submodule (`data/polars.rkt`, `data/math.rkt`) is loaded into that
+  registry, so that its struct types are the program's, and its predicates
+  and conversions are kept per registry. A plain value never loads Polars,
+  `math/matrix` or Typed Racket.
+- **What a fit remembers.** A fit from named data remembers its predictors'
+  names as an impersonator property of a chaperone of its result
+  (`attach-data-names` in `core/model.rkt`), so that the result is the struct
+  the explicit adapters give, `equal?` to it and with the same `coef`;
+  `predict` reads named data, and a design matrix with column names, by
+  those names. `struct-copy` makes a plain struct, without them.
+
 The formula language (#53) is R's, checked against R's `terms()` and
 `model.matrix()` by the parity goldens. A new kind of formula term, such as
 another R call with a meaning of its own, adds:
@@ -213,8 +241,10 @@ different `α` (`parm`) and `λ`. Each new capability is shipped as one unit:
    `define-glmnet` (`_f64vector`/`_s32vector` buffers, `(_ptr o …)` scalar outs;
    no allocator/finalizer — these are pure calls). Add a contracted wrapper in
    `core/` (inputs through the design-matrix layer, `data.rkt`, via
-   `core/marshal.rkt`; `jerr` check; a result struct that implements
-   `gen:glmnet-model` from `core/model.rkt`, so `predict`, `coef` and printing
+   `core/marshal.rkt`, or, for a procedure that takes data directly, the
+   contract `fit/c` and the conversion `fit-input` of `core/input.rkt`, with
+   `attach-data-names` on the result, the inner path of a CV result included; `jerr` check; a result struct that
+   implements `gen:glmnet-model` from `core/model.rkt`, so `predict`, `coef` and printing
    work on it; prediction helpers are `predict` at a fixed `#:type`).
 5. **Test the Racket binding.** `glmnet/tests/*-test.rkt` rackunit: round-trip vs
    closed-form / known values, `jerr` error surfacing, shape-mismatch contract

@@ -60,8 +60,8 @@
         (values 1 (vector-ref ds 0))
         (values (vector-ref ds 0) (vector-ref ds 1))))
 
-  (: matrix->f64vector (-> Any Storage (U #f (Listof String)) Symbol F64Vector))
-  (define (matrix->f64vector M storage names who)
+  (: matrix->f64vector (-> Any Storage (U #f (Listof String)) Symbol String F64Vector))
+  (define (matrix->f64vector M storage names who what)
     (define a (assert M array?))
     (define-values (m n) (rows+columns a))
     (define ref (element-reader a storage n))
@@ -73,12 +73,12 @@
       (f64vector-set! out (+ i (* j m))
                       (if (and (flonum? x) (fl< (flabs x) +inf.0))
                           x
-                          (->finite-flonum x who "the matrix" i
+                          (->finite-flonum x who what i
                                            (if labels (vector-ref labels j) j)))))
     out)
 
-  (: array->real-list (-> Any Storage Symbol (Listof Real)))
-  (define (array->real-list A storage who)
+  (: array->real-list (-> Any Storage Symbol String (Listof Real)))
+  (define (array->real-list A storage who what)
     (define a (assert A array?))
     (define-values (m n) (rows+columns a))
     (define ref (element-reader a storage n))
@@ -86,11 +86,11 @@
                                 [j (in-range n)])
       (define x (ref i j))
       (define k (+ (* i n) j))
-      (unless (real? x)
-        (element-error who "the response" "not a real number" x #:position k))
-      (unless (fl< (flabs (real->double-flonum x)) +inf.0)
-        (element-error who "the response" "not finite" x #:position k))
-      x))
+      (cond
+        [(not (real? x)) (element-error who what "not a real number" x #:position k)]
+        [(not (fl< (flabs (real->double-flonum x)) +inf.0))
+         (element-error who what "not finite" x #:position k)]
+        [else x])))
 
   (: row-major->flarray (-> FlVector Index Index FlArray))
   (define (row-major->flarray data m n)
@@ -122,6 +122,14 @@
   [design-matrix->matrix (-> design-matrix? matrix/c)]
   [array->response (-> response-array/c (and/c (listof real?) pair?))]))
 
+;; For glmnet's data boundary (core/input.rkt) only: the conversions above with
+;; the name of the procedure the user called.
+(module* support #f
+  (provide math-matrix? response-array? matrix->dm array->reals))
+
+(define (math-matrix? v)
+  (and (array? v) (matrix? v)))
+
 (define (array-storage a)
   (cond
     [(flarray? a) (flarray-data a)]
@@ -129,13 +137,15 @@
     [else #f]))
 
 (define (matrix->design-matrix M #:column-names [names #f])
-  (define who 'matrix->design-matrix)
+  (matrix->dm 'matrix->design-matrix "the matrix" M names))
+
+(define (matrix->dm who what M [names #f])
   (define-values (m n) (matrix-shape M))
   (define storage (array-storage M))
   (if (and (flvector? storage) (= (flvector-length storage) (* m n)))
-      (flat->design-matrix storage m n names who "the matrix" #:order 'row-major)
-      (flat->design-matrix (matrix->f64vector M storage (check-column-names names n who) who)
-                           m n names who "the matrix" #:adopt? #t)))
+      (flat->design-matrix storage m n names who what #:order 'row-major)
+      (flat->design-matrix (matrix->f64vector M storage (check-column-names names n who) who what)
+                           m n names who what #:adopt? #t)))
 
 (define (design-matrix->matrix dm)
   (define v (design-matrix-data dm))
@@ -148,4 +158,7 @@
   (row-major->flarray rows m n))
 
 (define (array->response A)
-  (array->real-list A (array-storage A) 'array->response))
+  (array->reals 'array->response "the response" A))
+
+(define (array->reals who what A)
+  (array->real-list A (array-storage A) who what))

@@ -5,17 +5,16 @@
          racket/match
          ffi/vector
          (only-in polars
-                  dataframe dataframe? series
+                  dataframe dataframe? series series?
                   dataframe->f64vector dataframe->columns series->list in-series
                   column-names height ref dtype null-count polars-null?)
          (only-in "../data.rkt" design-matrix? design-matrix-column-names table?
                   table-column-names)
          (only-in (submod "../data.rkt" support)
                   design-matrix-data design-matrix-nrows design-matrix-ncols
-                  column-name->string select-table-values flat->design-matrix
-                  element-error missing-error default-column-names))
-
-(define column-name/c (or/c string? symbol?))
+                  column-name? column-name->string select-table-values flat->design-matrix
+                  element-error missing-error default-column-names
+                  name-set explain column-problem column-list-problem))
 
 (provide
  (contract-out
@@ -41,6 +40,14 @@
         ([columns (t) (table-columns/c t)])
         [result dataframe?])]))
 
+;; For glmnet's data boundary (core/input.rkt) only: the conversions above with
+;; the name of the procedure the user called. With #:checked? #t, the caller's
+;; contract has checked the column names and dtypes, as numeric-column-problem
+;; does; otherwise they are checked here.
+(module* support #f
+  (provide dataframe? series? column-names numeric-column-problem
+           dataframe->design-matrix dataframe-column->response series->response))
+
 ;; --- dtypes --------------------------------------------------------------------
 
 (define (numeric-dtype? d)
@@ -60,9 +67,6 @@
 
 ;; --- contracts -----------------------------------------------------------------
 
-(define ((explain v expected given . args) blame)
-  (apply raise-blame-error blame v (list 'expected: expected 'given: given) args))
-
 (define dataframe-with-rows/c
   (flat-contract-with-explanation
    (lambda (df)
@@ -70,35 +74,12 @@
          (explain df "a dataframe with at least one row" "a dataframe with no rows")))
    #:name 'dataframe-with-rows/c))
 
-;; The column names `present`, strings, as a set to look names up in.
-(define (name-set present)
-  (for/hash ([name (in-list present)]) (values name #t)))
-
-;; What is wrong with the column name `s` (a string) of the `what` ("dataframe"
-;; or "table") whose columns are `present`, with the set `known`, as a string
-;; for a blame error's given: field; #f when nothing is. `problem` is #f for a
-;; column it accepts, or what is wrong with it.
-(define (column-problem s what known present problem)
-  (cond
-    [(not (hash-ref known s #f))
-     (format "~s, which is not a column of the ~a; its columns are ~s" s what present)]
-    [(problem s) => (lambda (p) (format "column ~s, ~a" s p))]
-    [else #f]))
-
 ;; A non-empty list of distinct column names, each without a problem.
 (define (column-list/c expected what present problem)
   (define known (name-set present))
   (flat-contract-with-explanation
    (lambda (names)
-     (define given
-       (cond
-         [(not (and (list? names) (pair? names) (andmap column-name/c names)))
-          (format "~e" names)]
-         [(check-duplicates names #:key column-name->string)
-          => (lambda (name) (format "~s twice" (column-name->string name)))]
-         [else
-          (for/or ([name (in-list names)])
-            (column-problem (column-name->string name) what known present problem))]))
+     (define given (column-list-problem names what known present problem))
      (or (not given) (explain names "~a" "~a" expected given)))
    #:name '(and/c (listof (or/c string? symbol?)) pair?)))
 
@@ -122,7 +103,7 @@
   (flat-contract-with-explanation
    (lambda (name)
      (define given
-       (if (column-name/c name)
+       (if (column-name? name)
            (column-problem (column-name->string name) "dataframe" known present
                            (dtype-problem df accepts?))
            (format "~e" name)))
@@ -140,7 +121,7 @@
    (lambda (names)
      (define expected (format "~a distinct column names, strings or symbols" ncols))
      (cond
-       [(not (and (list? names) (andmap column-name/c names)))
+       [(not (and (list? names) (andmap column-name? names)))
         (explain names "~a" "~e" expected names)]
        [(not (= (length names) ncols))
         (explain names "~a" "~a names: ~e" expected (length names) names)]
@@ -170,27 +151,78 @@
                    #:row (for/first ([x (in-series s)] [i (in-naturals)] #:when (polars-null? x)) i)
                    #:column name)))
 
+;; What is wrong with df's column `name`, a string, as a numeric column, or #f.
+(define (numeric-column-problem df)
+  (dtype-problem df numeric-dtype?))
+
+;; Checks that df has rows and, unless checked? is #t, a numeric column with
+;; each of `names`, strings.
+(define (check-numeric-columns who df names checked?)
+  (define present (if checked? '() (column-names df)))
+  (define known (name-set present))
+  (define absent
+    (and (not checked?) (findf (lambda (name) (not (hash-ref known name #f))) names)))
+  (define text
+    (and (not checked?) (not absent)
+         (findf (lambda (name) (not (numeric-dtype? (dtype (ref df name))))) names)))
+  (cond
+    [(zero? (height df)) (raise-arguments-error who "the dataframe has no rows")]
+    [absent
+     (raise-arguments-error who "the dataframe has no column with this name"
+                            "column" absent "columns of the dataframe" present)]
+    [text
+     (raise-arguments-error who "the dataframe has a column that is not numeric"
+                            "column" text "dtype" (dtype (ref df text)))]
+    [else (void)]))
+
+;; The position and value of the first entry of ys, from a series of dtype d,
+;; that is not finite, or #f.
+(define (first-non-finite ys d)
+  (and (float-dtype? d)
+       (for/first ([y (in-list ys)] [k (in-naturals)] #:unless (< (abs y) +inf.0))
+         (cons k y))))
+
 ;; --- polars -> glmnet ------------------------------------------------------------
 
 (define (polars->design-matrix df columns)
-  (define who 'polars->design-matrix)
+  (dataframe->design-matrix 'polars->design-matrix df columns #:checked? #t))
+
+(define (dataframe->design-matrix who df columns #:checked? [checked? #f])
   (define names (map column-name->string columns))
+  (check-numeric-columns who df names checked?)
   (for ([name (in-list names)])
     (check-no-null who (ref df name) name))
   (define-values (v nrows ncols) (dataframe->f64vector df #:columns names #:null 'error))
   (flat->design-matrix v nrows ncols names who "the dataframe" #:adopt? #t))
 
 (define (polars->response df column)
-  (define who 'polars->response)
+  (dataframe-column->response 'polars->response df column #:checked? #t))
+
+(define (dataframe-column->response who df column #:checked? [checked? #f])
   (define name (column-name->string column))
+  (check-numeric-columns who df (list name) checked?)
   (define s (ref df name))
   (check-no-null who s name)
   (define ys (series->list s))
-  (when (float-dtype? (dtype s))
-    (for ([y (in-list ys)] [i (in-naturals)])
-      (unless (< (abs y) +inf.0)
-        (element-error who "the dataframe" "not finite" y #:row i #:column name))))
-  ys)
+  (define bad (first-non-finite ys (dtype s)))
+  (cond
+    [bad (element-error who "the dataframe" "not finite" (cdr bad) #:row (car bad) #:column name)]
+    [else ys]))
+
+;; The numbers of the series s, a response named `what` in errors, as a list.
+(define (series->response who what s)
+  (define d (dtype s))
+  (define ys (and (numeric-dtype? d) (zero? (null-count s)) (series->list s)))
+  (define bad (and ys (first-non-finite ys d)))
+  (cond
+    [(not (numeric-dtype? d))
+     (raise-arguments-error who (format "~a is a series that is not numeric" what) "dtype" d)]
+    [(not ys)
+     (missing-error who what
+                    #:position (for/first ([x (in-series s)] [k (in-naturals)] #:when (polars-null? x))
+                                 k))]
+    [bad (element-error who what "not finite" (cdr bad) #:position (car bad))]
+    [else ys]))
 
 (define (polars->table df [columns (column-names df)])
   (define who 'polars->table)

@@ -33,14 +33,21 @@
 
 ;; --- prediction ------------------------------------------------------------
 
-;; The new-data argument of a prediction helper, as a design matrix with one
+;; The new data x of a prediction, a design matrix, checked to have one
 ;; column per coefficient.
-(define (prediction-matrix X ni who)
-  (define x (as-design-matrix X who "X"))
-  (unless (= (design-matrix-ncols x) ni)
-    (raise-arguments-error who "X does not have one column per coefficient"
-                           "columns of X" (design-matrix-ncols x) "coefficients" ni))
-  x)
+(define (prediction-matrix x ni who)
+  (define no (design-matrix-nrows x))
+  (define nc (design-matrix-ncols x))
+  (cond
+    [(= nc ni) x]
+    [(= no ni)
+     (raise-arguments-error who "X does not have one column per coefficient"
+                            "columns of X" nc "coefficients" ni "rows of X" no
+                            "hint" (unquoted-printing-string
+                                    "rows are observations; is X transposed?"))]
+    [else
+     (raise-arguments-error who "X does not have one column per coefficient"
+                            "columns of X" nc "coefficients" ni)]))
 
 ;; intercept + x_i . beta for row i of the design matrix x.
 (define (linear-predictor x i intercept beta)

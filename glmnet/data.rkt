@@ -85,6 +85,16 @@
 ;;     names (#f, or one distinct name per column) as strings, or #f: the
 ;;     check flat->design-matrix makes, for a format that labels its element
 ;;     errors by name before it has a design matrix.
+;;   (explain v expected given arg ...)
+;;     A flat-contract-with-explanation result: raises a blame error with the
+;;     fields expected: and given:, formats applied to the args.
+;;   (column-problem s what known present problem)
+;;   (column-list-problem v what known present problem)
+;;     What is wrong with the column name s (a string), or with v as a
+;;     non-empty list of distinct column names, of the `what` ("table" or
+;;     "dataframe") whose columns are `present` (`known`, its name-set), as
+;;     the given: field of a contract's explanation, or #f. `problem` is #f
+;;     for a column it accepts, or what is wrong with it, as "of dtype string".
 (module* support #f
   (provide design-matrix-data
            design-matrix-nrows
@@ -97,8 +107,14 @@
            one-dimensional->vector
            as-design-matrix
            as-response
+           column-name?
            column-name->string
            table-names
+           table-name-list
+           name-set
+           explain
+           column-problem
+           column-list-problem
            select-table-columns
            select-table-values
            table-column->flvector
@@ -566,17 +582,43 @@
   (string->immutable-string (if (symbol? name) (symbol->string name) name)))
 
 ;; The table's column names as strings, in its order; a hash has none, so its
-;; names are sorted.
+;; names are sorted. table-name-list does not check that they are distinct.
+(define (table-name-list t)
+  (cond
+    [(design-matrix? t) (design-matrix-column-names t)]
+    [(hash? t) (sort (map column-name->string (hash-keys t)) string<?)]
+    [else (for/list ([entry (in-list t)]) (column-name->string (car entry)))]))
+
 (define (table-names t who)
-  (define names
-    (cond
-      [(design-matrix? t) (design-matrix-column-names t)]
-      [(hash? t) (sort (map column-name->string (hash-keys t)) string<?)]
-      [else (for/list ([entry (in-list t)]) (column-name->string (car entry)))]))
+  (define names (table-name-list t))
   (define dup (check-duplicates names))
   (when dup
     (raise-arguments-error who "the table has two columns with the same name" "name" dup))
   names)
+
+;; --- column names in contracts (support submodule) ------------------------------
+
+(define ((explain v expected given . args) blame)
+  (apply raise-blame-error blame v (list 'expected: expected 'given: given) args))
+
+(define (name-set names)
+  (for/hash ([name (in-list names)]) (values name #t)))
+
+(define (column-problem s what known present problem)
+  (cond
+    [(not (hash-ref known s #f))
+     (format "~s, which is not a column of the ~a; its columns are ~s" s what present)]
+    [(problem s) => (lambda (p) (format "column ~s, ~a" s p))]
+    [else #f]))
+
+(define (column-list-problem v what known present problem)
+  (cond
+    [(not (and (list? v) (pair? v) (andmap column-name? v))) (format "~e" v)]
+    [(check-duplicates v #:key column-name->string)
+     => (lambda (name) (format "~s twice" (column-name->string name)))]
+    [else
+     (for/or ([name (in-list v)])
+       (column-problem (column-name->string name) what known present problem))]))
 
 (define (table-column-names t)
   (table-names t 'table-column-names))
