@@ -27,10 +27,6 @@ use, and R's @tt{mtcars} and @tt{iris}, which the formula examples use.
 (require glmnet/datasets)
 ]
 
-@examples[#:eval ev #:hidden
-(require racket/list racket/vector)
-]
-
 @margin-note{See @secref["ref-datasets"] in the @secref["reference"] for
 each loader.}
 
@@ -210,7 +206,6 @@ as the number, as it does in R. @racket[csv-file->table] and
 @racket[table->csv-file] do the same with a file:
 
 @examples[#:eval ev #:label #f
-(require racket/file)
 (define file (make-temporary-file "patients-~a.csv"))
 (table->csv-file patients file #:exists 'replace)
 (display (file->string file))

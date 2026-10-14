@@ -440,11 +440,9 @@ Racket's, as they are inside R's @tt{I()} and any other function call, so
 This is how a formula squares a column. @racket[(^ age 2)] is crossing, and
 the same as @racket[age] (see @secref["formulas-powers"]); R's
 @tt{y ~ x + x^2} is @tt{y ~ x}. The square is @racket[(I (expt age 2))], as R
-writes @tt{I(x^2)}, or @racket[(sqr age)], with @racket[sqr] from
-@racketmodname[racket/math]:
+writes @tt{I(x^2)}, or @racket[(sqr age)]:
 
 @examples[#:eval ev #:label #f
-(require racket/math)
 (formula-predictor-names (bp . ~ . age + age ^ 2) patients)
 (formula-predictor-names (bp . ~ . age + (sqr age)) patients)
 (coef (formula-fit (bp . ~ . age + (sqr age) + dose) patients #:lambda 0.1))

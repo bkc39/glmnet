@@ -21,3 +21,65 @@ jobs:
         run: nix flake check --all-systems --no-build
       - name: Build native lib + Racket package, run tests, render docs
         run: nix flake check --print-build-logs
+
+  resyntax:
+    name: Resyntax lint
+    runs-on: ubuntu-latest
+    steps:
+      # full history, so --local-git-repository finds the base commit
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: DeterminateSystems/nix-installer-action@v22
+      - name: Resyntax lint
+        env:
+          # a master push lints the empty diff: a skipped required check never reports
+          BASE_REF: ${{ github.event.pull_request.base.sha || 'origin/master' }}
+          BASE_NAME: ${{ github.base_ref || 'master' }}
+        run: |
+          nix develop .#ci --command bash -c '
+            set -euo pipefail
+            if [ ! -f "$PLTUSERHOME/.glmnet-linked" ]; then
+              if racket -l racket/base -l pkg/lib \
+                   -e "(exit (if (hash-ref (installed-pkg-table #:scope (quote user)) \"glmnet\" #f) 0 1))"; then
+                echo "::error::glmnet installed, but raco setup failed on it (a compile error?); see the ci shell log above."
+              else
+                echo "::error::The ci shell could not install glmnet or its dependencies; see its log above."
+              fi
+              exit 1
+            fi
+            # nix bash has no compgen; an unmatched glob stays literal
+            stamps=("$PLTUSERHOME"/.linters-*)
+            if [ ! -e "${stamps[0]}" ]; then
+              echo "::error::The ci shell could not install the pinned Resyntax or lint/; see its log above."
+              exit 1
+            fi
+            # || keeps set -e from exiting before $out is shown
+            rc=0
+            out=$(resyntax analyze --refactoring-suite glmnet-lint/style project-style \
+                    --local-git-repository . "$BASE_REF" --analyzer-timeout 30000 2>&1) || rc=$?
+            echo "$out"
+            if [ "$rc" -ne 0 ]; then
+              echo "::error::Resyntax exited $rc without completing the analysis."
+              exit 1
+            fi
+            status=0
+            broken=$(grep -B1 -E "^ encountered an error during (initial analysis|macro expansion)" <<<"$out" \
+                       | sed -n "s/^resyntax: skipping //p" | sort -u | paste -sd " " || true)
+            if [ -n "$broken" ]; then
+              echo "::error::Resyntax could not analyze $broken; see each error above."
+              status=1
+            fi
+            if grep -qE "resyntax: .*\.rkt:[0-9]+:[0-9]+ \[" <<<"$out"; then
+              echo "::error::Resyntax found refactoring suggestions. Run: resyntax fix --refactoring-suite glmnet-lint/style project-style --local-git-repository . origin/$BASE_NAME"
+              status=1
+            fi
+            timeouts=$(grep -c "timed out" <<<"$out" || true)
+            if [ "$timeouts" -gt 0 ]; then
+              echo "::warning::Resyntax analyzer timed out on $timeouts file(s); that part of the analysis was partial."
+            fi
+            if [ "$status" -eq 0 ]; then
+              echo "Resyntax: no suggestions."
+            fi
+            exit "$status"
+          '

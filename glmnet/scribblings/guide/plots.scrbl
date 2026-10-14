@@ -273,7 +273,6 @@ in the format that the file's extension names: @filepath{.png}, @filepath{.pdf},
 the pict. Any other extension breaks their contract:
 
 @examples[#:eval ev #:label #f
-(require racket/file)
 (define file (make-temporary-file "cv-~a.png"))
 (void (plot-cv cv #:out-file file))
 (call-with-input-file file (lambda (in) (read-bytes 4 in)))

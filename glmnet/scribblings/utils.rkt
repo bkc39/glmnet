@@ -10,15 +10,17 @@
 ;;
 ;; Examples run against the real bindings at documentation-build time, so a
 ;; printed coefficient cannot drift from what the library produces, and a broken
-;; example fails the build. The library is an FFI wrapper, so the sandbox runs
-;; with the ambient security guard and without memory or time limits.
+;; example fails the build. They evaluate in `racket`, as the Racket Guide's do,
+;; with glmnet required (the two export no common name). The library is an FFI
+;; wrapper, so the sandbox runs with the ambient security guard and without
+;; memory or time limits.
 
 (require scribble/manual
          scribble/example
          scribble/core
          scribble/decode
          racket/sandbox
-         (for-syntax racket/base))
+         syntax/parse/define)
 
 (require (for-label glmnet
                     (only-in datasets load-dataset)
@@ -32,11 +34,8 @@
                              dtype polars-null dataframe->f64vector cast)
                     (prefix-in pl: (only-in polars head))
                     glmnet/datasets
-                    racket/base
-                    racket/contract
-                    racket/file
+                    racket
                     racket/flonum
-                    racket/match
                     ffi/vector
                     math/array
                     math/matrix
@@ -58,11 +57,8 @@
                                   glmnet/data/polars
                                   polars
                                   glmnet/datasets
-                                  racket/base
-                                  racket/contract
-                                  racket/file
+                                  racket
                                   racket/flonum
-                                  racket/match
                                   ffi/vector
                                   math/array
                                   math/matrix
@@ -81,15 +77,14 @@
                  [sandbox-eval-limits #f]
                  [sandbox-security-guard current-security-guard]
                  [sandbox-path-permissions '((exists "/"))])
-    (make-base-eval '(require glmnet))))
+    (make-base-eval #:lang 'racket '(require glmnet))))
 
 ;; "the @exnraise[exn:fail:contract]" => "the `exn:fail:contract` exception is
 ;; raised", after mz.rkt.
 (define (*exnraise s)
   (make-element #f (list s " exception is raised")))
-(define-syntax exnraise
-  (syntax-rules ()
-    [(_ s) (*exnraise (racket s))]))
+(define-syntax-parse-rule (exnraise s:id)
+  (*exnraise (racket s)))
 
 ;; A margin note pointing from a guide chapter into the reference, after
 ;; guide-utils.rkt's `refdetails`.

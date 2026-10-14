@@ -302,7 +302,6 @@ Because the structs are transparent, @racket[equal?] compares them field by
 field and @racket[match] destructures them:
 
 @examples[#:eval ev #:label #f
-(require racket/match)
 (match-define (elnet-result a0 beta _ _ _) fit)
 (list a0 beta)
 ]

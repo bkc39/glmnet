@@ -19,10 +19,10 @@ writes @racketfont{(mpg . ~ . hp + (sqr hp))}, where @racket[(sqr hp)] is a
 @racketmodname[glmnet/datasets] provides R's @tt{mtcars}: 32 cars from the
 1974 Motor Trend road tests, among them their miles per gallon
 (@racket["mpg"]), horsepower (@racket["hp"]) and weight in thousands of pounds
-(@racket["wt"]). @racket[sqr] is @racketmodname[racket/math]'s:
+(@racket["wt"]):
 
 @examples[#:eval ev #:label #f
-(require racket/math glmnet/datasets)
+(require glmnet/datasets)
 (table-column-names mtcars)
 ]
 
