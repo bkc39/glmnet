@@ -154,7 +154,8 @@ matrix and a response for every fitter and for `predict`:
 - **Plain forms first.** A design matrix, nested rows and a table are
   recognised with no library check. An association list whose columns are
   lists is also rows: it is named data when the response argument names
-  columns, and rows otherwise.
+  columns, and rows otherwise; a binomial or multinomial response names one
+  column, so a list there is class labels.
 - **Libraries glmnet does not load.** Only for a value that is none of the
   plain forms does it ask whether the value is a Polars dataframe or series,
   or a `math/array` array: each library's module name is resolved once (an

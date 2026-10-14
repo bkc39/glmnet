@@ -15,7 +15,7 @@
 (require racket/contract
          ffi/vector
          "marshal.rkt"
-         (only-in "input.rkt" data/c response-for/c)
+         (only-in "input.rkt" data/c)
          (submod "input.rkt" support)
          "model.rkt"
          (submod "model.rkt" support)
@@ -31,7 +31,7 @@
  (struct-out logistic-result)
  (contract-out
   [logistic-fit
-   (fit/c (response-for/c X (or/c 0 1) #:classes? #t)
+   (fit/c #:classes (or/c 0 1)
           (#:lambda (>=/c 0))
           (#:alpha (real-in 0 1)
            #:standardize? boolean?
@@ -48,7 +48,7 @@
 (provide
  (contract-out
   [logistic-path
-   (fit/c (response-for/c X (or/c 0 1) #:classes? #t)
+   (fit/c #:classes (or/c 0 1)
           ()
           (#:lambda lambda-sequence/c
            #:nlambda exact-positive-integer?
@@ -60,7 +60,7 @@
            #:max-iters exact-positive-integer?)
           glmnet-path?)]
   [logistic-cv
-   (fit/c (response-for/c X (or/c 0 1) #:classes? #t)
+   (fit/c #:classes (or/c 0 1)
           ()
           (#:type-measure (or/c 'deviance 'class 'auc 'mse 'mae)
            #:nfolds nfolds/c

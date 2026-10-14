@@ -26,10 +26,10 @@
   [survival-for/c (-> data/c flat-contract?)]
   [statuses-for/c (-> data/c any/c flat-contract?)]
   [responses-for/c (-> data/c flat-contract?)]
-  [predictors-for/c (-> data/c any/c flat-contract?)]))
+  [predictors-for/c (->* (data/c any/c) (#:classes? boolean?) flat-contract?)]))
 
 ;; For the family modules and core/model.rkt only: the contract of a fitter,
-;; (fit/c response-ctc [#:argument id] [#:statuses ctc] (mandatory-kw ctc ...)
+;; (fit/c response [#:argument id] [#:statuses ctc] (mandatory-kw ctc ...)
 ;; (optional-kw ctc ...) result); its arguments as a design matrix, the
 ;; response and the predictors' names (#f for unnamed data), by fit-input,
 ;; class-fit-input (with the classes), survival-fit-input (the times and the
@@ -140,10 +140,10 @@
       (and (adapter? form) (not (polars-adapter? form)))))
 
 ;; Whether data of the form `form` is named data given the response y: a
-;; table+rows is when y names columns, and rows otherwise.
-(define (named-form? form y)
+;; table+rows is when y names columns, as names? says, and rows otherwise.
+(define (named-form? form y names?)
   (and (named-data-form? form)
-       (or (not (eq? form 'table+rows)) (column-names? y))))
+       (or (not (eq? form 'table+rows)) (names? y))))
 
 (define (column-names? y)
   (or (column-name? y) (and (pair? y) (list? y) (andmap column-name? y))))
@@ -195,28 +195,28 @@
      (or (not given) (explain v "~a" "~a" (format expected what) given)))
    #:name name))
 
-;; named/c for a column name, or a list of them, and unnamed/c for anything else.
-(define (by-name/c named/c unnamed/c)
+;; named/c for a value that names? accepts, and unnamed/c for anything else.
+(define (by-name/c named/c unnamed/c names?)
   (define named-projection (get/build-late-neg-projection named/c))
   (define unnamed-projection (get/build-late-neg-projection unnamed/c))
   (make-flat-contract
    #:name `(or/c ,(contract-name named/c) ,(contract-name unnamed/c))
    #:first-order
-   (lambda (v) (contract-first-order-passes? (if (column-names? v) named/c unnamed/c) v))
+   (lambda (v) (contract-first-order-passes? (if (names? v) named/c unnamed/c) v))
    #:late-neg-projection
    (lambda (blame)
      (define named (named-projection blame))
      (define unnamed (unnamed-projection blame))
      (lambda (v neg-party)
-       (if (column-names? v) (named v neg-party) (unnamed v neg-party))))))
+       (if (names? v) (named v neg-party) (unnamed v neg-party))))))
 
 ;; The contract on a response argument given X: (named/c X form) for named
 ;; data, unnamed/c for unnamed data, and either, by the value, for a
 ;; table+rows.
-(define (response-by-form/c X named/c unnamed/c)
+(define (response-by-form/c X names? named/c unnamed/c)
   (define form (data-form X))
   (cond
-    [(eq? form 'table+rows) (by-name/c (named/c X form) unnamed/c)]
+    [(eq? form 'table+rows) (by-name/c (named/c X form) unnamed/c names?)]
     [(named-data-form? form) (named/c X form)]
     [else unnamed/c]))
 
@@ -228,6 +228,7 @@
 ;; math array or a Polars series, whose entries are checked as they are read.
 (define (response-for/c X elem #:classes? [classes? #f])
   (response-by-form/c X
+                      (if classes? column-name? column-names?)
                       (lambda (X form) (response-column/c X form classes?))
                       (labels-response/c elem (if classes? '(text boolean) '()))))
 
@@ -349,6 +350,7 @@
 (define (survival-for/c X)
   (response-by-form/c
    X
+   column-names?
    (lambda (X form)
      (columns/c X form '(list/c column-name/c column-name/c)
                 "a list of the names of two columns of the ~a, the time and the status"
@@ -372,7 +374,7 @@
 (define (statuses-for/c X y)
   (define form (data-form X))
   (cond
-    [(named-form? form y)
+    [(named-form? form y column-names?)
      (flat-contract-with-explanation
       (lambda (v)
         (explain v "~a" "~e"
@@ -387,6 +389,7 @@
 (define (responses-for/c X)
   (response-by-form/c
    X
+   column-names?
    (lambda (X form)
      (columns/c X form '(and/c (listof column-name/c) pair?)
                 "a non-empty list of distinct names of numeric columns of the ~a"
@@ -406,19 +409,23 @@
 ;; #:predictors given X and y: for named data, a non-empty list of distinct
 ;; names of its numeric columns, without the response, one column or several;
 ;; for unnamed data, only #f, since its predictors are all of its columns.
-(define (predictors-for/c X y)
+(define (predictors-for/c X y #:classes? [classes? #f])
   (define form (data-form X))
+  (define names? (if classes? column-name? column-names?))
   (cond
-    [(named-form? form y) (predictor-columns/c X form y)]
+    [(named-form? form y names?) (predictor-columns/c X form y)]
+    [(and (eq? form 'table+rows) (column-names? y))
+     (no-predictors/c (string-append "#f, since y is a list, not a column name, so X, a table "
+                                     "whose columns are lists, is read as rows; a binomial or "
+                                     "multinomial y names one column"))]
     [else
-     (flat-contract-with-explanation
-      (lambda (v)
-        (or (not v)
-            (explain v "~a" "~e"
-                     (string-append "#f, since X is unnamed data: rows, a matrix or a design "
-                                    "matrix, even one whose columns have names")
-                     v)))
-      #:name 'not)]))
+     (no-predictors/c (string-append "#f, since X is unnamed data: rows, a matrix or a design "
+                                     "matrix, even one whose columns have names"))]))
+
+(define (no-predictors/c expected)
+  (flat-contract-with-explanation
+   (lambda (v) (or (not v) (explain v "~a" "~e" expected v)))
+   #:name 'not))
 
 (define (response-names y)
   (cond
@@ -437,16 +444,16 @@
 
 ;; fit/c's preconditions: named data needs #:predictors, and unnamed data a
 ;; Cox fit's statuses.
-(define (predictors-problem X y predictors)
+(define (predictors-problem X y predictors names?)
   (define form (data-form X))
-  (or (not (named-form? form y))
+  (or (not (named-form? form y names?))
       (and (not (unsupplied-arg? predictors)) predictors #t)
       (list (format (string-append "#:predictors is required when X is a ~a; it names the "
                                    "predictor columns, as in #:predictors '(\"wt\" \"hp\")")
                     (data-kind form)))))
 
 (define (statuses-problem X y statuses)
-  (or (named-form? (data-form X) y)
+  (or (named-form? (data-form X) y column-names?)
       (not (unsupplied-arg? statuses))
       (list (string-append "statuses is required when X is unnamed data; "
                            "y is then the times and statuses the events"))))
@@ -463,33 +470,48 @@
   ;; checks they are given.
   (define-splicing-syntax-class statuses-argument
     #:attributes (ctc problem)
-    (pattern (~seq #:statuses ctc:expr) #:with problem #'statuses-problem)))
+    (pattern (~seq #:statuses ctc:expr) #:with problem #'statuses-problem))
+
+  (define-splicing-syntax-class response-argument
+    #:attributes (ctc context names? classes?)
+    (pattern (~seq #:classes elem:expr)
+             #:with context #'elem
+             #:with X (datum->syntax #'elem 'X)
+             #:with ctc #'(response-for/c X elem #:classes? #t)
+             #:with names? #'column-name?
+             #:with classes? #'#t)
+    (pattern ctc:expr
+             #:with context #'ctc
+             #:with names? #'column-names?
+             #:attr classes? #f)))
 
 ;; The X in the contracts of the response and the statuses is the fitter's X
 ;; argument, and the response argument is y unless #:argument names it. The
 ;; contract's name is the ->* form of the documented signature, its optional
 ;; keywords elided, so that an error does not print the whole ->i.
-(define-syntax-parse-rule (fit/c response-ctc:expr
+(define-syntax-parse-rule (fit/c response-arg:response-argument
                                  (~optional (~seq #:argument response-id:id))
                                  (~optional status-arg:statuses-argument)
                                  (mandatory:keyword-contract ...)
                                  (optional:keyword-contract ...)
                                  result:expr)
-  #:with X (datum->syntax #'response-ctc 'X)
-  #:with response (or (attribute response-id) (datum->syntax #'response-ctc 'y))
-  #:with predictors (format-id #'response-ctc "#:predictors")
+  #:with X (datum->syntax #'response-arg.context 'X)
+  #:with response (or (attribute response-id) (datum->syntax #'response-arg.context 'y))
+  #:with predictors (format-id #'response-arg.context "#:predictors")
+  #:with predictors/c #'(predictors-for/c X response (~? (~@ #:classes? response-arg.classes?)))
   (rename-contract
    (->i ([X data/c]
-         [response (X) response-ctc]
+         [response (X) response-arg.ctc]
          (~@ mandatory.kw [mandatory.id mandatory.ctc]) ...)
         ((~? [statuses (X response) status-arg.ctc])
-         #:predictors [predictors (X response) (predictors-for/c X response)]
+         #:predictors [predictors (X response) predictors/c]
          (~@ optional.kw [optional.id optional.ctc]) ...)
-        #:pre/desc (X response predictors) (predictors-problem X response predictors)
+        #:pre/desc (X response predictors)
+        (predictors-problem X response predictors response-arg.names?)
         (~? (~@ #:pre/desc (X response statuses) (status-arg.problem X response statuses)))
         [_ result])
-   '(->* (data/c response-ctc (~@ mandatory.kw mandatory.ctc) ...)
-         ((~? status-arg.ctc) #:predictors (predictors-for/c X response) (... ...))
+   '(->* (data/c response-arg.ctc (~@ mandatory.kw mandatory.ctc) ...)
+         ((~? status-arg.ctc) #:predictors predictors/c (... ...))
          result)))
 
 ;; --- conversion --------------------------------------------------------------------
@@ -550,16 +572,16 @@
 
 ;; The predictors of a fitter's arguments as a design matrix, their names, or
 ;; #f for unnamed data, and X's form.
-(define (fit-predictors who X y predictors)
+(define (fit-predictors who X y predictors names?)
   (define form (data-form X))
   (cond
-    [(named-form? form y)
+    [(named-form? form y names?)
      (define names (map column-name->string predictors))
      (values (named->design-matrix who X form names #:checked? #t) names form)]
     [else (values (unnamed->design-matrix who "X" X form) #f form)]))
 
 (define (fit-input who X y predictors [elem #f])
-  (define-values (x names form) (fit-predictors who X y predictors))
+  (define-values (x names form) (fit-predictors who X y predictors column-names?))
   (values x
           (if names
               (named-response who X form (column-name->string y) x elem)
@@ -567,7 +589,7 @@
           names))
 
 (define (class-fit-input who X y predictors elem family)
-  (define-values (x names form) (fit-predictors who X y predictors))
+  (define-values (x names form) (fit-predictors who X y predictors column-name?))
   (define-values (yv classes)
     (if names
         (named-classes who X form (column-name->string y) x elem family)
@@ -575,7 +597,7 @@
   (values x yv names classes))
 
 (define (survival-fit-input who X y statuses predictors time/c status/c)
-  (define-values (x names form) (fit-predictors who X y predictors))
+  (define-values (x names form) (fit-predictors who X y predictors column-names?))
   (cond
     [names
      (match-define (list time status) (map column-name->string y))
@@ -590,7 +612,7 @@
              #f)]))
 
 (define (responses-fit-input who X Y predictors)
-  (define-values (x names form) (fit-predictors who X Y predictors))
+  (define-values (x names form) (fit-predictors who X Y predictors column-names?))
   (define no (design-matrix-nrows x))
   (cond
     [names
