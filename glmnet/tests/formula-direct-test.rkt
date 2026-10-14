@@ -243,15 +243,19 @@
         (match entry
           [(cons (== name) entries) (cons name (vector-take entries 31))]
           [_ entry])))
-    (define (message who column)
-      (regexp (format "^~a: the response and the predictors have different lengths\n  column: ~s\n  response rows: 31\n  predictor rows: 32$"
-                      who column)))
+    (define (message who column [response-rows 31] [predictor-rows 32])
+      (regexp (format "^~a: the response and the predictors have different lengths\n  response column: ~s\n  response rows: ~a\n  predictor rows: ~a$"
+                      who column response-rows predictor-rows)))
     (check-exn (error-matching (message 'formula-fit "am"))
                (lambda () (formula-fit (~ (surv mpg am) wt) (short "am") #:family 'cox #:lambda 0.1)))
     (check-exn (error-matching (message 'formula-fit "mpg"))
                (lambda () (formula-fit (~ (surv mpg am) wt) (short "mpg") #:family 'cox #:lambda 0.1)))
     (check-exn (error-matching (message 'formula-path "qsec"))
-               (lambda () (formula-path (~ (mpg qsec) wt) (short "qsec") #:family 'mgaussian))))
+               (lambda () (formula-path (~ (mpg qsec) wt) (short "qsec") #:family 'mgaussian)))
+    (check-exn (error-matching (message 'formula-cv "mpg"))
+               (lambda () (formula-cv (~ mpg wt) (short "mpg") #:fold-ids (folds 32 4))))
+    (check-exn (error-matching (message 'formula-fit "mpg" 32 31))
+               (lambda () (formula-fit (~ mpg wt) (short "wt") #:lambda 0.1))))
 
   (test-case "predict reads the columns the terms read, by name"
     (define m (formula-fit (mpg . ~ . wt * hp + (factor cyl)) cars-frame #:lambda 0.1))

@@ -1203,6 +1203,7 @@ The @tech{binomial family}: two-class logistic regression on 0/1 labels. See
   deviance explained.
 
   @examples[#:eval ev
+  (require glmnet/datasets)
   (define X '((1.0 5.0 2.0) (2.0 6.0 1.0) (2.0 5.0 3.0) (1.0 4.0 1.0)
               (6.0 2.0 2.0) (5.0 1.0 1.0) (6.0 1.0 3.0) (5.0 2.0 1.0)))
   (define y '(0 0 0 0 1 1 1 1))
@@ -1228,7 +1229,6 @@ The @tech{binomial family}: two-class logistic regression on 0/1 labels. See
 
   @examples[#:eval ev
   (logistic-fit X y #:lambda 0.05)
-  (require (only-in glmnet/datasets iris mtcars))
   (define cars+ (cons (cons "heavy" (for/list ([wt (in-vector (cdr (assoc "wt" mtcars)))])
                                       (if (> wt 3.3) "yes" "no")))
                       mtcars))
@@ -1278,6 +1278,7 @@ labels. See @secref["ex-multinomial"].
   zero. @racket[dev-ratio] is the fraction of null deviance explained.
 
   @examples[#:eval ev
+  (require glmnet/datasets)
   (define X '((1.0 1.0) (2.0 1.0) (5.0 1.0) (6.0 1.0) (3.0 5.0) (4.0 6.0)))
   (define y '(0 0 1 1 2 2))
   (define fit (multinomial-fit X y #:lambda 0.05))
@@ -1303,7 +1304,6 @@ labels. See @secref["ex-multinomial"].
   @examples[#:eval ev
   (multinomial-result-intercepts (multinomial-fit X y #:lambda 0.05))
   (multinomial-result-intercepts (multinomial-fit X '(a a b b c c) #:lambda 0.05))
-  (require (only-in glmnet/datasets iris))
   (multinomial-result-intercepts
    (multinomial-fit iris "Species" #:predictors '("Petal.Length" "Petal.Width") #:lambda 0.05))
   (eval:error (multinomial-fit X '(0 0 2 2 2 2) #:lambda 0.05))]}
@@ -1412,6 +1412,7 @@ The @tech{Poisson family}: counts with a log link. See @secref["ex-poisson"].
   explained.
 
   @examples[#:eval ev
+  (require glmnet/datasets)
   (define X '((1.0 2.0) (2.0 1.0) (3.0 2.0) (4.0 1.0)
               (5.0 2.0) (6.0 1.0) (7.0 2.0) (8.0 1.0)))
   (define y '(1 2 2 3 4 6 8 11))
@@ -1436,7 +1437,6 @@ The @tech{Poisson family}: counts with a log link. See @secref["ex-poisson"].
 
   @examples[#:eval ev
   (poisson-fit X y #:lambda 0.5)
-  (require (only-in glmnet/datasets mtcars))
   (poisson-fit mtcars "carb" #:predictors '("hp" "wt") #:lambda 0.1)
   (eval:error (poisson-fit X '(0 0 0 0 0 0 0 0) #:lambda 0.5))]}
 
@@ -1466,6 +1466,7 @@ jointly under a grouped penalty. See @secref["ex-mgaussian"].
   explained across all responses.
 
   @examples[#:eval ev
+  (require glmnet/datasets)
   (define X '((1.0 2.0) (2.0 1.0) (3.0 2.0) (4.0 1.0) (5.0 2.0) (6.0 1.0)))
   (define Y '((3.0 9.0) (5.0 8.0) (7.0 7.0) (9.0 6.0) (11.0 5.0) (13.0 4.0)))
   (define fit (mgaussian-fit X Y #:lambda 0.1))
@@ -1493,7 +1494,6 @@ jointly under a grouped penalty. See @secref["ex-mgaussian"].
 
   @examples[#:eval ev
   (mgaussian-fit X Y #:lambda 0.5)
-  (require (only-in glmnet/datasets mtcars))
   (mgaussian-result-coefficients
    (mgaussian-fit mtcars '("mpg" "qsec") #:predictors '("wt" "hp") #:lambda 0.5))]}
 
@@ -1592,6 +1592,7 @@ These are R's @tt{glmnet.control} defaults (@tt{fdev = 1e-5},
   a path at any @math{λ}.
 
   @examples[#:eval ev
+  (require glmnet/datasets)
   (define X '((1.0 2.0 1.0) (2.0 1.0 4.0) (3.0 4.0 9.0)
               (4.0 3.0 16.0) (5.0 6.0 25.0) (6.0 5.0 36.0)))
   (define y '(1.0 4.0 3.0 6.0 5.0 8.0))
@@ -1657,7 +1658,6 @@ These are R's @tt{glmnet.control} defaults (@tt{fdev = 1e-5},
   @examples[#:eval ev
   (define mpath (multinomial-path X '(0 0 1 1 2 2) #:lambda '(0.3 0.03)))
   (vector-ref (glmnet-path-coefficients mpath) 1)
-  (require (only-in glmnet/datasets iris mtcars))
   (glmnet-path-df (multinomial-path iris "Species" #:nlambda 5
                                     #:predictors '("Petal.Length" "Petal.Width")))]}
 
@@ -1780,6 +1780,7 @@ in this section use 60 observations of 8 predictors, of which the first three
 carry the signal:
 
 @examples[#:eval ev #:label #f
+(require glmnet/datasets)
 (random-seed 8)
 (define (noise) (- (* 2 (random)) 1))
 (define X60
@@ -1878,7 +1879,6 @@ carry the signal:
 
   @examples[#:eval ev
   (elnet-cv X60 y60 #:type-measure 'mae #:alpha 0.5)
-  (require (only-in glmnet/datasets iris mtcars))
   (define car-cv
     (elnet-cv mtcars "mpg" #:predictors '("wt" "hp" "qsec")
               #:fold-ids (for/list ([i (in-range 32)]) (modulo i 4))))
@@ -2283,7 +2283,8 @@ Trend road tests, and R's @tt{iris}, 150 irises of three species, which
 @racketmodname[glmnet/datasets] provides as tables (see @secref["ref-datasets"]):
 
 @examples[#:eval ev #:label #f
-(require glmnet/datasets)
+(require glmnet/data/polars
+         glmnet/datasets)
 (table-column-names mtcars)
 (table-column-names iris)
 ]
@@ -2745,7 +2746,6 @@ package, with a text column of the cars' names:
   (define cv-model (formula-cv (mpg . ~ . wt * hp) mtcars #:fold-ids folds))
   cv-model
   (coef cv-model)
-  (require (only-in glmnet/data/polars table->polars))
   (define iris-df (table->polars iris))
   (define flowers (formula-cv (~ Species all) iris-df #:family 'multinomial
                               #:fold-ids (for/list ([i (in-range 150)]) (modulo i 5))))
@@ -2797,6 +2797,8 @@ The examples in this section use a single fit and a path of the Gaussian
 family:
 
 @examples[#:eval ev #:label #f
+(require glmnet/data/polars
+         glmnet/datasets)
 (define X '((1.0 2.0 1.0) (2.0 1.0 4.0) (3.0 4.0 9.0)
             (4.0 3.0 16.0) (5.0 6.0 25.0) (6.0 5.0 36.0)))
 (define y '(1.0 4.0 3.0 6.0 5.0 8.0))
@@ -3002,7 +3004,6 @@ family:
   (define new-table
     (list (cons "c" '(49.0)) (cons "b" '(6.0)) (cons "a" '(7.0))))
   (predict named-model new-table)
-  (require (only-in glmnet/data/polars table->polars))
   (predict named-model (table->polars new-table))
   (eval:error (predict named-model (cdr new-table)))]}
 
@@ -3049,7 +3050,6 @@ family:
   @examples[#:eval ev
   (for ([(λ β) (in-path path)])
     (printf "~a: ~a\n" λ β))
-  (require (only-in glmnet/datasets mtcars))
   (for/list ([(λ β) (in-path (formula-path (~ mpg (+ wt hp)) mtcars #:nlambda 4))])
     β)]}
 
@@ -3131,7 +3131,8 @@ cross-validated fit @racket[cv] of @secref["ref-cv"], and the formula model
 @racket[cv-model] of @racket[formula-cv]:
 
 @examples[#:eval ev #:label #f
-(require glmnet/plot)
+(require glmnet/datasets
+         glmnet/plot)
 (define X '((1.0 2.0 1.0) (2.0 1.0 4.0) (3.0 4.0 9.0)
             (4.0 3.0 16.0) (5.0 6.0 25.0) (6.0 5.0 36.0)))
 (define y '(1.0 4.0 3.0 6.0 5.0 8.0))
@@ -3196,7 +3197,6 @@ cross-validated fit @racket[cv] of @secref["ref-cv"], and the formula model
   @examples[#:eval ev
   (plot-coefficient-path path #:xvar 'norm #:label '("x1" "x2" "x3")
                          #:width 400 #:height 300 #:title "Lasso path")
-  (require (only-in glmnet/datasets mtcars))
   (plot-coefficient-path (elnet-path mtcars "mpg" #:predictors '("wt" "hp" "qsec"))
                          #:label #t #:width 400 #:height 300)
   (eval:error (plot-coefficient-path (elnet-path X y #:lambda '(10.0 5.0))))

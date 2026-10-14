@@ -302,8 +302,10 @@
                                #rx"length of y: 4\n  rows of X: 3$")
                (lambda () (ols '((1 2) (4 5) (7 9)) '(1 2 3 4))))
     (check-exn (error-matching #rx"^ols: the table's columns have different lengths"
-                               #rx"column: \"y\"")
+                               #rx"\n  response column: \"y\"\n  length: 2\n  rows of the predictors: 3$")
                (lambda () (ols (list (cons "x" '(1 2 3)) (cons "y" '(1 2))) "y" #:predictors '("x"))))
+    (check-exn (error-matching #rx"\n  response column: \"y\"\n  length: 3\n  rows of the predictors: 2$")
+               (lambda () (ols (list (cons "x" '(1 2)) (cons "y" '(1 2 3))) "y" #:predictors '("x"))))
     (define fit (ols rows mpg))
     (check-exn (error-matching #rx"^predict: X does not have one column per coefficient"
                                #rx"hint: rows are observations; is X transposed[?]")
