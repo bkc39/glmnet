@@ -412,6 +412,21 @@
     (check-equal? (glmnet-model-class-labels (multinomial-path X6 (list->array kinds) #:nlambda 5))
                   '("a" "b" "c")))
 
+  (test-case "on a table that is also rows, a list of labels is a response, and X is read as rows"
+    (define both (list (list "x" 1.0 2.0 3.0 4.0) (list "t" 5.0 3.0 6.0 2.0) (list "d" 1 0 1 1)))
+    (check-exn (error-matching #rx"^logistic-fit: X has an element that is not a real number"
+                               #rx"element: \"x\"")
+               (lambda () (logistic-fit both '("a" "b" "a") #:lambda 0.1)))
+    (check-exn (error-matching #rx"^multinomial-path: X has an element that is not a real number")
+               (lambda () (multinomial-path both '(a b c))))
+    (check-exn (error-matching #rx"^logistic-cv: X has an element that is not a real number")
+               (lambda () (logistic-cv both '("d"))))
+    (check-pred glmnet-path? (logistic-path both "d" #:predictors '("x" "t") #:nlambda 3))
+    (check-pred glmnet-path? (cox-path both '("t" "d") #:predictors '("x") #:nlambda 3))
+    (check-exn (blame-matching #rx"expected: the name of a numeric column of the table"
+                               #rx"given: '\\(\"t\" \"d\"\\)")
+               (lambda () (elnet-fit both '("t" "d") #:predictors '("x") #:lambda 0.1))))
+
   (test-case "a Cox status may be a boolean, #t for an event, as R's Surv reads it"
     (define times '(5.0 3.0 6.0 2.0 4.0 1.0))
     (define statuses '(1 0 1 1 0 1))

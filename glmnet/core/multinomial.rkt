@@ -14,7 +14,7 @@
          racket/flonum
          ffi/vector
          "marshal.rkt"
-         (only-in "input.rkt" data/c response-for/c)
+         (only-in "input.rkt" data/c)
          (submod "input.rkt" support)
          "model.rkt"
          (submod "model.rkt" support)
@@ -30,7 +30,7 @@
  (struct-out multinomial-result)
  (contract-out
   [multinomial-fit
-   (fit/c (response-for/c X (and/c integer? (>=/c 0)) #:classes? #t)
+   (fit/c #:classes (and/c integer? (>=/c 0))
           (#:lambda (>=/c 0))
           (#:alpha (real-in 0 1)
            #:standardize? boolean?
@@ -46,7 +46,7 @@
 (provide
  (contract-out
   [multinomial-path
-   (fit/c (response-for/c X (and/c integer? (>=/c 0)) #:classes? #t)
+   (fit/c #:classes (and/c integer? (>=/c 0))
           ()
           (#:lambda lambda-sequence/c
            #:nlambda exact-positive-integer?
@@ -58,7 +58,7 @@
            #:max-iters exact-positive-integer?)
           glmnet-path?)]
   [multinomial-cv
-   (fit/c (response-for/c X (and/c integer? (>=/c 0)) #:classes? #t)
+   (fit/c #:classes (and/c integer? (>=/c 0))
           ()
           (#:type-measure (or/c 'deviance 'class 'mse 'mae)
            #:nfolds nfolds/c
