@@ -10,6 +10,7 @@
   (require rackunit
            racket/list
            racket/match
+           (only-in racket/vector vector-take)
            (only-in racket/contract exn:fail:contract:blame?)
            (only-in polars dataframe series cast head polars-null)
            glmnet
@@ -235,6 +236,22 @@
                (lambda () (formula-fit (~ (id gear) wt) cars #:family 'mgaussian #:lambda 0.1)))
     (check-exn (error-matching message)
                (lambda () (formula-fit (~ (surv mpg id) wt) cars #:family 'cox #:lambda 0.1))))
+
+  (test-case "a table's response column of another length than the predictors is an error naming it"
+    (define (short name)
+      (for/list ([entry (in-list cars)])
+        (match entry
+          [(cons (== name) entries) (cons name (vector-take entries 31))]
+          [_ entry])))
+    (define (message who column)
+      (regexp (format "^~a: the response and the predictors have different lengths\n  column: ~s\n  response rows: 31\n  predictor rows: 32$"
+                      who column)))
+    (check-exn (error-matching (message 'formula-fit "am"))
+               (lambda () (formula-fit (~ (surv mpg am) wt) (short "am") #:family 'cox #:lambda 0.1)))
+    (check-exn (error-matching (message 'formula-fit "mpg"))
+               (lambda () (formula-fit (~ (surv mpg am) wt) (short "mpg") #:family 'cox #:lambda 0.1)))
+    (check-exn (error-matching (message 'formula-path "qsec"))
+               (lambda () (formula-path (~ (mpg qsec) wt) (short "qsec") #:family 'mgaussian))))
 
   (test-case "predict reads the columns the terms read, by name"
     (define m (formula-fit (mpg . ~ . wt * hp + (factor cyl)) cars-frame #:lambda 0.1))
