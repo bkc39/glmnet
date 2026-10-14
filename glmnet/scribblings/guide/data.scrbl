@@ -158,6 +158,7 @@ table to one. It depends on nothing beyond Racket's @tt{base} package:
 four procedures.}
 
 @examples[#:eval ev #:label #f
+(require glmnet/data/csv)
 (define text "site,age,response\nBoston,34,3.1\n\"Portland, ME\",51,5.2\n")
 (define t (csv->table (open-input-string text)))
 t

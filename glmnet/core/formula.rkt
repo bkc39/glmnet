@@ -859,11 +859,14 @@
        (list (response-reals who table column)
              (response-reals who table (cadr responses) status->real))]
       [else (for/list ([name (in-list responses)]) (response-reals who table name))]))
-  (define y1 (car ys))
-  (unless (= (length y1) (design-matrix-nrows x))
+  (for ([y (in-list ys)]
+        [name (in-list responses)]
+        #:unless (= (length y) (design-matrix-nrows x)))
     (raise-arguments-error who "the response and the predictors have different lengths"
-                           "response rows" (length y1)
+                           "column" name
+                           "response rows" (length y)
                            "predictor rows" (design-matrix-nrows x)))
+  (define y1 (car ys))
   (values
    mt
    x

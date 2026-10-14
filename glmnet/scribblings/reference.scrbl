@@ -1228,6 +1228,7 @@ The @tech{binomial family}: two-class logistic regression on 0/1 labels. See
 
   @examples[#:eval ev
   (logistic-fit X y #:lambda 0.05)
+  (require (only-in glmnet/datasets iris mtcars))
   (define cars+ (cons (cons "heavy" (for/list ([wt (in-vector (cdr (assoc "wt" mtcars)))])
                                       (if (> wt 3.3) "yes" "no")))
                       mtcars))
@@ -1302,6 +1303,7 @@ labels. See @secref["ex-multinomial"].
   @examples[#:eval ev
   (multinomial-result-intercepts (multinomial-fit X y #:lambda 0.05))
   (multinomial-result-intercepts (multinomial-fit X '(a a b b c c) #:lambda 0.05))
+  (require (only-in glmnet/datasets iris))
   (multinomial-result-intercepts
    (multinomial-fit iris "Species" #:predictors '("Petal.Length" "Petal.Width") #:lambda 0.05))
   (eval:error (multinomial-fit X '(0 0 2 2 2 2) #:lambda 0.05))]}
@@ -1434,6 +1436,7 @@ The @tech{Poisson family}: counts with a log link. See @secref["ex-poisson"].
 
   @examples[#:eval ev
   (poisson-fit X y #:lambda 0.5)
+  (require (only-in glmnet/datasets mtcars))
   (poisson-fit mtcars "carb" #:predictors '("hp" "wt") #:lambda 0.1)
   (eval:error (poisson-fit X '(0 0 0 0 0 0 0 0) #:lambda 0.5))]}
 
@@ -1490,6 +1493,7 @@ jointly under a grouped penalty. See @secref["ex-mgaussian"].
 
   @examples[#:eval ev
   (mgaussian-fit X Y #:lambda 0.5)
+  (require (only-in glmnet/datasets mtcars))
   (mgaussian-result-coefficients
    (mgaussian-fit mtcars '("mpg" "qsec") #:predictors '("wt" "hp") #:lambda 0.5))]}
 
@@ -1653,6 +1657,7 @@ These are R's @tt{glmnet.control} defaults (@tt{fdev = 1e-5},
   @examples[#:eval ev
   (define mpath (multinomial-path X '(0 0 1 1 2 2) #:lambda '(0.3 0.03)))
   (vector-ref (glmnet-path-coefficients mpath) 1)
+  (require (only-in glmnet/datasets iris mtcars))
   (glmnet-path-df (multinomial-path iris "Species" #:nlambda 5
                                     #:predictors '("Petal.Length" "Petal.Width")))]}
 
@@ -1873,6 +1878,7 @@ carry the signal:
 
   @examples[#:eval ev
   (elnet-cv X60 y60 #:type-measure 'mae #:alpha 0.5)
+  (require (only-in glmnet/datasets iris mtcars))
   (define car-cv
     (elnet-cv mtcars "mpg" #:predictors '("wt" "hp" "qsec")
               #:fold-ids (for/list ([i (in-range 32)]) (modulo i 4))))
@@ -2286,7 +2292,9 @@ Some also use @tt{mtcars} as a dataframe, from the @racketmodname[datasets]
 package, with a text column of the cars' names:
 
 @examples[#:eval ev #:label #f
-(require (only-in datasets load-dataset) (prefix-in pl: (only-in polars head)))
+(require (only-in datasets load-dataset)
+         (only-in polars column-names)
+         (prefix-in pl: (only-in polars head)))
 (define cars (load-dataset 'mtcars #:format 'polars))
 (column-names cars)
 ]
@@ -2737,6 +2745,7 @@ package, with a text column of the cars' names:
   (define cv-model (formula-cv (mpg . ~ . wt * hp) mtcars #:fold-ids folds))
   cv-model
   (coef cv-model)
+  (require (only-in glmnet/data/polars table->polars))
   (define iris-df (table->polars iris))
   (define flowers (formula-cv (~ Species all) iris-df #:family 'multinomial
                               #:fold-ids (for/list ([i (in-range 150)]) (modulo i 5))))
@@ -2993,6 +3002,7 @@ family:
   (define new-table
     (list (cons "c" '(49.0)) (cons "b" '(6.0)) (cons "a" '(7.0))))
   (predict named-model new-table)
+  (require (only-in glmnet/data/polars table->polars))
   (predict named-model (table->polars new-table))
   (eval:error (predict named-model (cdr new-table)))]}
 
@@ -3039,6 +3049,7 @@ family:
   @examples[#:eval ev
   (for ([(λ β) (in-path path)])
     (printf "~a: ~a\n" λ β))
+  (require (only-in glmnet/datasets mtcars))
   (for/list ([(λ β) (in-path (formula-path (~ mpg (+ wt hp)) mtcars #:nlambda 4))])
     β)]}
 
@@ -3185,6 +3196,7 @@ cross-validated fit @racket[cv] of @secref["ref-cv"], and the formula model
   @examples[#:eval ev
   (plot-coefficient-path path #:xvar 'norm #:label '("x1" "x2" "x3")
                          #:width 400 #:height 300 #:title "Lasso path")
+  (require (only-in glmnet/datasets mtcars))
   (plot-coefficient-path (elnet-path mtcars "mpg" #:predictors '("wt" "hp" "qsec"))
                          #:label #t #:width 400 #:height 300)
   (eval:error (plot-coefficient-path (elnet-path X y #:lambda '(10.0 5.0))))
