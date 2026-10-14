@@ -79,6 +79,8 @@
 ;;     further fields, such as a file's line.
 ;;   (->finite-flonum x who what i c)
 ;;     x as a flonum; otherwise element-error at row i and column c.
+;;   (status->real x)
+;;     A Cox status as R's Surv reads it: #t is 1 (an event), #f is 0.
 ;;   (default-column-names n)
 ;;     R's names for the columns of an unnamed matrix: "V1" ... "Vn".
 ;;   (check-column-names names ncols who)
@@ -118,6 +120,7 @@
            select-table-columns
            select-table-values
            table-column->flvector
+           status->real
            flvectors->design-matrix
            element-error
            missing-error
@@ -704,6 +707,14 @@
 (define (table-column->flvector entries name who)
   (for/flvector #:length (vector-length entries) ([x (in-vector entries)] [i (in-naturals)])
     (->finite-flonum x who "the table" i name)))
+
+;; A Cox status as R's Surv reads it: #t (an event) is 1 and #f (censored) is
+;; 0; any other value is itself.
+(define (status->real x)
+  (cond
+    [(eq? x #t) 1]
+    [(eq? x #f) 0]
+    [else x]))
 
 ;; Columns with the given names as a design matrix; errors name the column by
 ;; its name.

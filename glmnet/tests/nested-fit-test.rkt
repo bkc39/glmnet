@@ -168,28 +168,28 @@
   (test-case "a matrix of the wrong shape names the accepted shapes"
     (check-blame (lambda () (ols (flvector 1.0 2.0) yg))
                  #rx"^ols: contract violation"
-                 #rx"expected: \\(or/c design-matrix\\? \\(listof \\(or/c list\\? vector\\?\\)\\) \\(vectorof \\(or/c list\\? vector\\?\\)\\)"
-                 #rx"\\(and/c array\\? matrix\\?\\) table\\? dataframe\\?\\)"
+                 #rx"expected: unnamed data \\(a design matrix, a list or vector of rows or a math/matrix matrix\\)"
+                 #rx"or named data \\(a table or a Polars dataframe\\)"
                  #rx"in: the X argument of")
     (check-blame (lambda () (mgaussian-fit Xr #(1.0 2.0) #:lambda 1.0))
-                 #rx"expected: \\(or/c design-matrix\\? \\(listof \\(or/c list\\? vector\\?\\)\\)"
-                 #rx"in: the 2nd argument of"))
+                 #rx"expected: unnamed data \\(a design matrix, a list or vector of rows or a math/matrix matrix\\), since X is unnamed"
+                 #rx"in: the Y argument of"))
 
   (test-case "new data of the wrong shape names the accepted shapes"
     (define r (lasso Xg yg #:lambda 0.1))
     (check-blame (lambda () (elnet-predict r (flvector 1.0 2.0)))
                  #rx"^elnet-predict: contract violation"
-                 #rx"\\(vectorof \\(or/c list\\? vector\\?\\)\\)" #rx"given: \\(flvector 1.0 2.0\\)")
+                 #rx"a list or vector of rows" #rx"given: \\(flvector 1.0 2.0\\)")
     (check-blame (lambda () (predict r #(1.0 2.0)))
                  #rx"^predict: contract violation"
-                 #rx"\\(vectorof \\(or/c list\\? vector\\?\\)\\)" #rx"table\\?"))
+                 #rx"a list or vector of rows" #rx"named data \\(a table or a Polars dataframe\\)"))
 
   (test-case "a response of the wrong shape names the accepted shapes"
     (check-blame (lambda () (ols Xg "y"))
                  #rx"expected: a non-empty list, vector, flvector or f64vector of real\\?")
     (check-blame (lambda () (cox-fit Xc tc (vector) #:lambda 0.05))
                  #rx"expected: a non-empty list, vector, flvector or f64vector of \\(or/c 0 1\\)"
-                 #rx"in: the 3rd argument of"))
+                 #rx"in: the statuses argument of"))
 
   (test-case "a response entry that fails is named by its position"
     (check-blame (lambda () (logistic-fit Xb (list->vector (list-set yb 7 2)) #:lambda 0.02))

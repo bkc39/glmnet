@@ -10,7 +10,7 @@
 (require racket/contract
          ffi/vector
          "marshal.rkt"
-         (only-in "input.rkt" data/c)
+         (only-in "input.rkt" data/c response-for/c)
          (submod "input.rkt" support)
          "model.rkt"
          (submod "model.rkt" support)
@@ -26,7 +26,7 @@
  (struct-out elnet-result)
  (contract-out
   [elnet-fit
-   (fit/c real?
+   (fit/c (response-for/c X real?)
           (#:lambda (>=/c 0))
           (#:alpha (real-in 0 1)
            #:standardize? boolean?
@@ -35,7 +35,7 @@
            #:max-iters exact-positive-integer?)
           elnet-result?)]
   [ols
-   (fit/c real?
+   (fit/c (response-for/c X real?)
           ()
           (#:standardize? boolean?
            #:intercept? boolean?
@@ -43,7 +43,7 @@
            #:max-iters exact-positive-integer?)
           elnet-result?)]
   [ridge
-   (fit/c real?
+   (fit/c (response-for/c X real?)
           (#:lambda (>=/c 0))
           (#:standardize? boolean?
            #:intercept? boolean?
@@ -51,7 +51,7 @@
            #:max-iters exact-positive-integer?)
           elnet-result?)]
   [lasso
-   (fit/c real?
+   (fit/c (response-for/c X real?)
           (#:lambda (>=/c 0))
           (#:standardize? boolean?
            #:intercept? boolean?
@@ -59,7 +59,7 @@
            #:max-iters exact-positive-integer?)
           elnet-result?)]
   [elastic-net
-   (fit/c real?
+   (fit/c (response-for/c X real?)
           (#:alpha (real-in 0 1) #:lambda (>=/c 0))
           (#:standardize? boolean?
            #:intercept? boolean?
@@ -72,7 +72,7 @@
 (provide
  (contract-out
   [elnet-path
-   (fit/c real?
+   (fit/c (response-for/c X real?)
           ()
           (#:lambda lambda-sequence/c
            #:nlambda exact-positive-integer?
@@ -84,7 +84,7 @@
            #:max-iters exact-positive-integer?)
           glmnet-path?)]
   [elnet-cv
-   (fit/c real?
+   (fit/c (response-for/c X real?)
           ()
           (#:type-measure (or/c 'mse 'deviance 'mae)
            #:nfolds nfolds/c

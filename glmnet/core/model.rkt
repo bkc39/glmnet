@@ -67,8 +67,12 @@
         #:pre/name (model) "the model has at least one fitted λ" (fitted? model)
         [result lambda-arg/c])]
   [glmnet-model-named-lambda (-> glmnet-model? lambda-name/c (or/c #f (>=/c 0)))]
-  [glmnet-model-predictor-names (-> glmnet-model? (or/c #f (listof string?)))]
-  [glmnet-model-response-names (-> glmnet-model? (or/c #f (listof string?)))]
+  [rename remembered-predictor-names glmnet-model-predictor-names
+          (-> glmnet-model? (or/c #f (listof string?)))]
+  [rename remembered-response-names glmnet-model-response-names
+          (-> glmnet-model? (or/c #f (listof string?)))]
+  [rename model-class-labels glmnet-model-class-labels
+          (-> glmnet-model? (or/c #f (listof string?)))]
   [deviance-ratio (-> glmnet-model? (or/c real? (vectorof real? #:flat? #t)))]
   [predict
    (->i ([model glmnet-model?] [X data/c])
@@ -93,22 +97,40 @@
            attach-data-names
            data-predictor-names))
 
-;; The predictors' names of a fit from named data, on a chaperone of the
-;; result, which stays the plain struct (equal?, coef); see AGENTS.md.
-(define-values (prop:data-predictors data-predictors? data-predictors-ref)
-  (make-impersonator-property 'data-predictors))
+;; What a fit through core/input.rkt remembers of its data: its predictors'
+;; names, its classes' labels and its responses' names, each #f when it has
+;; none, on a chaperone of the result, which stays the plain struct (equal?,
+;; coef); see AGENTS.md.
+(struct data-input (predictors classes responses))
 
-;; model, remembering `names`, or model itself when names is #f. Every result
-;; type is transparent, so struct-info finds its type.
-(define (attach-data-names model names)
+(define-values (prop:data-names data-names? data-names-ref)
+  (make-impersonator-property 'data-names))
+
+;; model, remembering `names`, `classes` and `responses`, or model itself
+;; when all are #f. Every result type is transparent, so struct-info finds its
+;; type.
+(define (attach-data-names model names #:classes [classes #f] #:responses [responses #f])
   (cond
-    [names
+    [(or names classes responses)
      (define-values (type skipped?) (struct-info model))
-     (chaperone-struct model type prop:data-predictors names)]
+     (chaperone-struct model type prop:data-names (data-input names classes responses))]
     [else model]))
 
-(define (data-predictor-names model)
-  (and (data-predictors? model) (data-predictors-ref model)))
+(define ((data-name-ref field) model)
+  (and (data-names? model) (field (data-names-ref model))))
+
+(define data-predictor-names (data-name-ref data-input-predictors))
+(define data-class-labels (data-name-ref data-input-classes))
+(define data-response-names (data-name-ref data-input-responses))
+
+;; The public glmnet-model-predictor-names and glmnet-model-response-names:
+;; the names a model gives, as a formula model does, which key `coef`, or
+;; else those a fit from named data remembers, which do not.
+(define (remembered-predictor-names model)
+  (or (glmnet-model-predictor-names model) (data-predictor-names model)))
+
+(define (remembered-response-names model)
+  (or (glmnet-model-response-names model) (data-response-names model)))
 
 ;; How a model that names its predictors builds their design matrix from a
 ;; table for `predict`: a procedure of the model, the table and the name of the
@@ -123,12 +145,15 @@
 ;; for the indices themselves. A formula model of a response of strings (#53)
 ;; names them, as R's glmnet names a factor response's: `coef` keys a
 ;; multinomial model's coefficients by them, and `predict` with #:type 'class
-;; returns them.
+;; returns them. A fit from such a response (core/input.rkt) remembers them
+;; instead.
 (define-values (prop:class-labels class-labels? class-labels-ref)
   (make-struct-type-property 'class-labels))
 
 (define (model-class-labels model)
-  (and (class-labels? model) ((class-labels-ref model) model)))
+  (cond
+    [(class-labels? model) ((class-labels-ref model) model)]
+    [else (data-class-labels model)]))
 
 ;; --- single fits -------------------------------------------------------------
 

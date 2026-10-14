@@ -4,7 +4,7 @@
          (only-in racket/flonum flvector? flvector-length make-flvector flvector-set!)
          (only-in ffi/vector f64vector-ref)
          (only-in math/array
-                  array? array-shape mutable-array? mutable-array-data flarray-data)
+                  array? array-shape array->vector mutable-array? mutable-array-data flarray-data)
          (only-in math/matrix matrix? matrix-shape row-matrix? col-matrix?)
          ;; math/array exports flarray-data but no predicate for flonum arrays.
          (only-in (submod math/private/array/flarray-struct defs) flarray?)
@@ -123,9 +123,10 @@
   [array->response (-> response-array/c (and/c (listof real?) pair?))]))
 
 ;; For glmnet's data boundary (core/input.rkt) only: the conversions above with
-;; the name of the procedure the user called.
+;; the name of the procedure the user called, and array->vector, an array's
+;; elements in row-major order.
 (module* support #f
-  (provide math-matrix? response-array? matrix->dm array->reals))
+  (provide math-matrix? response-array? matrix->dm array->reals array->vector))
 
 (define (math-matrix? v)
   (and (array? v) (matrix? v)))
