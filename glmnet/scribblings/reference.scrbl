@@ -1203,6 +1203,7 @@ The @tech{binomial family}: two-class logistic regression on 0/1 labels. See
   deviance explained.
 
   @examples[#:eval ev
+  (require glmnet/datasets)
   (define X '((1.0 5.0 2.0) (2.0 6.0 1.0) (2.0 5.0 3.0) (1.0 4.0 1.0)
               (6.0 2.0 2.0) (5.0 1.0 1.0) (6.0 1.0 3.0) (5.0 2.0 1.0)))
   (define y '(0 0 0 0 1 1 1 1))
@@ -1277,6 +1278,7 @@ labels. See @secref["ex-multinomial"].
   zero. @racket[dev-ratio] is the fraction of null deviance explained.
 
   @examples[#:eval ev
+  (require glmnet/datasets)
   (define X '((1.0 1.0) (2.0 1.0) (5.0 1.0) (6.0 1.0) (3.0 5.0) (4.0 6.0)))
   (define y '(0 0 1 1 2 2))
   (define fit (multinomial-fit X y #:lambda 0.05))
@@ -1410,6 +1412,7 @@ The @tech{Poisson family}: counts with a log link. See @secref["ex-poisson"].
   explained.
 
   @examples[#:eval ev
+  (require glmnet/datasets)
   (define X '((1.0 2.0) (2.0 1.0) (3.0 2.0) (4.0 1.0)
               (5.0 2.0) (6.0 1.0) (7.0 2.0) (8.0 1.0)))
   (define y '(1 2 2 3 4 6 8 11))
@@ -1463,6 +1466,7 @@ jointly under a grouped penalty. See @secref["ex-mgaussian"].
   explained across all responses.
 
   @examples[#:eval ev
+  (require glmnet/datasets)
   (define X '((1.0 2.0) (2.0 1.0) (3.0 2.0) (4.0 1.0) (5.0 2.0) (6.0 1.0)))
   (define Y '((3.0 9.0) (5.0 8.0) (7.0 7.0) (9.0 6.0) (11.0 5.0) (13.0 4.0)))
   (define fit (mgaussian-fit X Y #:lambda 0.1))
@@ -1588,6 +1592,7 @@ These are R's @tt{glmnet.control} defaults (@tt{fdev = 1e-5},
   a path at any @math{λ}.
 
   @examples[#:eval ev
+  (require glmnet/datasets)
   (define X '((1.0 2.0 1.0) (2.0 1.0 4.0) (3.0 4.0 9.0)
               (4.0 3.0 16.0) (5.0 6.0 25.0) (6.0 5.0 36.0)))
   (define y '(1.0 4.0 3.0 6.0 5.0 8.0))
@@ -1775,6 +1780,7 @@ in this section use 60 observations of 8 predictors, of which the first three
 carry the signal:
 
 @examples[#:eval ev #:label #f
+(require glmnet/datasets)
 (random-seed 8)
 (define (noise) (- (* 2 (random)) 1))
 (define X60
@@ -2087,20 +2093,30 @@ carry the signal:
 
 @section[#:tag "ref-formula"]{Formulas}
 
-The formula front end fits any family from a @tech{table} (see
-@secref["ref-tables"]). A @tech{formula} names the response and, in R's formula
-algebra, the predictor terms. @racket[formula-fit], @racket[formula-path] and
-@racket[formula-cv] expand the terms against the table, as R's @tt{terms}
-does, build their design matrix, as R's @tt{model.matrix} does, and call the
-fit procedure, path fitter or cross-validation procedure of the family that
-@racket[#:family] names on it. They return a @racket[formula-model], which
-keeps the formula, the names of the design matrix's columns and the expanded
-terms, so that @racket[coef] keys the coefficients by name and
-@racket[predict] builds the design matrix of a new table (see
-@secref["ref-model"]). @secref["formulas"] works through examples,
-@secref["formulas-algebra"] explains the algebra,
+The formula front end fits any family from named data: a @tech{table} (see
+@secref["ref-tables"]) or a Polars dataframe. A @tech{formula} names the
+response and, in R's formula algebra, the predictor terms.
+@racket[formula-fit], @racket[formula-path] and @racket[formula-cv] expand the
+terms against the data's columns, as R's @tt{terms} does, build their design
+matrix, as R's @tt{model.matrix} does, and call the fit procedure, path fitter
+or cross-validation procedure of the family that @racket[#:family] names on
+it. They return a @racket[formula-model], which keeps the formula, the names
+of the design matrix's columns and the expanded terms, so that @racket[coef]
+keys the coefficients by name and @racket[predict] builds the design matrix of
+new named data (see @secref["ref-model"]). @secref["formulas"] works through
+examples, @secref["formulas-algebra"] explains the algebra,
 @secref["formulas-transforms"] the transforms, and
 @secref["formulas-factors"] the factors.
+
+A dataframe is read as @racket[(polars->table df)] would be, and the results
+are the same, except that only the columns the formula uses are converted:
+those its terms read and, for a fit, the response columns. The other columns
+may have any dtype, and missing values. A converted column needs a numeric,
+boolean, string, categorical or enum dtype and no missing value; a response
+needs a numeric one, except the class labels of a binomial or multinomial
+response and a Cox status, which may be boolean. An error names the column.
+A dataframe with no rows is an error only for a formula that reads a column
+of it, as a table is.
 
 The terms of a formula expand as R's @tt{terms} expands them:
 
@@ -2267,9 +2283,21 @@ Trend road tests, and R's @tt{iris}, 150 irises of three species, which
 @racketmodname[glmnet/datasets] provides as tables (see @secref["ref-datasets"]):
 
 @examples[#:eval ev #:label #f
-(require glmnet/datasets)
+(require glmnet/data/polars
+         glmnet/datasets)
 (table-column-names mtcars)
 (table-column-names iris)
+]
+
+Some also use @tt{mtcars} as a dataframe, from the @racketmodname[datasets]
+package, with a text column of the cars' names:
+
+@examples[#:eval ev #:label #f
+(require (only-in datasets load-dataset)
+         (only-in polars column-names)
+         (prefix-in pl: (only-in polars head)))
+(define cars (load-dataset 'mtcars #:format 'polars))
+(column-names cars)
 ]
 
 @defform*[#:literals (all surv I factor + - * : ^)
@@ -2506,25 +2534,28 @@ Trend road tests, and R's @tt{iris}, 150 irises of three species, which
   (formula-terms (mpg . ~ . 1 + wt * hp))
   (formula-terms (~ mpg wt (- all cyl)))]}
 
-@defproc[(formula-predictor-names [f formula?] [table table?]) (listof string?)]{
-  The names of the columns of @racket[f]'s design matrix on @racket[table],
-  which are the names of the model's coefficients, in their order, as R's
-  @tt{colnames(model.matrix(f, table))} without @tt{(Intercept)}. It is empty
-  for a formula without predictors. It reads the table's values, which decide
-  a factor's levels, and evaluates the transforms, as R's @tt{model.matrix}
-  does.
+@defproc[(formula-predictor-names [f formula?] [data (or/c table? named-data?)])
+         (listof string?)]{
+  The names of the columns of @racket[f]'s design matrix on @racket[data], a
+  table or a dataframe, which are the names of the model's coefficients, in
+  their order, as R's @tt{colnames(model.matrix(f, data))} without
+  @tt{(Intercept)}. It is empty for a formula without predictors. It reads the
+  values of the columns the terms use, which decide a factor's levels, and
+  evaluates the transforms, as R's @tt{model.matrix} does.
 
   @examples[#:eval ev
   (formula-predictor-names (~ mpg wt hp (: wt hp qsec)) mtcars)
   (formula-predictor-names (mpg . ~ . wt * hp * qsec - wt : hp : qsec) mtcars)
   (formula-predictor-names (~ mpg (: all wt)) mtcars)
   (formula-predictor-names (mpg . ~ . (factor cyl) * (factor am)) mtcars)
-  (formula-predictor-names (~ mpg 1) mtcars)]}
+  (formula-predictor-names (~ mpg 1) mtcars)
+  (formula-predictor-names (~ mpg (- all model)) cars)]}
 
-@defproc[(formula-design-matrix [f formula?] [table table?]) design-matrix?]{
-  The design matrix of @racket[f] on @racket[table], with one named column per
-  predictor, which is what the formula procedures fit: R's
-  @tt{model.matrix(f, table)} without its @tt{(Intercept)} column. The
+@defproc[(formula-design-matrix [f formula?] [data (or/c table? named-data?)])
+         design-matrix?]{
+  The design matrix of @racket[f] on @racket[data], a table or a dataframe,
+  with one named column per predictor, which is what the formula procedures
+  fit: R's @tt{model.matrix(f, data)} without its @tt{(Intercept)} column. The
   formula must have at least one predictor. The name is not
   @racketidfont{formula-model-matrix}, which would read as an accessor of a
   @racket[formula-model].
@@ -2559,12 +2590,13 @@ Trend road tests, and R's @tt{iris}, 150 irises of three species, which
   A formula model implements @racket[gen:glmnet-model] through @racket[fit]:
   @racket[predict], @racket[coef] and @racket[deviance-ratio] give what they
   give for @racket[fit], except that @racket[coef] keys the coefficients by
-  name and @racket[predict] takes a table, from whose columns it builds the
-  design matrix of the fitted terms. It does not expand the formula again, so
-  @racket[all] stands for the columns it stood for in the fit, and the new
-  table's columns can come in any order. It evaluates the transforms again, on
-  the new table's rows: each name of a transform that was a column in the fit
-  must be a column of the new table, and one that was a Racket binding is
+  name and @racket[predict] takes a table or a dataframe, from whose columns
+  it builds the design matrix of the fitted terms, reading only those the
+  terms read. It does not expand the formula again, so @racket[all] stands for
+  the columns it stood for in the fit, and the new data's columns can come in
+  any order, without the response. It evaluates the transforms again, on the
+  new rows: each name of a transform that was a column in the fit must be a
+  column of the new data, and one that was a Racket binding is
   read again. It codes the factors with the fit's levels, whichever of them
   the new rows have, and a level that the fit did not have is an error that
   names the factor and the new levels. For a response with classes,
@@ -2606,7 +2638,7 @@ Trend road tests, and R's @tt{iris}, 150 irises of three species, which
    (formula-fit (mpg . ~ . wt + hp) mtcars #:lambda 0.1))]}
 
 @defproc[(formula-fit [f formula?]
-                      [table table?]
+                      [data (or/c table? named-data?)]
                       [#:lambda lambda (>=/c 0)]
                       [#:family family
                                 (or/c 'gaussian 'binomial 'multinomial 'poisson 'cox 'mgaussian)
@@ -2617,7 +2649,8 @@ Trend road tests, and R's @tt{iris}, 150 irises of three species, which
                       [#:thresh thresh (>/c 0) 1e-7]
                       [#:max-iters max-iters exact-positive-integer? 100000])
          formula-model?]{
-  Fits @racket[f] to @racket[table] at a single @math{λ}, with the fit
+  Fits @racket[f] to @racket[data], a table or a dataframe, at a single
+  @math{λ}, with the fit
   procedure of @racket[family]: @racket[elnet-fit], @racket[logistic-fit],
   @racket[multinomial-fit], @racket[poisson-fit], @racket[cox-fit] or
   @racket[mgaussian-fit], on the design matrix of @racket[f]. The keywords are
@@ -2648,10 +2681,14 @@ Trend road tests, and R's @tt{iris}, 150 irises of three species, which
   (coef (formula-fit (mpg . ~ . wt + (factor cyl)) mtcars #:lambda 0.1))
   (formula-fit (am . ~ . wt + hp) mtcars #:family 'binomial #:lambda 0.05)
   (map car (coef (formula-fit (~ Species all) iris #:family 'multinomial #:lambda 0.05)))
-  (eval:error (formula-fit (~ mpg 1) mtcars #:lambda 0.1))]}
+  (define car-model (formula-fit (~ mpg (+ wt hp)) cars #:lambda 0))
+  (coef car-model)
+  (predict car-model (pl:head cars 3))
+  (eval:error (formula-fit (~ mpg 1) mtcars #:lambda 0.1))
+  (eval:error (formula-fit (~ model wt) cars #:lambda 0.1))]}
 
 @defproc[(formula-path [f formula?]
-                       [table table?]
+                       [data (or/c table? named-data?)]
                        [#:family family
                                  (or/c 'gaussian 'binomial 'multinomial 'poisson 'cox 'mgaussian)
                                  'gaussian]
@@ -2664,7 +2701,7 @@ Trend road tests, and R's @tt{iris}, 150 irises of three species, which
                        [#:thresh thresh (>/c 0) 1e-7]
                        [#:max-iters max-iters exact-positive-integer? 100000])
          formula-model?]{
-  Fits the @tech{regularization path} of @racket[f] on @racket[table], with the
+  Fits the @tech{regularization path} of @racket[f] on @racket[data], with the
   path fitter of @racket[family], such as @racket[elnet-path], to which the
   keywords are passed. The response and the intercept are as for
   @racket[formula-fit], and an error that the path fitter raises names
@@ -2674,10 +2711,11 @@ Trend road tests, and R's @tt{iris}, 150 irises of three species, which
   (define path
     (formula-path (~ mpg (^ (+ wt hp qsec) 2)) mtcars #:lambda '(1.0 0.5 0.1)))
   path
-  (coef path #:lambda 0.1)]}
+  (coef path #:lambda 0.1)
+  (formula-path (~ am (- all model)) cars #:family 'binomial #:nlambda 5)]}
 
 @defproc[(formula-cv [f formula?]
-                     [table table?]
+                     [data (or/c table? named-data?)]
                      [#:family family
                                (or/c 'gaussian 'binomial 'multinomial 'poisson 'cox 'mgaussian)
                                'gaussian]
@@ -2694,12 +2732,12 @@ Trend road tests, and R's @tt{iris}, 150 irises of three species, which
                      [#:thresh thresh (>/c 0) 1e-7]
                      [#:max-iters max-iters exact-positive-integer? 100000])
          formula-model?]{
-  Cross-validates the path of @racket[f] on @racket[table] with the
+  Cross-validates the path of @racket[f] on @racket[data] with the
   cross-validation procedure of @racket[family], such as @racket[elnet-cv], to
   which the keywords are passed. @racket[type-measure] must be one of the
   family's measures (see @secref["ref-cv"]), which the contract on it checks;
   @racket[#f], the default, is the family's default. @racket[fold-ids] needs
-  one entry per row of @racket[table]. The response and the intercept are as
+  one entry per row of @racket[data]. The response and the intercept are as
   for @racket[formula-fit], and an error that the cross-validation procedure
   raises names @racket[formula-cv].
 
@@ -2707,7 +2745,11 @@ Trend road tests, and R's @tt{iris}, 150 irises of three species, which
   (define folds (for/list ([i (in-range 32)]) (modulo i 4)))
   (define cv-model (formula-cv (mpg . ~ . wt * hp) mtcars #:fold-ids folds))
   cv-model
-  (coef cv-model)]}
+  (coef cv-model)
+  (define iris-df (table->polars iris))
+  (define flowers (formula-cv (~ Species all) iris-df #:family 'multinomial
+                              #:fold-ids (for/list ([i (in-range 150)]) (modulo i 5))))
+  (predict flowers (pl:head iris-df 3) #:type 'class #:lambda 'lambda-1se)]}
 
 @section[#:tag "ref-model"]{Generic model interface}
 
@@ -2742,9 +2784,9 @@ as R's @tt{s} accepts @tt{"lambda.min"} and @tt{"lambda.1se"}.
 
 A model can also name its predictors, as a @racket[formula-model] does. Then
 @racket[coef] keys its coefficients by name, as R's @tt{coef} names its rows,
-and @racket[predict] takes a @tech{table} and reads the predictors from it by
-name, or, for a formula model, builds them from the table's columns, as its
-formula's terms say.
+and @racket[predict] takes a @tech{table} or a dataframe and reads the
+predictors from it by name, or, for a formula model, builds them from its
+columns, as its formula's terms say.
 
 @racket[predict], @racket[coef] and @racket[glmnet-model-default-lambda] need
 a model with at least one fitted @math{λ}. A @racket[glmnet-path] built by
@@ -2755,6 +2797,8 @@ The examples in this section use a single fit and a path of the Gaussian
 family:
 
 @examples[#:eval ev #:label #f
+(require glmnet/data/polars
+         glmnet/datasets)
 (define X '((1.0 2.0 1.0) (2.0 1.0 4.0) (3.0 4.0 9.0)
             (4.0 3.0 16.0) (5.0 6.0 25.0) (6.0 5.0 36.0)))
 (define y '(1.0 4.0 3.0 6.0 5.0 8.0))
@@ -2851,9 +2895,9 @@ family:
   remembers them; a fit from unnamed data does not. When a model, such as a
   formula model, implements this method of @racket[gen:glmnet-model],
   @racket[coef] keys its coefficients by these names and
-  @racket[predict] reads the columns with these names from a table, except
-  that a formula model builds its predictors, such as the interaction
-  @racket["a:b"] or the transform @racket["(log a)"], from the table's
+  @racket[predict] reads the columns with these names from a table or a
+  dataframe, except that a formula model builds its predictors, such as the
+  interaction @racket["a:b"] or the transform @racket["(log a)"], from its
   columns; the names a fit from named data remembers leave @racket[coef]'s
   layout as it is. The names must be distinct, one
   per predictor of the model's path; @racket[coef] and @racket[predict] raise
@@ -2915,10 +2959,10 @@ family:
   @tt{predict(fit, newx, s, type)}. @racket[X] needs one column per
   coefficient, in the order of the coefficients. For a model that names its
   predictors (see @racket[glmnet-model-predictor-names]), @racket[X] is instead
-  a @tech{table} with a column of each of those names, in any order; its other
-  columns are ignored, and a missing one is an error that names it. For a
-  @racket[formula-model], the table needs the columns that the formula's terms
-  read, from which @racket[predict] builds the design matrix as
+  a @tech{table} or a dataframe with a column of each of those names, in any
+  order; its other columns are ignored, and a missing one is an error that
+  names it. For a @racket[formula-model], @racket[X] needs the columns that the
+  formula's terms read, from which @racket[predict] builds the design matrix as
   @racket[formula-design-matrix] does, transforms included; an error names the
   missing ones. A fit from named data (see @secref["ref-common-data"]) reads
   named @racket[X], a table or a dataframe, by its predictors' names, and
@@ -2960,6 +3004,7 @@ family:
   (define new-table
     (list (cons "c" '(49.0)) (cons "b" '(6.0)) (cons "a" '(7.0))))
   (predict named-model new-table)
+  (predict named-model (table->polars new-table))
   (eval:error (predict named-model (cdr new-table)))]}
 
 @defproc[(coef [model glmnet-model?]
@@ -3086,7 +3131,8 @@ cross-validated fit @racket[cv] of @secref["ref-cv"], and the formula model
 @racket[cv-model] of @racket[formula-cv]:
 
 @examples[#:eval ev #:label #f
-(require glmnet/plot)
+(require glmnet/datasets
+         glmnet/plot)
 (define X '((1.0 2.0 1.0) (2.0 1.0 4.0) (3.0 4.0 9.0)
             (4.0 3.0 16.0) (5.0 6.0 25.0) (6.0 5.0 36.0)))
 (define y '(1.0 4.0 3.0 6.0 5.0 8.0))

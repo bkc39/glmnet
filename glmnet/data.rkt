@@ -72,7 +72,7 @@
 ;;     Raises "<what> has an element that is <problem>", such as "not a real
 ;;     number" or "not finite", with the fields column (a name, or an index
 ;;     when the data has no names), row and element, or position and element
-;;     for one-dimensional data.
+;;     for one-dimensional data; with #:row and no #:column, row and element.
 ;;   (missing-error who what #:row i #:column c [#:element x] [#:details fields])
 ;;   (missing-error who what #:position k [#:element x] [#:details fields])
 ;;     Raises "<what> has a missing value" with the same fields, then any
@@ -97,6 +97,11 @@
 ;;     "dataframe") whose columns are `present` (`known`, its name-set), as
 ;;     the given: field of a contract's explanation, or #f. `problem` is #f
 ;;     for a column it accepts, or what is wrong with it, as "of dtype string".
+;;   (absent-columns names present)
+;;   (absent-columns-error who what absent present)
+;;     The names among `names` that are not among `present`, or #f when there
+;;     are none; and the error naming them, of the `what` ("table" or
+;;     "dataframe") whose columns are `present`.
 (module* support #f
   (provide design-matrix-data
            design-matrix-nrows
@@ -117,6 +122,8 @@
            explain
            column-problem
            column-list-problem
+           absent-columns
+           absent-columns-error
            select-table-columns
            select-table-values
            table-column->flvector
@@ -267,7 +274,8 @@
   (cond
     [k (list "position" k)]
     [(and i c) (list "column" c "row" i)]
-    [else (raise-arguments-error who "an element error needs a row and a column, or a position")]))
+    [i (list "row" i)]
+    [else (raise-arguments-error who "an element error needs a row or a position")]))
 
 (define (element-error who what problem x #:row [i #f] #:column [c #f] #:position [k #f])
   (apply raise-arguments-error who (format "~a has an element that is ~a" what problem)
@@ -622,6 +630,18 @@
     [else
      (for/or ([name (in-list v)])
        (column-problem (column-name->string name) what known present problem))]))
+
+(define (absent-columns names present)
+  (define known (name-set present))
+  (define absent (filter (lambda (name) (not (hash-ref known name #f))) names))
+  (and (pair? absent) absent))
+
+(define (absent-columns-error who what absent present)
+  (if (null? (cdr absent))
+      (raise-arguments-error who (format "the ~a has no column with this name" what)
+                             "column" (car absent) (format "columns of the ~a" what) present)
+      (raise-arguments-error who (format "the ~a has no columns with these names" what)
+                             "columns" absent (format "columns of the ~a" what) present)))
 
 (define (table-column-names t)
   (table-names t 'table-column-names))

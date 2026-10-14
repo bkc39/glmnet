@@ -8,8 +8,8 @@
 ;; also names lambdas, 'lambda-min and 'lambda-1se, which `predict` and `coef`
 ;; accept in place of a number. A model that names its predictors, such as a
 ;; formula model (#26), gets name-keyed coefficients from `coef` and has
-;; `predict` read a table by those names. `in-path` walks a model's path, a λ
-;; and its coefficients at a time.
+;; `predict` read named data, a table or a dataframe, by those names. `in-path`
+;; walks a model's path, a λ and its coefficients at a time.
 
 (require racket/contract
          racket/generic
@@ -21,8 +21,7 @@
          "path.rkt"
          (submod "path.rkt" support)
          (only-in "../data.rkt" table?)
-         (only-in (submod "../data.rkt" support) select-table-columns)
-         (only-in "input.rkt" data/c)
+         (only-in "input.rkt" data/c named-data?)
          (only-in (submod "input.rkt" support) new-data->design-matrix))
 
 (define lambda-arg/c (or/c (>=/c 0) (and/c (listof (>=/c 0)) pair?)))
@@ -132,11 +131,12 @@
 (define (remembered-response-names model)
   (or (glmnet-model-response-names model) (data-response-names model)))
 
-;; How a model that names its predictors builds their design matrix from a
-;; table for `predict`: a procedure of the model, the table and the name of the
-;; procedure called. A formula model (#53) has it, since its predictors, such
-;; as the interaction "x:z", are computed from the table's columns. Without it,
-;; `predict` reads the columns with the predictors' names.
+;; How a model that names its predictors builds their design matrix from named
+;; data, a table or a dataframe, for `predict`: a procedure of the model, the
+;; data and the name of the procedure called. A formula model (#53) has it,
+;; since its predictors, such as the interaction "x:z", are computed from the
+;; data's columns. Without it, `predict` reads the columns with the
+;; predictors' names.
 (define-values (prop:predictor-matrix predictor-matrix? predictor-matrix-ref)
   (make-struct-type-property 'predictor-matrix))
 
@@ -399,17 +399,19 @@
 
 ;; The new data X as a design matrix with one column per predictor of the
 ;; model's path p: for a model with named predictors, the design matrix that
-;; the model builds from the table X, or the columns of X with those names, in
-;; the model's order; otherwise as new-data->design-matrix reads it, by the
-;; names of the predictors of a fit from named data or by position.
+;; the model builds from X, a table or a dataframe, or the columns of X with
+;; those names, in the model's order; otherwise as new-data->design-matrix
+;; reads it, by the names of the predictors of a fit from named data or by
+;; position.
 (define (model-matrix who model X p)
   (define names (model-predictor-names who model p))
   (cond
-    [(and names (not (table? X)))
-     (raise-arguments-error who "the model's predictors are named, so X must be a table"
+    [(and names (not (or (table? X) (named-data? X))))
+     (raise-arguments-error who (string-append "the model's predictors are named, so X must be "
+                                               "a table or a dataframe")
                             "predictors" names "X" X)]
     [(and names (predictor-matrix? model)) ((predictor-matrix-ref model) model X who)]
-    [names (select-table-columns X names who)]
+    [names (new-data->design-matrix who X names)]
     [else
      (prediction-matrix (new-data->design-matrix who X (data-predictor-names model))
                         (path-num-predictors p) who)]))
