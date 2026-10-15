@@ -11,7 +11,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 echo "Running all glmnet examples..."
-for f in glmnet/examples/test/*.rkt; do
+for f in glmnet/examples/test/[0-9][0-9]-*.rkt; do
   echo
   echo "=== $f ==="
   racket "$f"

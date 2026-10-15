@@ -14,7 +14,7 @@
 (module+ test
   (require racket/match
            rackunit
-           "common.rkt")
+           (submod "common.rkt" test))
   (match-define (vector (vector _ low-x₁ x₂-in-0)
                         (vector _ high-x₁ x₂-in-1)
                         (vector _ x₁-in-2 high-x₂))
