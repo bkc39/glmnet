@@ -54,6 +54,8 @@ glmnet/                        Racket collection
   examples/NN-*.rkt            #lang scribble/lp2 literate examples; a <provide> chunk
                                provides their data and results
   examples/test/NN-*.rkt       companion runners + rackunit harnesses over those names
+  examples/test/common.rkt     shared checks, provided from its `test` submodule only:
+                               rackunit is a build-dep (tests/run-deps-test.rkt)
   scribblings/glmnet.scrbl     manual root: guide.scrbl (guide/*.scrbl) + reference.scrbl;
                                the plots are guide/plots.scrbl and reference's ref-plot
   scribblings/utils.rkt        for-label imports + make-glmnet-eval for live examples
