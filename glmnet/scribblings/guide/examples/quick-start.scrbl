@@ -69,11 +69,13 @@ of @racket[x] is at index @racket[(+ j 1)]:
 ]
 
 @racket[entries] is an association list, from each name to the @math{λ}
-at which it enters:
+at which it enters, here shown to two decimals:
 
 @examples[#:eval ev #:label #f
 (string-join (dict-keys entries))
-(take entries 6)
+(define (~r2 x) (~r x #:precision '(= 2)))
+(for ([(name λ) (in-dict (take entries 6))])
+  (printf "~a: λ = ~a\n" name (~r2 λ)))
 ]
 
 @tt{V1} and @tt{V14} enter first, at @math{λ ≈ 1.49}, then @tt{V5} and
