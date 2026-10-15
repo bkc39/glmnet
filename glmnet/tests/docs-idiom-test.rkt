@@ -1,8 +1,5 @@
 #lang racket/base
 
-;; The docs idiom gate (AGENTS.md, Documentation). `racket docs-idiom-test.rkt`
-;; prints every hit.
-
 (require racket/file
          racket/list
          racket/match
@@ -16,6 +13,16 @@
 (define collection-dir (simplify-path (build-path tests-dir "..")))
 
 (struct idiom (name pattern fix))
+
+(define positional-names
+  (string-append "car|c[ad]{2,4}r|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth"
+                 "|list-ref|list-tail|vector\\*?-ref|matrix-ref|array-ref|sequence-ref"))
+
+(define positional-access
+  (idiom 'positional-access
+         (pregexp (format "\\((?:~a)\\s|\\(cdr\\s+\\(ass(?:oc|q|v|f)\\s|\\((?:map|curryr?)\\s+(?:cdr|~a)[\\s)]"
+                          positional-names positional-names))
+         "destructure with match-define, read a key with dict-ref, or iterate a sequence"))
 
 ;; Where two idioms match at one position, the first listed one is the hit.
 (define idioms
@@ -32,9 +39,7 @@
    (idiom 'hand-rounding
           #px"(?<![\\w-])(?:round3|rounded)(?![\\w-])|\\(/\\s+\\(round\\s+\\(\\*\\s+(?:10+(?![\\w.])|(?:[^()\\s]+|\\([^()]*\\))\\s+10+(?![\\w.]))"
           "show the value as returned, or format it with ~r")
-   (idiom 'positional-access
-          #px"\\((?:car|cadr|caddr|first|second|third|list-ref|vector-ref)\\s|\\(cdr\\s+\\(assoc\\s|\\(map\\s+(?:car|cdr|cadr|caddr)[\\s)]"
-          "destructure with match-define, read a key with dict-ref, or iterate a sequence")
+   positional-access
    (idiom 'hand-written-output
           #px"\\(code:comment\\s+\"\\s*=>"
           "evaluate it: an @examples block, or a chunk whose value the companion test checks")
@@ -42,16 +47,12 @@
           #px"\\(define\\s+\\(?(?:fmt|coef-line|~r\\d+)(?=[\\s()])"
           "use the evaluator's fmt and coef-line, defined once in scribblings/utils.rkt")))
 
-;; Forms whose body is block code shown to the reader.
 (define code-heads
   '(examples interaction interaction0 interaction-eval interaction-eval-show defexamples
     racketblock racketblock0 RACKETBLOCK RACKETBLOCK0 racketmod racketmod0
     racketinput racketinput0 racketresultblock racketresultblock0
     codeblock codeblock0 schemeblock schemeblock0 chunk CHUNK))
 
-;; The [start, end) character offsets of the block code in a source: an
-;; @-syntax page or lp2 program, or a module of documentation helpers, whose
-;; macro templates hold block code.
 (define (code-spans in)
   (port-count-lines! in)
   (define file (object-name in))
@@ -77,22 +78,28 @@
 
 (struct hit (file line idiom text))
 
-;; The hits in `source`, the text of `file`, in order. A counting port reads
-;; CRLF as one position, so the text is read with LF line ends.
-(define (source-hits file source)
+;; A counting port reads CRLF as one position, so the text is read with LF
+;; line ends.
+(define (source-hits file source [checked idioms] [spans-of code-spans])
   (define text (regexp-replace* #rx"\r\n" source "\n"))
-  (define spans (code-spans (open-input-string text file)))
+  (define spans (spans-of (open-input-string text file)))
   (define (in-code? pos)
     (for/or ([span (in-list spans)])
       (and (<= (car span) pos) (< pos (cdr span)))))
   (define (line-of pos)
     (add1 (length (regexp-match-positions* #rx"\n" text 0 pos))))
   (define matches
-    (for*/list ([id (in-list idioms)]
+    (for*/list ([id (in-list checked)]
                 [pos (in-list (regexp-match-positions* (idiom-pattern id) text))]
                 #:when (in-code? (car pos)))
       (cons (car pos) (hit file (line-of (car pos)) id (substring text (car pos) (cdr pos))))))
   (map cdr (remove-duplicates (sort matches < #:key car) = #:key car)))
+
+(define (whole-source in)
+  (list (cons 0 +inf.0)))
+
+(define (test-source-hits file source)
+  (source-hits file source (list positional-access) whole-source))
 
 (define (hit->string h)
   (format "~a:~a: ~a `~a`: ~a" (hit-file h) (hit-line h) (idiom-name (hit-idiom h))
@@ -101,9 +108,6 @@
 (define (lp2? path)
   (call-with-input-file path lp2-source?))
 
-;; Every checked file, relative to the collection: the .scrbl files under
-;; scribblings/ but the reference, the helper modules there, and the lp2
-;; programs in examples/.
 (define (checked-files)
   (define (relative path) (path->string (find-relative-path collection-dir path)))
   (define pages
@@ -117,10 +121,54 @@
     (for/list ([path (in-list (directory-list (build-path collection-dir "examples") #:build? #t))]
                #:when (and (path-has-extension? path #".rkt") (lp2? path)))
       (relative path)))
-  (sort (append pages programs) string<?))
+  (define tests
+    (for/list ([path (in-list (directory-list (build-path collection-dir "examples" "test")
+                                              #:build? #t))]
+               #:when (path-has-extension? path #".rkt"))
+      (relative path)))
+  (sort (append pages programs tests) string<?))
 
 (define (file-hits file)
-  (source-hits file (file->string (build-path collection-dir file))))
+  (define source (file->string (build-path collection-dir file)))
+  (cond
+    [(string-prefix? file "examples/test/") (test-source-hits file source)]
+    [else (source-hits file source)]))
+
+(struct binding (name rhs line))
+
+(define (block-bindings file source heads)
+  (define in (open-input-string source file))
+  (port-count-lines! in)
+  (let walk ([stx (read-syntax-inside file in)])
+    (match (syntax->list stx)
+      [#f '()]
+      [(cons head body)
+       #:when (and (identifier? head) (memq (syntax-e head) heads))
+       (filter-map define->binding body)]
+      [forms (append-map walk forms)])))
+
+(define (define->binding stx)
+  (match (syntax->datum stx)
+    [(list 'define (? symbol? name) rhs) (binding name rhs (syntax-line stx))]
+    [(list 'define (cons (? symbol? name) formals) body ...)
+     (binding name `(λ ,formals ,@body) (syntax-line stx))]
+    [_ #f]))
+
+(define (renamings page-file page program-file program)
+  (for*/list ([shown (in-list (block-bindings page-file page '(examples)))]
+              [defined (in-list (block-bindings program-file program '(chunk CHUNK)))]
+              #:when (and (equal? (binding-rhs shown) (binding-rhs defined))
+                          (not (eq? (binding-name shown) (binding-name defined)))))
+    (format "~a:~a: `~a` is ~a's `~a`; use the program's name" page-file (binding-line shown)
+            (binding-name shown) program-file (binding-name defined))))
+
+(define (page-renamings page-file)
+  (define page (file->string (build-path collection-dir page-file)))
+  (match (regexp-match #rx"@margin-note{Source: @filepath{glmnet/([^}]+)}}" page)
+    [(list _ program-file)
+     (renamings page-file page program-file
+                (file->string (build-path collection-dir program-file)))]
+    [#f '()]))
 
 (module+ test
   (require rackunit)
@@ -172,6 +220,23 @@
                     (4 page-helper "(define (fmt")
                     (4 page-helper "(define ~r5"))))
 
+  (test-case "positional access hits in its every form"
+    (check-equal? (map (compose1 idiom-name hit-idiom) (source-hits "t.scrbl" "@examples[(vector*-ref v 0) (fourth r) (map first rows) (list-tail xs 2) (cdr (assq 'a t))]"))
+                  (make-list 5 'positional-access))
+    (check-equal? (map hit-text (source-hits "t.scrbl" "@examples[(cddr xs) (caar xs) (cdar xs) (seventh xs)
+(matrix-ref M 0 1) (array-ref A #(0)) (sequence-ref s 2) (map vector-ref vs is)
+(curryr vector-ref 1) (map second rows) (cdr (assv 1 t))]"))
+                  '("(cddr " "(caar " "(cdar " "(seventh " "(matrix-ref " "(array-ref "
+                    "(sequence-ref " "(map vector-ref " "(curryr vector-ref " "(map second "
+                    "(cdr (assv ")))
+
+  (test-case "a test program is scanned whole, for positional access only"
+    (check-equal? (map hit-text (test-source-hits "t.rkt" "#lang racket/base
+(module+ test
+  (check-equal? (vector-ref (glmnet-path-df fit) 0) 0)
+  (glmnet-path-coefficients p))"))
+                  '("(vector-ref ")))
+
   (test-case "CRLF line ends give the same hits"
     (check-equal? (hit-texts "@examples[\r\n(f x)\r\n(car row)]\r\n@examples[(second r)]")
                   (hit-texts "@examples[\n(f x)\n(car row)]\n@examples[(second r)]")))
@@ -214,7 +279,26 @@
     (check-not-false (member "examples/04-logistic.rkt" files))
     (check-not-false (member "scribblings/utils.rkt" files))
     (check-false (member "scribblings/reference.scrbl" files))
-    (check-false (member "examples/test/04-logistic.rkt" files)))
+    (check-not-false (member "examples/test/04-logistic.rkt" files)))
+
+  (test-case "a page binding a program's value under another name hits"
+    (check-equal? (renamings "p.scrbl" "#lang scribble/manual
+@examples[#:eval ev
+(define coefs-min (coef cvfit #:lambda 'lambda-min))
+(define fit (f x))
+(define (g x) (h x))
+(define nonzero (n fit))]"
+                             "examples/p.rkt" "#lang scribble/lp2
+@chunk[<a>
+(define coefficients-min (coef cvfit #:lambda 'lambda-min))
+(define fit (f x))
+(define (k x) (h x))]")
+                  '("p.scrbl:3: `coefs-min` is examples/p.rkt's `coefficients-min`; use the program's name"
+                    "p.scrbl:5: `g` is examples/p.rkt's `k`; use the program's name")))
+
+  (for ([file (in-list files)])
+    (test-case (format "shared names: ~a" file)
+      (check-equal? (page-renamings file) '())))
 
   (for ([file (in-list files)])
     (define hits (file-hits file))
@@ -223,9 +307,6 @@
         (check-true (null? hits))))))
 
 (module+ main
-  (define all-hits
-    (for/list ([file (in-list (checked-files))])
-      (cons file (file-hits file))))
-  (for* ([file+hits (in-list all-hits)]
-         [h (in-list (cdr file+hits))])
-    (displayln (hit->string h))))
+  (for ([file (in-list (checked-files))])
+    (for-each (compose1 displayln hit->string) (file-hits file))
+    (for-each displayln (page-renamings file))))

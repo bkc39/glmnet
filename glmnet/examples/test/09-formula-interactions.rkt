@@ -23,71 +23,53 @@
 
 (module+ test
   (require racket/dict
-           racket/match
            rackunit
            (submod "common.rkt" test))
 
-  (define ((entry model) name)
-    (for/first ([(λ β) (in-path model)]
-                #:unless (zero? (dict-ref β name)))
-      λ))
-
-  (define (sign b)
-    (cond
-      [(zero? b) 'out]
-      [(positive? b) '+]
-      [else '-]))
-
-  (define (runs xs)
-    (for/list ([x (in-list xs)]
-               [previous (in-list (cons #f xs))]
-               #:unless (eq? x previous))
-      x))
-
-  ;; R: 83 λ from 5.146981 down to 0.002503.
   (check-equal? (formula-model-predictor-names path) '("wt" "hp" "wt:hp"))
-  (match-define (vector first-λ λs ... last-λ) (glmnet-path-lambda (formula-model-fit path)))
-  (check-equal? (+ 2 (length λs)) 83)
-  (check-within first-λ 5.146981062830 1e-9)
-  (check-within last-λ 0.002502771825 1e-9)
+  (check-lambda-range path 83 5.146981062830 0.002502771825)
 
-  ;; The interaction enters negative before horsepower, leaves when it enters,
-  ;; and comes back positive at R's fit$lambda[43], 0.1034.
-  (check-true (> ((entry path) "wt:hp") ((entry path) "hp")))
-  (check-equal? (runs (for/list ([(λ β) (in-path path)]) (sign (dict-ref β "wt:hp"))))
-                '(out - out +))
-  (check-within (for/first ([(λ β) (in-path path)]
-                            #:when (positive? (dict-ref β "wt:hp")))
-                  λ)
-                0.103414842150 1e-9)
-  (check-coef (coef path #:lambda 1.0)
-              '(("(Intercept)" . 33.9037235411278) ("wt" . -3.2523144521271)
-                ("hp" . -0.0228348691607798) ("wt:hp" . 0.0)))
-  (check-coef (coef path #:lambda 0.5)
-              '(("(Intercept)" . 35.5656284349261) ("wt" . -3.56514419056097)
-                ("hp" . -0.0273032350257783) ("wt:hp" . 0.0)))
-  (check-coef (coef path #:lambda 0.1)
-              '(("(Intercept)" . 37.3564993170298) ("wt" . -3.97487798000443)
-                ("hp" . -0.0341498399582343) ("wt:hp" . 0.00103286017657962)))
-  (check-coef (coef path #:lambda 0.01)
-              '(("(Intercept)" . 48.4848201592447) ("wt" . -7.76579700746338)
-                ("hp" . -0.11098237778796) ("wt:hp" . 0.0250029001029414)))
-  ;; R: predict(fit, newx = model.matrix(~ wt * hp, new)[, -1], s = 0.5)
-  (check-values (predict path new-cars #:lambda 0.5) '(23.9224444559459 17.6269767628071))
+  (define hp-λ ((entry path) "hp"))
+  (check-true (> ((entry path) "wt:hp") hp-λ) "wt:hp enters before hp")
+  (check-close hp-λ 2.68364019197806 "hp enters at R's fit$lambda[8]")
+  (check-true (negative? (dict-ref (coef path #:lambda hp-λ) "wt:hp"))
+              "wt:hp is negative at R's fit$lambda[8]")
+  (check-close (for/first ([(λ β) (in-path path)]
+                           #:when (and (< λ hp-λ) (zero? (dict-ref β "wt:hp"))))
+                 λ)
+               2.44523299374503
+               "wt:hp leaves at R's fit$lambda[9]")
+  (check-close (for/first ([(λ β) (in-path path)]
+                           #:when (positive? (dict-ref β "wt:hp")))
+                 λ)
+               0.103414842150
+               "wt:hp comes back positive at R's fit$lambda[43]")
+  (check-close (coef path #:lambda 1.0)
+               '(("(Intercept)" . 33.9037235411278) ("wt" . -3.2523144521271)
+                 ("hp" . -0.0228348691607798) ("wt:hp" . 0.0)))
+  (check-close (coef path #:lambda 0.5)
+               '(("(Intercept)" . 35.5656284349261) ("wt" . -3.56514419056097)
+                 ("hp" . -0.0273032350257783) ("wt:hp" . 0.0)))
+  (check-close (coef path #:lambda 0.1)
+               '(("(Intercept)" . 37.3564993170298) ("wt" . -3.97487798000443)
+                 ("hp" . -0.0341498399582343) ("wt:hp" . 0.00103286017657962)))
+  (check-close (coef path #:lambda 0.01)
+               '(("(Intercept)" . 48.4848201592447) ("wt" . -7.76579700746338)
+                 ("hp" . -0.11098237778796) ("wt:hp" . 0.0250029001029414)))
+  (check-close (predict path new-cars #:lambda 0.5) '(23.9224444559459 17.6269767628071)
+               "R's predict(fit, newx, s = 0.5)")
 
   (check-equal? (formula-model-fit infix-path) (formula-model-fit path))
 
-  ;; R: mpg ~ (wt + hp + qsec)^2.
-  (check-coef (coef pairs-path #:lambda 0.5)
-              '(("(Intercept)" . 31.3961639325795) ("wt" . -3.36652169969068) ("hp" . 0.0)
-                ("qsec" . 0.226070506646891) ("wt:hp" . 0.0) ("wt:qsec" . 0.0)
-                ("hp:qsec" . -0.00177957442978985)))
-  (check-coef (coef pairs-path #:lambda 0.1)
-              '(("(Intercept)" . 24.7803556255478) ("wt" . -3.16330770785517) ("hp" . 0.0)
-                ("qsec" . 0.705206335387755) ("wt:hp" . 0.00201708780129361)
-                ("wt:qsec" . -0.0566365769326373) ("hp:qsec" . -0.0019345410205699)))
+  (check-close (coef pairs-path #:lambda 0.5)
+               '(("(Intercept)" . 31.3961639325795) ("wt" . -3.36652169969068) ("hp" . 0.0)
+                 ("qsec" . 0.226070506646891) ("wt:hp" . 0.0) ("wt:qsec" . 0.0)
+                 ("hp:qsec" . -0.00177957442978985)))
+  (check-close (coef pairs-path #:lambda 0.1)
+               '(("(Intercept)" . 24.7803556255478) ("wt" . -3.16330770785517) ("hp" . 0.0)
+                 ("qsec" . 0.705206335387755) ("wt:hp" . 0.00201708780129361)
+                 ("wt:qsec" . -0.0566365769326373) ("hp:qsec" . -0.0019345410205699)))
 
-  ;; Cross-validation on R's folds.
   (define fit (formula-model-fit cv))
   (define (cv-error lam)
     (for/first ([(λ err) (in-parallel (glmnet-cv-lambda fit) (glmnet-cv-cvm fit))]
@@ -97,15 +79,10 @@
   (check-within (glmnet-cv-lambda-1se fit) 0.0447658164589027 1e-9)
   (check-within (cv-error (glmnet-cv-lambda-min fit)) 6.08030633778 1e-6)
   (check-within (cv-error (glmnet-cv-lambda-1se fit)) 6.6098350739 1e-6)
-  (check-coef (coef cv #:lambda 'lambda-min)
-              '(("(Intercept)" . 49.4121805994915) ("wt" . -8.08170825664582)
-                ("hp" . -0.117384962057037) ("wt:hp" . 0.0270003747721069)))
-  (define lambda-1se
-    '(("(Intercept)" . 44.1859978249934) ("wt" . -6.30138140767303)
-      ("hp" . -0.0813023212966243) ("wt:hp" . 0.0157433836058477)))
-  (check-coef (coef cv) lambda-1se)
-  ;; R's coef(cv) at each new car, its predict(cv, newx).
-  (match-define (list (cons _ b₀) (cons _ b-wt) (cons _ b-hp) (cons _ b-wt:hp)) lambda-1se)
-  (check-values predictions
-                (for/list ([hp (in-list '(100 200))] [wt (in-list '(2.5 3.5))])
-                  (+ b₀ (* b-wt wt) (* b-hp hp) (* b-wt:hp wt hp)))))
+  (check-close (coef cv #:lambda 'lambda-min)
+               '(("(Intercept)" . 49.4121805994915) ("wt" . -8.08170825664582)
+                 ("hp" . -0.117384962057037) ("wt:hp" . 0.0270003747721069)))
+  (check-close (coef cv)
+               '(("(Intercept)" . 44.1859978249934) ("wt" . -6.30138140767303)
+                 ("hp" . -0.0813023212966243) ("wt:hp" . 0.0157433836058477)))
+  (check-close predictions '(24.2381580776103 16.8910671629063) "R's predict(cv, newx)"))

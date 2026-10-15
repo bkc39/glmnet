@@ -56,8 +56,9 @@ for the quarter-mile time.
          (only-in polars read-csv))]
 
 @chunk[<provide>
-(provide predictors file mpg rows cars df fits coefficients formula-coefs
-         design from-design first-cars nested matrix dataframe csv)]
+(provide predictors file mpg rows cars df from-table from-rows from-csv from-math from-polars
+         fits coefficients formula-from-table formula-from-csv formula-from-polars
+         formula-coefs design from-design first-cars nested matrix dataframe csv)]
 
 The predictors by name, and the file the table comes from:
 
@@ -76,7 +77,7 @@ are unnamed data:
 
 @chunk[<rows>
 (define mpg (dict-ref mtcars "mpg"))
-(define columns (for/list ([name (in-list predictors)]) (dict-ref mtcars name)))
+(define columns (map (λ (name) (dict-ref mtcars name)) predictors))
 (define rows (apply vector-map vector columns))
 (define from-rows (elnet-path rows mpg))]
 
@@ -106,18 +107,22 @@ The same lasso path from each source, and R's @tt{coef(fit, s = 0.5)}:
 (define fits (list from-table from-rows from-csv from-math from-polars))
 (define coefficients (coef from-table #:lambda 0.5))]
 
-Each source that is named data, the dataset, the CSV file's table and the
-dataframe, fits the same path as a formula model, whose @racket[coef] names
-the coefficients:
+The table, the CSV table and the dataframe name their columns, so each also
+fits the path as a formula model, whose @racket[coef] names the coefficients:
 
 @chunk[<formulas>
-(define (formula-coef data)
-  (coef (formula-path (mpg . ~ . wt + hp + qsec) data) #:lambda 0.5))
-(define formula-coefs (map formula-coef (list mtcars cars df)))]
+(define (formula-fit data)
+  (formula-path (mpg . ~ . wt + hp + qsec) data))
+(define formula-from-table (formula-fit mtcars))
+(define formula-from-csv (formula-fit cars))
+(define formula-from-polars (formula-fit df))
+(define formula-coefs
+  (map (λ (fit) (coef fit #:lambda 0.5))
+       (list formula-from-table formula-from-csv formula-from-polars)))]
 
-Converting to a @tech{design matrix} once checks the data once, for many
-fits, and fits the same path. The design matrix converts back to each source, and @racket[table->csv]
-writes it as CSV:
+Converting to a @tech{design matrix} once checks the data once, for many fits,
+and fits the same path. The design matrix converts back to each source, and
+@racket[table->csv] writes it as CSV:
 
 @chunk[<explicit>
 (define design (table->design-matrix mtcars predictors))

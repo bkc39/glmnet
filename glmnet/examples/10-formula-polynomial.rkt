@@ -36,8 +36,8 @@ The data are R's @tt{mtcars}, which
 
 The quadratic's lasso path. Horsepower enters first, and the square only at
 @math{λ ≈ 0.26}; at @math{λ = 0.01} the coefficients are close to R's
-@tt{lm}, @math{40.4 − 0.213 hp + 0.00042 hp²}. R's @tt{I(hp^2)} is the same
-column, written as R writes it.
+@tt{lm}, @math{40.4 − 0.213 hp + 0.00042 hp²}. R's @tt{I(hp^2)}, written as
+R writes it, gives the same fit.
 
 @chunk[<quadratic>
 (define quadratic (formula-path (mpg . ~ . hp + (sqr hp)) mtcars))

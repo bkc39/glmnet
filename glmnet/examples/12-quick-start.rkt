@@ -56,11 +56,12 @@ start at index 1.
 
 @chunk[<entries>
 (define entries
-  (for*/fold ([entered '()] #:result (reverse entered))
-             ([(λ β) (in-path fit)]
-              [(name b) (in-parallel (design-matrix-column-names x) (in-vector β 1))]
-              #:unless (or (zero? b) (dict-has-key? entered name)))
-    (cons (cons name λ) entered)))]
+  (remove-duplicates
+   (for*/list ([(λ β) (in-path fit)]
+               [(name b) (in-parallel (design-matrix-column-names x) (in-vector β 1))]
+               #:unless (zero? b))
+     (cons name λ))
+   #:key car))]
 
 R's @tt{coef(fit, s = 0.1)}: the intercept and the 20 coefficients at
 @math{λ = 0.1}, which is between two fitted values, so they are interpolated

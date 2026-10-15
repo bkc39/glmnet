@@ -291,11 +291,12 @@ different `α` (`parm`) and `λ`. Each new capability is shipped as one unit:
 7. **Add the user-guide pages.** Add the family to `scribblings/guide/concepts.scrbl`
    (its `@deftech`, response shape, table rows) and convert the example into
    `scribblings/guide/examples/name.scrbl`, included from
-   `guide/examples.scrbl`: the lp2 prose and chunks as live `@examples` that
-   define the same names the program provides, at top level, and show them,
-   with `coef`, `predict` and `deviance-ratio` before any family helper; plus
-   a λ/α sweep and `predict` on new data. The page passes #59's idiom
-   checklist and `tests/docs-idiom-test.rkt`.
+   `guide/examples.scrbl`: the lp2 prose and chunks as live `@examples`, at
+   top level, with `coef`, `predict` and `deviance-ratio` before any family
+   helper; plus a λ/α sweep and `predict` on new data. A value the page
+   shares with the program has the program's name; the page may show a
+   subset of the program and add helpers of its own. The page passes #59's
+   idiom checklist and `tests/docs-idiom-test.rkt`.
 8. **Add the reference entry.** Document the new public procs and result struct
    in `scribblings/reference.scrbl` (contract matching `contract-out` + a live
    example each).
@@ -384,9 +385,11 @@ modules under `scribblings/`, for #59's idioms: a family or path accessor where
 `coef`, `predict` or `deviance-ratio` belongs, a last element by index
 arithmetic, hand rounding, positional access (`car`, `list-ref`,
 `vector-ref`, ...), hand-written output and a page's own copy of `fmt` or
-`coef-line`. A checked file has no hit; a hit names
-file:line, the idiom and the fix. `racket glmnet/tests/docs-idiom-test.rkt`
-prints every hit.
+`coef-line`. It checks the companion tests in `examples/test/` whole, for
+positional access only, and fails a page whose top-level `define` binds an
+expression its program (the `Source:` margin note) binds under another name.
+A checked file has no hit; a hit names file:line, the idiom and the fix.
+`racket glmnet/tests/docs-idiom-test.rkt` prints every hit.
 
 ## Local dev loop
 

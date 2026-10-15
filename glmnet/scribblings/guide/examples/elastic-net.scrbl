@@ -97,11 +97,9 @@ observations @racket[X40] and @racket[y40] of @secref["ex-lasso-cv"]:
 
 @examples[#:eval ev #:label #f
 (define folds (random-fold-ids 40))
-(for* ([α (in-list '(0.0 0.25 0.5 0.75 1.0))]
-       [cv (in-value (elnet-cv X40 y40 #:alpha α #:fold-ids folds))]
-       [(λ err sd) (in-parallel (glmnet-cv-lambda cv) (glmnet-cv-cvm cv) (glmnet-cv-cvsd cv))]
-       #:when (= λ (glmnet-cv-lambda-min cv)))
-  (printf "α = ~a: λ-min = ~a, error = ~a ± ~a\n" α (fmt λ) (fmt err) (fmt sd)))
+(for ([α (in-list '(0.0 0.25 0.5 0.75 1.0))])
+  (define cv (elnet-cv X40 y40 #:alpha α #:fold-ids folds))
+  (printf "α = ~a: ~a\n" α cv))
 ]
 
 Ridge, which keeps every predictor, the irrelevant @math{x₃} among them,

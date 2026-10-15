@@ -24,9 +24,9 @@ columns. The path has R's sequence of @math{λ}, and R's
 @examples[#:eval ev #:label #f
 (require glmnet/datasets)
 (define predictors '("wt" "hp" "qsec"))
-(define fit (elnet-path mtcars "mpg" #:predictors predictors))
-(vector-length (glmnet-path-lambda fit))
-(coef fit #:lambda 0.5)
+(define from-table (elnet-path mtcars "mpg" #:predictors predictors))
+(vector-length (glmnet-path-lambda from-table))
+(coef from-table #:lambda 0.5)
 ]
 
 @section[#:tag "ex-data-sources-nested"]{Lists and vectors}
@@ -36,10 +36,10 @@ unnamed data:
 
 @examples[#:eval ev #:label #f
 (define mpg (dict-ref mtcars "mpg"))
-(define columns (for/list ([name (in-list predictors)]) (dict-ref mtcars name)))
+(define columns (map (λ (name) (dict-ref mtcars name)) predictors))
 (define rows (apply vector-map vector columns))
 (vector-take rows 3)
-(equal? (elnet-path rows mpg) fit)
+(equal? (elnet-path rows mpg) from-table)
 ]
 
 @section[#:tag "ex-data-sources-csv"]{A CSV file}
@@ -50,7 +50,7 @@ unnamed data:
 (require glmnet/data/csv)
 (define file (collection-file-path "mtcars.csv" "glmnet" "datasets"))
 (define cars (csv-file->table file))
-(equal? (elnet-path cars "mpg" #:predictors predictors) fit)
+(equal? (elnet-path cars "mpg" #:predictors predictors) from-table)
 ]
 
 @section[#:tag "ex-data-sources-math"]{A matrix}
@@ -62,7 +62,7 @@ response can be a column matrix:
 (require (only-in math/matrix ->col-matrix matrix-shape vector*->matrix))
 (define M (vector*->matrix rows))
 (matrix-shape M)
-(equal? (elnet-path M (->col-matrix mpg)) fit)
+(equal? (elnet-path M (->col-matrix mpg)) from-table)
 ]
 
 @section[#:tag "ex-data-sources-polars"]{A Polars dataframe}
@@ -72,21 +72,23 @@ Polars reads the file itself, and the predictors leave it in one copy:
 @examples[#:eval ev #:label #f
 (require (only-in polars read-csv))
 (define df (read-csv file))
-(equal? (elnet-path df "mpg" #:predictors predictors) fit)
+(equal? (elnet-path df "mpg" #:predictors predictors) from-table)
 ]
 
 @section[#:tag "ex-data-sources-formulas"]{Formulas}
 
-Each source that is named data, the dataset, the CSV file's table and the
-dataframe, fits the same path as a formula model, whose @racket[coef] names
-the coefficients:
+The table, the CSV table and the dataframe name their columns, so each also
+fits the path as a formula model, whose @racket[coef] names the coefficients:
 
 @examples[#:eval ev #:label #f
-(define (formula-coef data)
-  (coef (formula-path (mpg . ~ . wt + hp + qsec) data) #:lambda 0.5))
-(formula-coef mtcars)
-(equal? (formula-coef cars) (formula-coef mtcars))
-(equal? (formula-coef df) (formula-coef mtcars))
+(define (formula-fit data)
+  (formula-path (mpg . ~ . wt + hp + qsec) data))
+(define formula-from-table (formula-fit mtcars))
+(define formula-from-csv (formula-fit cars))
+(define formula-from-polars (formula-fit df))
+(coef formula-from-table #:lambda 0.5)
+(equal? (coef formula-from-csv #:lambda 0.5) (coef formula-from-table #:lambda 0.5))
+(equal? (coef formula-from-polars #:lambda 0.5) (coef formula-from-table #:lambda 0.5))
 ]
 
 @section[#:tag "ex-data-sources-explicit"]{A design matrix, and back}
@@ -97,7 +99,7 @@ Converting to a @tech{design matrix} once checks the data once, for many fits
 @examples[#:eval ev #:label #f
 (require glmnet/data/nested glmnet/data/math glmnet/data/polars)
 (define design (table->design-matrix mtcars predictors))
-(equal? (elnet-path design mpg) fit)
+(equal? (elnet-path design mpg) from-table)
 ]
 
 The design matrix converts back to each source, and @racket[table->csv] writes
