@@ -68,9 +68,7 @@
     ("scribblings/guide/examples/quick-start.scrbl"
      (path-accessor . 1) (hand-rounding . 1) (positional-access . 1))
     ("scribblings/guide/examples/ridge.scrbl"
-     (family-accessor . 2) (path-accessor . 2) (hand-rounding . 6))
-    ("scribblings/guide/formulas.scrbl" (positional-access . 3))
-    ("scribblings/guide/plots.scrbl" (positional-access . 5))))
+     (family-accessor . 2) (path-accessor . 2) (hand-rounding . 6))))
 
 ;; Forms whose body is block code shown to the reader.
 (define code-heads
