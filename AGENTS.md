@@ -246,9 +246,12 @@ another R call with a meaning of its own, adds:
 The four core models (OLS, ridge, lasso, elastic net) are one `elnet` call with
 different `α` (`parm`) and `λ`. Each new capability is shipped as one unit:
 
-1. **Add the example.** `glmnet/examples/NN-name.rkt`, `#lang scribble/lp2`,
-   exporting `run-example`. Write the prose first (the model, its math, the
-   expected result), then `@chunk` code. It won't run yet — it *is* the spec.
+1. **Add the example.** `glmnet/examples/NN-name.rkt`, `#lang scribble/lp2`.
+   Its chunks define the data and results at module level, and a `<provide>`
+   chunk provides them (programs 04–11 and 13 still export a `run-example`
+   until their pages are rewritten). Write the prose first (the model, its
+   math, the expected result), then `@chunk` code. It won't run yet — it *is*
+   the spec.
 2. **Add the Fortran C-API.** Extend `fortran/glmnet_capi.f90` with a
    `bind(C)` entry mapping clean C args -> the internal `elnet` call (set
    `ka`/`jd`/`vp`/`cl`/`flmin`/`ulam`, uncompress `ca`/`ia` -> dense `beta`).
@@ -279,9 +282,11 @@ different `α` (`parm`) and `λ`. Each new capability is shipped as one unit:
 5. **Test the Racket binding.** `glmnet/tests/*-test.rkt` rackunit: round-trip vs
    closed-form / known values, `jerr` error surfacing, shape-mismatch contract
    errors.
-6. **Verify the example end to end.** Wire `glmnet/examples/test/NN-name.rkt`
-   (`module+ main` runner + `module+ test` asserting the documented result);
-   `raco test` passes; `racket glmnet/examples/test/NN-name.rkt` prints it.
+6. **Verify the example end to end.** Wire `glmnet/examples/test/NN-name.rkt`:
+   it requires the program's provided names, its `module+ main` prints them
+   (a model prints itself), and its `module+ test` asserts the documented
+   result; `raco test` passes; `racket glmnet/examples/test/NN-name.rkt`
+   prints it.
 7. **Add the user-guide pages.** Add the family to `scribblings/guide/concepts.scrbl`
    (its `@deftech`, response shape, table rows) and convert the example into
    `scribblings/guide/examples/name.scrbl`, included from

@@ -6,24 +6,19 @@
 @section[#:tag "ex-elastic-net"]{Elastic net (@math{0 < α < 1})}
 
 The @deftech{elastic net} blends the two penalties: with @math{0 < α < 1} the
-objective mixes the lasso's L1 term and the ridge's L2 term. It keeps the lasso's
-ability to select variables while borrowing the ridge's stability --- in
+objective mixes the lasso's L1 term with the ridge's L2 term. It keeps the
+lasso's ability to select predictors and borrows the ridge's stability. In
 particular it tends to keep or drop @emph{groups} of correlated predictors
-together, where the pure lasso would arbitrarily pick one. Setting @math{α = 0}
-recovers @secref["ex-ridge"] exactly and @math{α = 1} recovers
-@secref["ex-lasso"]; the interesting models live in between.
-
-On the running fixture, an @math{α = 0.5} fit at a moderate @math{λ} both shrinks
-its coefficients (ridge-like) and drives at least one exactly to zero
-(lasso-like). At a shared @math{λ}, the number of coefficients it zeros sits
-between ridge (which zeros none) and lasso (which zeros the most) --- the
-characteristic in-between behaviour of the blend.
+together, where the lasso would pick one of them arbitrarily. @math{α = 0}
+recovers @secref["ex-ridge"] and @math{α = 1} recovers @secref["ex-lasso"].
 
 @chunk[<require>
 (require glmnet)]
 
 @chunk[<provide>
-(provide run-example)]
+(provide X y fit zero-counts)]
+
+The running fixture again, with the irrelevant @math{x₃ = x₁²}:
 
 @chunk[<data>
 (define X '((1.0 2.0  1.0)
@@ -34,20 +29,29 @@ characteristic in-between behaviour of the blend.
             (6.0 5.0 36.0)))
 (define y '(1.0 4.0 3.0 6.0 5.0 8.0))]
 
-@racket[elastic-net] takes an explicit @racket[#:alpha]. Compare its fit to the
-@racket[ridge] and @racket[lasso] fits at the same @math{λ} to see it land
-between them.
+@racket[elastic-net] takes an explicit @racket[#:alpha]. The fit both shrinks
+its coefficients, as ridge does, and sets one exactly to zero, as the lasso
+does.
 
 @chunk[<fit>
-(define result (elastic-net X y #:alpha 0.5 #:lambda 0.5))]
+(define fit (elastic-net X y #:alpha 0.5 #:lambda 0.5))]
 
-@chunk[<run-example>
-(define (run-example)
-  <data>
-  <fit>
-  result)]
+At a shared @math{λ}, the number of coefficients the elastic net zeroes lies
+between ridge, which zeroes none, and the lasso, which zeroes the most.
+@racket[coef] gives the intercept first, so the coefficients start at index 1:
+
+@chunk[<zeros>
+(define (zeros model)
+  (for/sum ([b (in-vector (coef model) 1)] #:when (zero? b))
+    1))
+(define zero-counts
+  (map zeros (list (ridge X y #:lambda 0.5)
+                   fit
+                   (lasso X y #:lambda 0.5))))]
 
 @chunk[<*>
   <require>
   <provide>
-  <run-example>]
+  <data>
+  <fit>
+  <zeros>]

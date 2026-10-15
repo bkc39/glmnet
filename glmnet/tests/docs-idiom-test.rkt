@@ -53,22 +53,13 @@
     ("scribblings/guide/examples/cox.scrbl"
      (family-accessor . 1) (path-accessor . 2) (hand-rounding . 6))
     ("scribblings/guide/examples/data-sources.scrbl" (positional-access . 3))
-    ("scribblings/guide/examples/elastic-net.scrbl"
-     (family-accessor . 5) (hand-rounding . 10) (positional-access . 5))
     ("scribblings/guide/examples/formula-polynomial.scrbl" (last-by-index . 1))
-    ("scribblings/guide/examples/lasso.scrbl"
-     (family-accessor . 3) (path-accessor . 2) (hand-rounding . 8) (positional-access . 2))
     ("scribblings/guide/examples/logistic.scrbl"
      (family-accessor . 2) (path-accessor . 2) (hand-rounding . 7))
     ("scribblings/guide/examples/mgaussian.scrbl"
      (family-accessor . 7) (hand-rounding . 8) (positional-access . 4))
     ("scribblings/guide/examples/multinomial.scrbl" (family-accessor . 2))
-    ("scribblings/guide/examples/ols.scrbl" (family-accessor . 1))
-    ("scribblings/guide/examples/poisson.scrbl" (family-accessor . 2))
-    ("scribblings/guide/examples/quick-start.scrbl"
-     (path-accessor . 1) (hand-rounding . 1) (positional-access . 1))
-    ("scribblings/guide/examples/ridge.scrbl"
-     (family-accessor . 2) (path-accessor . 2) (hand-rounding . 6))))
+    ("scribblings/guide/examples/poisson.scrbl" (family-accessor . 2))))
 
 ;; Forms whose body is block code shown to the reader.
 (define code-heads

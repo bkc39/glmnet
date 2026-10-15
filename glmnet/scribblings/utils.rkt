@@ -67,6 +67,7 @@
                                   plot
                                   plot/utils))
          make-glmnet-eval
+         noisy-fixture
          see-reference
          exnraise)
 
@@ -78,6 +79,23 @@
                  [sandbox-security-guard current-security-guard]
                  [sandbox-path-permissions '((exists "/"))])
     (make-base-eval #:lang 'racket '(require glmnet))))
+
+;; The 40 noisy observations the lasso, elastic-net and plots pages
+;; cross-validate, as `@examples` with the given options (`#:label #f` shows
+;; them, `#:hidden` does not). They are evaluated in the page's evaluator, not
+;; required from a module, because the random folds drawn after them continue
+;; the same generator.
+(define-syntax-parse-rule (noisy-fixture ev:expr option ...)
+  (examples #:eval ev option ...
+   (random-seed 3)
+   (define (uniform a b) (+ a (* (- b a) (random))))
+   (define-values (x₁ x₂)
+     (for/lists (x₁ x₂) ([_ (in-range 40)])
+       (values (uniform 0 6) (uniform 0 6))))
+   (define X40 (map list x₁ x₂ (map sqr x₁)))
+   (define y40
+     (for/list ([a (in-list x₁)] [b (in-list x₂)])
+       (+ 1.0 (* 2 a) (- b) (uniform -1 1))))))
 
 ;; "the @exnraise[exn:fail:contract]" => "the `exn:fail:contract` exception is
 ;; raised", after mz.rkt.

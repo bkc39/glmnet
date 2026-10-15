@@ -51,21 +51,29 @@ each coefficient against @math{−log λ}:
 ]
 
 Each curve leaves zero where its predictor enters the model. The largest
-@math{λ} at which each coefficient is nonzero gives the order of entry:
+@math{λ} at which each coefficient is nonzero gives the order of entry.
+@racket[in-path] walks the path from the largest @math{λ}, giving the
+coefficients as @racket[coef] does, the intercept first, so column @racket[j]
+of @racket[x] is at index @racket[(+ j 1)]:
 
 @examples[#:eval ev #:label #f
 (define (entry-lambda j)
-  (for/first ([beta (in-vector (glmnet-path-coefficients fit))]
-              [lam (in-vector (glmnet-path-lambda fit))]
-              #:unless (zero? (vector-ref beta j)))
-    lam))
+  (for/first ([(λ β) (in-path fit)]
+              #:unless (zero? (vector-ref β j)))
+    λ))
 (define entries
   (sort (for/list ([name (in-list (design-matrix-column-names x))]
-                   [j (in-naturals)])
+                   [j (in-naturals 1)])
           (cons name (entry-lambda j)))
         > #:key cdr))
-(for/list ([entry (in-list entries)])
-  (cons (car entry) (/ (round (* 1000 (cdr entry))) 1000)))
+]
+
+@racket[entries] is an association list, from each name to the @math{λ}
+at which it enters:
+
+@examples[#:eval ev #:label #f
+(string-join (dict-keys entries))
+(take entries 6)
 ]
 
 @tt{V1} and @tt{V14} enter first, at @math{λ ≈ 1.49}, then @tt{V5} and

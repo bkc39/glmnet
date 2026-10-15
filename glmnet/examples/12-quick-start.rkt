@@ -25,7 +25,8 @@ loads as R's @tt{data(QuickStartExample)} does. R's
          glmnet/datasets)]
 
 @chunk[<provide>
-(provide run-example)]
+(provide x y fit path-plot coefficients first-five predictions
+         fold-ids cvfit cv-plot lambda-min coefficients-min predictions-min)]
 
 @chunk[<data>
 (define-values (x y) (quick-start-example))]
@@ -77,18 +78,12 @@ R's @tt{cvfit$lambda.min}, @tt{coef(cvfit, s = "lambda.min")} and
 (define coefficients-min (coef cvfit #:lambda 'lambda-min))
 (define predictions-min (predict cvfit first-five #:lambda 'lambda-min))]
 
-@chunk[<run-example>
-(define (run-example)
+@chunk[<*>
+  <require>
+  <provide>
   <data>
   <fit>
   <plot>
   <coef>
   <cv>
-  <lambda-min>
-  (values fit path-plot coefficients predictions
-          cvfit cv-plot lambda-min coefficients-min predictions-min))]
-
-@chunk[<*>
-  <require>
-  <provide>
-  <run-example>]
+  <lambda-min>]

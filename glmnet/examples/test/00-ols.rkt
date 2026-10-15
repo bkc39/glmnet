@@ -6,16 +6,17 @@
          "../00-ols.rkt")
 
 (module+ main
-  (define r (run-example))
-  (printf "intercept    = ~a\n" (elnet-result-intercept r))
-  (printf "coefficients = ~a\n" (elnet-result-coefficients r))
-  (printf "R^2          = ~a\n" (elnet-result-r-squared r))
-  (printf "lambda       = ~a\n" (elnet-result-lambda r)))
+  (println fit)
+  (println (coef fit))
+  (println fitted))
 
 (module+ test
-  (require rackunit)
-  (define r (run-example))
-  (check-= (elnet-result-intercept r) 1.0 1e-4)
-  (check-= (vector-ref (elnet-result-coefficients r) 0) 2.0 1e-4)
-  (check-= (vector-ref (elnet-result-coefficients r) 1) -1.0 1e-4)
-  (check-= (elnet-result-r-squared r) 1.0 1e-6))
+  (require racket/match
+           rackunit)
+  (match-define (vector a0 b1 b2) (coef fit))
+  (check-= a0 1.0 1e-4)
+  (check-= b1 2.0 1e-4)
+  (check-= b2 -1.0 1e-4)
+  (check-= (deviance-ratio fit) 1.0 1e-6)
+  (for ([fitted-value (in-list fitted)] [observed (in-list y)])
+    (check-= fitted-value observed 1e-4)))

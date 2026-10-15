@@ -194,20 +194,11 @@ response's count):
 
 @section[#:tag "plot-cv"]{Cross-validation curves}
 
-The lasso example cross-validates 40 observations of the fixture's model,
-with noise added to @math{y} (see @secref["ex-lasso-cv"]):
+The lasso example cross-validates @racket[X40] and @racket[y40], 40
+observations of the fixture's model with noise added to @math{y} (see
+@secref["ex-lasso-cv"]).
 
-@examples[#:eval ev #:label #f
-(random-seed 3)
-(define (uniform a b) (+ a (* (- b a) (random))))
-(define-values (x₁ x₂)
-  (for/lists (x₁ x₂) ([_ (in-range 40)])
-    (values (uniform 0 6) (uniform 0 6))))
-(define X40 (map list x₁ x₂ (map sqr x₁)))
-(define y40
-  (for/list ([a (in-list x₁)] [b (in-list x₂)])
-    (+ 1.0 (* 2 a) (- b) (uniform -1 1))))
-]
+@noisy-fixture[ev #:hidden]
 
 @racket[plot-cv] plots the result of @racket[elnet-cv] as R's
 @tt{plot(cvfit)} does:

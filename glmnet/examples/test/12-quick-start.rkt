@@ -10,32 +10,28 @@
 ;;   cvfit$lambda.min; coef(cvfit, s = "lambda.min")
 ;;   predict(cvfit, newx = x[1:5, ], s = "lambda.min")
 
-(require racket/list
-         racket/string
-         glmnet
-         (only-in pict pict? pict-width pict-height)
+(require glmnet
+         (only-in pict pict-height pict-width)
          "../12-quick-start.rkt")
 
 (module+ main
-  (define-values (fit path-plot coefficients predictions
-                      cvfit cv-plot lambda-min coefficients-min predictions-min)
-    (run-example))
-  (displayln fit)
-  (printf "path plot         = ~ax~a pict\n" (pict-width path-plot) (pict-height path-plot))
-  (printf "coef, λ = 0.1     = ~a\n" coefficients)
-  (printf "predict, λ = 0.1  = ~a\n" (first predictions))
-  (printf "predict, λ = 0.05 = ~a\n" (second predictions))
-  (displayln cvfit)
-  (printf "cv plot           = ~ax~a pict\n" (pict-width cv-plot) (pict-height cv-plot))
-  (printf "lambda-min        = ~a\n" lambda-min)
-  (printf "coef, lambda-min  = ~a\n" coefficients-min)
-  (printf "predict           = ~a\n" predictions-min))
+  (println fit)
+  (printf "path plot: ~ax~a pict\n" (pict-width path-plot) (pict-height path-plot))
+  (println coefficients)
+  (println predictions)
+  (println cvfit)
+  (printf "cv plot: ~ax~a pict\n" (pict-width cv-plot) (pict-height cv-plot))
+  (println lambda-min)
+  (println coefficients-min)
+  (println predictions-min))
 
 (module+ test
-  (require rackunit)
-  (define-values (fit path-plot coefficients predictions
-                      cvfit cv-plot lambda-min coefficients-min predictions-min)
-    (run-example))
+  (require racket/dict
+           racket/list
+           racket/match
+           racket/string
+           rackunit
+           (only-in pict pict?))
 
   ;; Six significant digits: a tolerance relative to R's value, with a floor
   ;; for a coefficient that is zero.
@@ -45,38 +41,40 @@
     (for ([g (in-list got)] [e (in-list expected)])
       (check-within g e (digits e))))
 
-  ;; R: 67 λ from 1.630762 down to 0.003513, 91.32% of the deviance at the end.
+  ;; R: 67 λ from 1.630762 down to 0.003513, 91.32% of the deviance at the
+  ;; end; index 66 is R's fit$lambda[67].
   (define lambdas (glmnet-path-lambda fit))
   (check-equal? (vector-length lambdas) 67)
   (check-within (vector-ref lambdas 0) 1.63076208204452 1e-9)
   (check-within (vector-ref lambdas 66) 0.00351337040074534 1e-12)
-  (check-within (vector-ref (glmnet-path-dev-ratio fit) 66) 0.913176465748194 1e-6)
+  (check-within (vector-ref (deviance-ratio fit) 66) 0.913176465748194 1e-6)
   (check-equal? (vector->list (glmnet-path-df fit))
                 '(0 2 2 2 2 2 4 5 5 6 6 6 6 6 7 7 7 7 7 7 7 7 8 8 8 8 8 8 8 8 9 9 9 9 10 11 11
                   12 15 16 16 16 17 17 18 18 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 20 20
                   20 20 20 20))
 
   ;; R's print(fit), from its header on.
-  (check-equal? (take (cdr (string-split (format "~a" fit) "\n")) 4)
+  (check-equal? (take (rest (string-split (format "~a" fit) "\n")) 4)
                 '("   Df  %Dev  Lambda"
                   "1   0  0.00 1.63100"
                   "2   2  5.53 1.48600"
                   "3   2 14.59 1.35400"))
 
   ;; R: the order in which the predictors enter, by the first λ at which each
-  ;; coefficient is nonzero, ties in column order.
-  (define entry-order
-    (let ([columns (for/list ([j (in-range 20)])
-                     (cons (format "V~a" (add1 j))
-                           (for/first ([beta (in-vector (glmnet-path-coefficients fit))]
-                                       [lam (in-vector lambdas)]
-                                       #:unless (zero? (vector-ref beta j)))
-                             lam)))])
-      (map car (sort columns > #:key cdr))))
-  (check-equal? entry-order
+  ;; coefficient is nonzero, ties in column order. coef's index 0 is the
+  ;; intercept, so column j of x is index j + 1.
+  (define (entry-lambda j)
+    (for/first ([(λ β) (in-path fit)]
+                #:unless (zero? (vector-ref β j)))
+      λ))
+  (define entries
+    (sort (for/list ([name (in-list (design-matrix-column-names x))]
+                     [j (in-naturals 1)])
+            (cons name (entry-lambda j)))
+          > #:key cdr))
+  (check-equal? (dict-keys entries)
                 '("V1" "V14" "V5" "V20" "V6" "V3" "V8" "V11" "V7" "V10" "V15" "V13" "V2"
                   "V12" "V18" "V4" "V16" "V17" "V9" "V19"))
-  (check-equal? (length (drop entry-order 6)) 14)
 
   (check-pred pict? path-plot)
   (check-pred pict? cv-plot)
@@ -86,15 +84,16 @@
                   -0.81741151754896735 0.52143667145873451 0.00482933514861668
                   0.31941591671556846 0.0 0.0 0.14249851856673512 0.0 0.0
                   -1.05997870191922949 0.0 0.0 0.0 0.0 0.0 -1.02187370368307984))
-  (check-values (first predictions)
+  (match-define (list predictions-0.1 predictions-0.05) predictions)
+  (check-values predictions-0.1
                 '(-1.366760695877866 2.562379220607292 0.565026939440315 1.922395960000677
                   1.446774332126730))
-  (check-values (second predictions)
+  (check-values predictions-0.05
                 '(-1.336265196924598 2.589424524770468 0.587286847997336 2.097722192283847
                   1.643627992490082))
 
   ;; R: lambda.min is the 35th λ, with 10 nonzero coefficients, and
-  ;; lambda.1se the 28th, with 8.
+  ;; lambda.1se the 28th, with 8; indices 34 and 27 here.
   (check-within lambda-min 0.0689688891531137 1e-12)
   (check-within (glmnet-cv-lambda-1se cvfit) 0.132276140242909 1e-12)
   (check-equal? (glmnet-cv-index-min cvfit) 34)
