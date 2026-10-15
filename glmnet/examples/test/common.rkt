@@ -19,14 +19,14 @@
         (fail-check "the deviance ratio is not in (0, 1]"))))
 
   (define (close? got expected)
-    (<= (abs (- got expected)) (max (* 1e-6 (abs expected)) 1e-12)))
+    (and (rational? expected)
+         (<= (abs (- got expected)) (max (* 1e-6 (abs expected)) 1e-12))))
 
   (define (difference got expected position)
     (define (pairwise gs es)
       (for/or ([g (in-list gs)] [e (in-list es)] [i (in-naturals)])
         (difference g e i)))
     (match* (got expected)
-      [((or (vector) '()) _) (list position got expected)]
       [(_ _) #:when (equal? got expected) #f]
       [((? real?) (? real?)) #:when (close? got expected) #f]
       [((? vector?) (? vector?)) #:when (= (vector-length got) (vector-length expected))
@@ -38,9 +38,10 @@
       [(_ _) (list position got expected)]))
 
   (define (fail-unless-close got expected)
-    (match (difference got expected #f)
-      [#f (void)]
-      [(list position g e)
+    (match* (got (difference got expected #f))
+      [((or (vector) '()) _) (fail-check "an empty value checks nothing")]
+      [(_ #f) (void)]
+      [(_ (list position g e))
        (with-check-info (['position position] ['got g] ['expected e])
          (fail-check "not equal to six significant digits"))]))
 

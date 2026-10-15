@@ -42,6 +42,15 @@
     (check-true (fails? (λ () (check-close #() #()))) "two empty vectors")
     (check-true (fails? (λ () (check-close '() '()))) "two empty lists"))
 
+  (test-case "check-close passes an inner empty value as it does any other"
+    (check-close #(1.0 #()) #(1.0 #()))
+    (check-close #(1.0000001 #()) #(1.0 #())))
+
+  (test-case "check-close has no tolerance for an infinite expected value"
+    (check-close +inf.0 +inf.0)
+    (check-true (fails? (λ () (check-close -inf.0 +inf.0))))
+    (check-true (fails? (λ () (check-close 1.0 +inf.0)))))
+
   (test-case "check-close passes equal non-numbers"
     (check-close '("setosa") '("setosa"))
     (check-close '((a . 1.0)) '((a . 1.0)))

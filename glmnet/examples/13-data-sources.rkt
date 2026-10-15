@@ -57,7 +57,7 @@ for the quarter-mile time.
 
 @chunk[<provide>
 (provide predictors file mpg rows cars df from-table from-rows from-csv from-math from-polars
-         fits coefficients formula-from-table formula-from-csv formula-from-polars
+         coefficients formula-from-table formula-from-csv formula-from-polars
          formula-coefs design from-design first-cars nested matrix dataframe csv)]
 
 The predictors by name, and the file the table comes from:
@@ -101,10 +101,9 @@ one copy:
 (define df (read-csv file))
 (define from-polars (elnet-path df "mpg" #:predictors predictors))]
 
-The same lasso path from each source, and R's @tt{coef(fit, s = 0.5)}:
+R's @tt{coef(fit, s = 0.5)}:
 
-@chunk[<fits>
-(define fits (list from-table from-rows from-csv from-math from-polars))
+@chunk[<coefficients>
 (define coefficients (coef from-table #:lambda 0.5))]
 
 The table, the CSV table and the dataframe name their columns, so each also
@@ -142,6 +141,6 @@ and fits the same path. The design matrix converts back to each source, and
   <csv>
   <math>
   <polars>
-  <fits>
+  <coefficients>
   <formulas>
   <explicit>]

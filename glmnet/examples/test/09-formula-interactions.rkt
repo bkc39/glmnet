@@ -30,20 +30,31 @@
   (check-lambda-range path 83 5.146981062830 0.002502771825)
 
   (define hp-λ ((entry path) "hp"))
-  (check-true (> ((entry path) "wt:hp") hp-λ) "wt:hp enters before hp")
+  (define wt:hp-λ ((entry path) "wt:hp"))
+  (define leave-λ
+    (for/first ([(λ β) (in-path path)]
+                #:when (and (< λ hp-λ) (zero? (dict-ref β "wt:hp"))))
+      λ))
+  (define return-λ
+    (for/first ([(λ β) (in-path path)]
+                #:when (positive? (dict-ref β "wt:hp")))
+      λ))
+  (check-true (> wt:hp-λ hp-λ) "wt:hp enters before hp")
   (check-close hp-λ 2.68364019197806 "hp enters at R's fit$lambda[8]")
-  (check-true (negative? (dict-ref (coef path #:lambda hp-λ) "wt:hp"))
-              "wt:hp is negative at R's fit$lambda[8]")
-  (check-close (for/first ([(λ β) (in-path path)]
-                           #:when (and (< λ hp-λ) (zero? (dict-ref β "wt:hp"))))
-                 λ)
-               2.44523299374503
-               "wt:hp leaves at R's fit$lambda[9]")
-  (check-close (for/first ([(λ β) (in-path path)]
-                           #:when (positive? (dict-ref β "wt:hp")))
-                 λ)
-               0.103414842150
-               "wt:hp comes back positive at R's fit$lambda[43]")
+  (check-close leave-λ 2.44523299374503 "wt:hp leaves at R's fit$lambda[9]")
+  (check-close return-λ 0.103414842150 "wt:hp comes back positive at R's fit$lambda[43]")
+  (check-true (for/and ([(λ β) (in-path path)]
+                        #:when (and (< leave-λ λ) (<= λ wt:hp-λ)))
+                (negative? (dict-ref β "wt:hp")))
+              "wt:hp is negative from its entry to R's fit$lambda[8]")
+  (check-true (for/and ([(λ β) (in-path path)]
+                        #:when (< return-λ λ leave-λ))
+                (zero? (dict-ref β "wt:hp")))
+              "wt:hp is out strictly between R's fit$lambda[9] and fit$lambda[43]")
+  (check-true (for/and ([(λ β) (in-path path)]
+                        #:when (<= λ return-λ))
+                (positive? (dict-ref β "wt:hp")))
+              "wt:hp is positive from R's fit$lambda[43] on")
   (check-close (coef path #:lambda 1.0)
                '(("(Intercept)" . 33.9037235411278) ("wt" . -3.2523144521271)
                  ("hp" . -0.0228348691607798) ("wt:hp" . 0.0)))

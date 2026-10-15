@@ -10,7 +10,7 @@
          "../13-data-sources.rkt")
 
 (module+ main
-  (for ([fit (in-list fits)])
+  (for ([fit (in-list (list from-table from-rows from-csv from-math from-polars from-design))])
     (println fit))
   (println coefficients)
   (println formula-coefs)
@@ -26,7 +26,6 @@
            rackunit
            (submod "common.rkt" test))
 
-  (check-equal? fits (list from-table from-rows from-csv from-math from-polars))
   (for ([(source fit) (in-dict (list (cons 'rows from-rows)
                                      (cons 'csv from-csv)
                                      (cons 'math from-math)

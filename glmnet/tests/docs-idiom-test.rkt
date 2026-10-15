@@ -20,7 +20,7 @@
 
 (define positional-access
   (idiom 'positional-access
-         (pregexp (format "\\((?:~a)\\s|\\(cdr\\s+\\(ass(?:oc|q|v|f)\\s|\\((?:map|curryr?)\\s+(?:cdr|~a)[\\s)]"
+         (pregexp (format "\\((?:~a)[\\s(]|\\(cdr\\s*\\(ass(?:oc|q|v|f)\\s|\\((?:map|curryr?)\\s+(?:cdr|~a)[\\s)]"
                           positional-names positional-names))
          "destructure with match-define, read a key with dict-ref, or iterate a sequence"))
 
@@ -152,23 +152,32 @@
     [(list 'define (? symbol? name) rhs) (binding name rhs (syntax-line stx))]
     [(list 'define (cons (? symbol? name) formals) body ...)
      (binding name `(λ ,formals ,@body) (syntax-line stx))]
+    [(list (or 'match-define 'define-values) pattern rhs) (binding pattern rhs (syntax-line stx))]
     [_ #f]))
 
 (define (renamings page-file page program-file program)
   (for*/list ([shown (in-list (block-bindings page-file page '(examples)))]
               [defined (in-list (block-bindings program-file program '(chunk CHUNK)))]
               #:when (and (equal? (binding-rhs shown) (binding-rhs defined))
-                          (not (eq? (binding-name shown) (binding-name defined)))))
+                          (not (equal? (binding-name shown) (binding-name defined)))))
     (format "~a:~a: `~a` is ~a's `~a`; use the program's name" page-file (binding-line shown)
             (binding-name shown) program-file (binding-name defined))))
 
+(define (example-page? file)
+  (regexp-match? #rx"^scribblings/guide/examples/[^/]+[.]scrbl$" file))
+
+(define (source-program page)
+  (match (regexp-match #rx"@margin-note{Source: @filepath{glmnet/([^}]+)}}" page)
+    [(list _ program-file) program-file]
+    [#f #f]))
+
 (define (page-renamings page-file)
   (define page (file->string (build-path collection-dir page-file)))
-  (match (regexp-match #rx"@margin-note{Source: @filepath{glmnet/([^}]+)}}" page)
-    [(list _ program-file)
+  (match (source-program page)
+    [#f '()]
+    [program-file
      (renamings page-file page program-file
-                (file->string (build-path collection-dir program-file)))]
-    [#f '()]))
+                (file->string (build-path collection-dir program-file)))]))
 
 (module+ test
   (require rackunit)
@@ -228,7 +237,9 @@
 (curryr vector-ref 1) (map second rows) (cdr (assv 1 t))]"))
                   '("(cddr " "(caar " "(cdar " "(seventh " "(matrix-ref " "(array-ref "
                     "(sequence-ref " "(map vector-ref " "(curryr vector-ref " "(map second "
-                    "(cdr (assv ")))
+                    "(cdr (assv "))
+    (check-equal? (map hit-text (source-hits "t.scrbl" "@examples[(car(f x)) (cdr(assoc k t)) (second(g y))]"))
+                  '("(car(" "(cdr(assoc " "(second(")))
 
   (test-case "a test program is scanned whole, for positional access only"
     (check-equal? (map hit-text (test-source-hits "t.rkt" "#lang racket/base
@@ -278,6 +289,7 @@
     (check-not-false (member "scribblings/guide/concepts.scrbl" files))
     (check-not-false (member "examples/04-logistic.rkt" files))
     (check-not-false (member "scribblings/utils.rkt" files))
+    (check-not-false (member "scribblings/guide/examples/ols.scrbl" files))
     (check-false (member "scribblings/reference.scrbl" files))
     (check-not-false (member "examples/test/04-logistic.rkt" files)))
 
@@ -295,6 +307,32 @@
 (define (k x) (h x))]")
                   '("p.scrbl:3: `coefs-min` is examples/p.rkt's `coefficients-min`; use the program's name"
                     "p.scrbl:5: `g` is examples/p.rkt's `k`; use the program's name")))
+
+  (test-case "a page destructuring a program's value into other names hits"
+    (check-equal? (renamings "p.scrbl" "#lang scribble/manual
+@examples[#:eval ev
+(match-define (list a b) (split x))
+(define-values (q r) (quotient/remainder n 3))
+(match-define (vector _ β ...) (coef fit))]"
+                             "examples/p.rkt" "#lang scribble/lp2
+@chunk[<a>
+(match-define (list lo hi) (split x))
+(define-values (quo rem) (quotient/remainder n 3))
+(match-define (vector _ β ...) (coef fit))]")
+                  '("p.scrbl:3: `(list a b)` is examples/p.rkt's `(list lo hi)`; use the program's name"
+                    "p.scrbl:4: `(q r)` is examples/p.rkt's `(quo rem)`; use the program's name")))
+
+  (test-case "an example page's source note names its program"
+    (check-equal? (source-program "@margin-note{Source: @filepath{glmnet/examples/00-ols.rkt}}")
+                  "examples/00-ols.rkt")
+    (check-false (source-program "@margin-note{Source: glmnet/examples/00-ols.rkt}"))
+    (check-true (example-page? "scribblings/guide/examples/ols.scrbl"))
+    (check-false (example-page? "scribblings/guide/concepts.scrbl")))
+
+  (for ([file (in-list files)]
+        #:when (example-page? file))
+    (test-case (format "source note: ~a" file)
+      (check-not-false (source-program (file->string (build-path collection-dir file))))))
 
   (for ([file (in-list files)])
     (test-case (format "shared names: ~a" file)
