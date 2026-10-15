@@ -45,7 +45,15 @@ resolves that ambiguity with the penalty, which prefers the smallest
 coefficients, so the class-0 and class-1 weights on @math{x₁} come out
 nearly equal and opposite rather than, say, zero and twice as large. The
 penalty does not touch the intercepts, which have the same freedom; as R does,
-the bindings centre them to sum to zero.
+the bindings centre them to sum to zero. To three decimals, the @math{x₁}
+weights of classes 0 and 1, and the sum of the three intercepts:
+
+@examples[#:eval ev #:label #f
+(match-define (vector (vector b₀ w₀ _) (vector b₁ w₁ _) (vector b₂ _ _))
+  (coef fit))
+(fmt (list w₀ w₁))
+(fmt (+ b₀ b₁ b₂))
+]
 
 @section[#:tag "ex-multinomial-predict"]{Predicting}
 

@@ -13,13 +13,13 @@
 
 (module+ test
   (require racket/match
-           rackunit)
+           rackunit
+           "common.rkt")
   (match-define (vector _ β₁ β₂ β₃) (coef fit))
   (check-equal? β₃ 0.0 "lasso logistic zeros the noise coefficient")
   (check-true (positive? β₁) "x₁ has positive log-odds weight")
   (check-true (negative? β₂) "x₂ has negative log-odds weight")
-  (check-true (< 0.0 (deviance-ratio fit)))
-  (check-true (<= (deviance-ratio fit) 1.0))
+  (check-deviance-ratio fit)
   (for ([p (in-list probabilities)] [class (in-list y)])
     (check-equal? (> p 0.5) (= class 1) "low for class 0, high for class 1"))
   (check-equal? labels y "every training point correct"))

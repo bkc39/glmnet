@@ -49,8 +49,8 @@ Exponentiating a coefficient gives an @emph{odds ratio}, the factor by which
 one more unit of the predictor multiplies the odds of class 1:
 
 @examples[#:eval ev #:label #f
-(for/list ([b (in-vector (coef fit) 1)])
-  (exp b))
+(match-define (vector _ β ...) (coef fit))
+(map exp β)
 ]
 
 @racket[deviance-ratio] is the fraction of null deviance explained, the
@@ -98,14 +98,10 @@ first (@secref["concepts-path"]). @racket[in-path] walks it, giving each
 @math{λ}, all shown to three decimals:
 
 @examples[#:eval ev #:label #f
-(define (~r3 x) (~r x #:precision '(= 3)))
-(define (coef-line coefs)
-  (match-define (vector β₀ β ...) coefs)
-  (format "β₀ = ~a, β = ~a" (~r3 β₀) (map ~r3 β)))
 (define path (logistic-path X y #:lambda '(0.0 0.001 0.01 0.04 0.1 0.3)))
 (for ([(λ coefs) (in-path path)]
       [dev (in-vector (deviance-ratio path))])
-  (printf "λ = ~a: ~a, dev-ratio = ~a\n" λ (coef-line coefs) (~r3 dev)))
+  (printf "λ = ~a: ~a, dev-ratio = ~a\n" λ (coef-line coefs) (fmt dev)))
 ]
 
 At @math{λ = 0} the solver returns large coefficients, the noise predictor among
@@ -116,7 +112,7 @@ a single fit starts from zero and returns different ones:
 
 @examples[#:eval ev #:label #f
 (define unpenalized (logistic-fit X y #:lambda 0.0))
-(coef-line (coef unpenalized))
+(displayln (coef-line (coef unpenalized)))
 ]
 
 Even a small penalty removes the noise and keeps the coefficients finite. On

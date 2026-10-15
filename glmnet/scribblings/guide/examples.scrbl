@@ -15,6 +15,13 @@ The small fixtures of the model sections are chosen so that the right answer is
 known in advance: a response built from some predictors plus a column of pure
 noise, which a good fit should leave out. Where a section prints a sweep over
 @math{λ}, it rounds the numbers to three decimal places so the rows line up.
+Every section's evaluator starts with two helpers: @racket[fmt] rounds a number,
+or each number in a sequence, to three decimals unless given the number of
+digits, and @racket[coef-line] shows coefficients as @racket[coef] gives them,
+the intercept @math{β₀} first and then @math{β}, or with
+@racket[#:intercept? #f] only @math{β}:
+
+@page-helpers-block
 The Quick Start uses R glmnet's @tt{QuickStartExample}, and the formula and
 data-source sections R's @tt{mtcars} and @tt{iris}; their numbers are R's.
 

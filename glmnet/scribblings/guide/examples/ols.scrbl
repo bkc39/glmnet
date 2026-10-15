@@ -38,12 +38,8 @@ the @math{R²}, here to ten:
 @examples[#:eval ev #:label #f
 (define fit (ols X y))
 fit
-(define (~r5 x) (~r x #:precision '(= 5)))
-(define (coef-line coefs)
-  (match-define (vector β₀ β ...) coefs)
-  (format "β₀ = ~a, β = ~a" (~r5 β₀) (map ~r5 β)))
-(displayln (coef-line (coef fit)))
-(~r (deviance-ratio fit) #:precision '(= 10))
+(displayln (coef-line (coef fit) 5))
+(fmt (deviance-ratio fit) 10)
 ]
 
 The intercept and coefficients match the generating equation to about five
@@ -53,7 +49,7 @@ because coordinate descent stops once a pass changes the objective by less than
 
 @examples[#:eval ev #:label #f
 (define tight (ols X y #:thresh 1e-14))
-(displayln (coef-line (coef tight)))
+(displayln (coef-line (coef tight) 5))
 (map elnet-result-num-passes (list fit tight))
 ]
 
@@ -65,14 +61,14 @@ rows, whose fitted values reproduce @racket[y] to the same five decimal
 places:
 
 @examples[#:eval ev #:label #f
-(map ~r5 (predict fit X))
+(fmt (predict fit X) 5)
 ]
 
 @racket[elnet-predict] is the same computation under the Gaussian family's own
 name. On new rows the fit extrapolates the plane it found:
 
 @examples[#:eval ev #:label #f
-(map ~r5 (elnet-predict fit '((6.0 5.0) (0.0 0.0))))
+(fmt (elnet-predict fit '((6.0 5.0) (0.0 0.0))) 5)
 ]
 
 @section[#:tag "ex-ols-when"]{When to use it}

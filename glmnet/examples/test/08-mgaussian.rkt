@@ -12,7 +12,8 @@
 
 (module+ test
   (require racket/match
-           rackunit)
+           rackunit
+           "common.rkt")
   (match-define (vector (vector _ up-x₁ x₂-in-y₁)
                         (vector _ down-x₁ x₂-in-y₂))
     (coef fit))
@@ -20,8 +21,7 @@
   (check-true (negative? down-x₁) "x₁ lowers response 2")
   (check-equal? x₂-in-y₁ 0.0 "x₂ dropped from response 1")
   (check-equal? x₂-in-y₂ 0.0 "x₂ dropped from response 2")
-  (check-true (< 0.0 (deviance-ratio fit)))
-  (check-true (<= (deviance-ratio fit) 1.0))
+  (check-deviance-ratio fit)
   (for* ([(predicted observed) (in-parallel predictions Y)]
          [(ŷ y) (in-parallel predicted observed)])
     (check-= ŷ y 0.5 "the predictions track Y")))

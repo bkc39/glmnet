@@ -57,7 +57,9 @@ second without one:
 @examples[#:eval ev #:label #f
 (define Y2
   (map (match-lambda
-         [(list x₁ x₂) (list (+ 1 (* 2 x₁) (* 0.5 x₂)) (- 10 x₁))])
+         [(list x₁ x₂)
+          (define y₁ (+ 1 (* 2 x₁) (* 0.5 x₂)))
+          (list y₁ (- 10 x₁))])
        X))
 ]
 
@@ -67,28 +69,23 @@ small coefficient where it does not belong. Each fit's coefficients are shown
 to three decimals, the intercept @math{β₀} first and then @math{β}:
 
 @examples[#:eval ev #:label #f
-(define (~r3 x) (~r x #:precision '(= 3)))
-(define (coef-line coefs)
-  (match-define (vector β₀ β ...) coefs)
-  (format "β₀ = ~a, β = ~a" (~r3 β₀) (map ~r3 β)))
+(define (show-coefs coefs)
+  (for-each (compose displayln coef-line) (sequence->list coefs)))
 (match-define (list y₁ y₂) (apply map list Y2))
 (define separate (list (lasso X y₁ #:lambda 0.05) (lasso X y₂ #:lambda 0.05)))
-(for ([coefs (in-list (map coef separate))])
-  (displayln (coef-line coefs)))
+(show-coefs (map coef separate))
 ]
 
 @examples[#:eval ev #:label #f
 (define grouped (mgaussian-fit X Y2 #:lambda 0.05))
-(for ([coefs (in-vector (coef grouped))])
-  (displayln (coef-line coefs)))
+(show-coefs (coef grouped))
 ]
 
 Raise @math{λ} and the grouped fit drops @math{x₂} from both responses at once:
 
 @examples[#:eval ev #:label #f
 (define grouped-0.2 (mgaussian-fit X Y2 #:lambda 0.2))
-(for ([coefs (in-vector (coef grouped-0.2))])
-  (displayln (coef-line coefs)))
+(show-coefs (coef grouped-0.2))
 ]
 
 @section[#:tag "ex-mgaussian-when"]{When to use it}

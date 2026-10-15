@@ -36,10 +36,6 @@ three decimals:
 
 @examples[#:eval ev #:label #f
 (define fit (lasso X y #:lambda 0.05))
-(define (~r3 x) (~r x #:precision '(= 3)))
-(define (coef-line coefs)
-  (match-define (vector β₀ β ...) coefs)
-  (format "β₀ = ~a, β = ~a" (~r3 β₀) (map ~r3 β)))
 (displayln (coef-line (coef fit)))
 ]
 
@@ -70,7 +66,7 @@ time:
 (define path (elnet-path X y #:lambda '(0.01 0.05 0.2 0.5 1.0 2.5)))
 (for ([(λ coefs) (in-path path)]
       [r² (in-vector (deviance-ratio path))])
-  (printf "λ = ~a: ~a, R² = ~a\n" λ (coef-line coefs) (~r3 r²)))
+  (printf "λ = ~a: ~a, R² = ~a\n" λ (coef-line coefs) (fmt r²)))
 ]
 
 At @math{λ = 0.01} all three predictors are in (the noise just barely);

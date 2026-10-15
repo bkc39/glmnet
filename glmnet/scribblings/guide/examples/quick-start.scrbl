@@ -73,9 +73,8 @@ at which it enters, here shown to two decimals:
 
 @examples[#:eval ev #:label #f
 (string-join (dict-keys entries))
-(define (~r2 x) (~r x #:precision '(= 2)))
 (for ([(name λ) (in-dict (take entries 6))])
-  (printf "~a: λ = ~a\n" name (~r2 λ)))
+  (printf "~a: λ = ~a\n" name (fmt λ 2)))
 ]
 
 @tt{V1} and @tt{V14} enter first, at @math{λ ≈ 1.49}, then @tt{V5} and
@@ -112,14 +111,22 @@ R prints them as a sparse column, with the names and a dot for each zero.
 The nonzero ones, by name:
 
 @examples[#:eval ev #:label #f
-(for/list ([name (in-list (cons "(Intercept)" (design-matrix-column-names x)))]
-           [b (in-vector (coef fit #:lambda 0.1))]
-           #:unless (zero? b))
-  (cons name b))
+(define nonzero
+  (for/list ([name (in-list (cons "(Intercept)" (design-matrix-column-names x)))]
+             [b (in-vector (coef fit #:lambda 0.1))]
+             #:unless (zero? b))
+    (cons name b)))
+nonzero
 ]
 
 Nine predictors are in the model at @math{λ = 0.1}. @tt{V7} has only just
-entered, at @math{λ ≈ 0.1001}, and its coefficient is @math{0.0048}.
+entered, at @math{λ ≈ 0.1001}, and its coefficient is @math{0.0048}, both
+shown to four decimals:
+
+@examples[#:eval ev #:label #f
+(fmt (dict-ref entries "V7") 4)
+(fmt (dict-ref nonzero "V7") 4)
+]
 
 R's @tt{predict(fit, newx = x[1:5,], s = c(0.1, 0.05))} predicts the first
 five observations at two values of @math{λ}. The vignette draws random new
@@ -176,12 +183,17 @@ model's @racket[coef] and @racket[predict] take @racket['lambda-min] and
 
 @examples[#:eval ev #:label #f
 (glmnet-cv-lambda-min cvfit)
-(coef cvfit #:lambda 'lambda-min)
+(define coefs-min (coef cvfit #:lambda 'lambda-min))
+coefs-min
 (predict cvfit first-five #:lambda 'lambda-min)
 ]
 
-At @tech{lambda-min}, @tt{V10} has joined the nine predictors of
-@math{λ = 0.1}, with a coefficient of @math{0.0012}.
+At @tech{lambda-min}, @tt{V10}, at index 10, has joined the nine predictors of
+@math{λ = 0.1}, with a coefficient of @math{0.0012} to four decimals:
+
+@examples[#:eval ev #:label #f
+(fmt (vector-ref coefs-min 10) 4)
+]
 
 @section[#:tag "ex-quick-start-r"]{Matching R}
 

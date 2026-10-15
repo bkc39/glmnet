@@ -77,12 +77,11 @@ with its coefficients, and @racket[deviance-ratio] gives the deviance ratio at
 each @math{λ}, all shown to three decimals:
 
 @examples[#:eval ev #:label #f
-(define (~r3 x) (~r x #:precision '(= 3)))
 (define path (cox-path X times statuses #:lambda '(0.01 0.1 0.5 1.0)))
 (for ([(λ β) (in-path path)]
       [dev (in-vector (deviance-ratio path))])
-  (printf "λ = ~a: β = ~a, dev-ratio = ~a\n"
-          λ (map ~r3 (vector->list β)) (~r3 dev)))
+  (printf "λ = ~a: ~a, dev-ratio = ~a\n"
+          λ (coef-line β #:intercept? #f) (fmt dev)))
 ]
 
 With eight subjects and five events, a small penalty lets the noise predictor

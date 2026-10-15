@@ -31,14 +31,19 @@ fit
 (coef fit)
 ]
 
-After the intercept, @math{β₁} is close to the @racket[0.3] the counts were
-built around, and the noise coefficient is exactly @racket[0.0]. The
-coefficients are on the log scale; exponentiated, @math{β₁} is a
+The noise coefficient is exactly @racket[0.0]. To three decimals, @math{β₁}
+is close to the @racket[0.3] the counts were built around:
+
+@examples[#:eval ev #:label #f
+(match-define (vector _ β₁ _) (coef fit))
+(fmt β₁)
+]
+
+The coefficients are on the log scale; exponentiated, @math{β₁} is a
 @emph{rate ratio}, the factor by which one more unit of @math{x₁} multiplies the
 expected count:
 
 @examples[#:eval ev #:label #f
-(match-define (vector _ β₁ _) (coef fit))
 (exp β₁)
 ]
 

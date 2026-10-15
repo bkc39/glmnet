@@ -39,7 +39,10 @@
           "destructure with match-define, read a key with dict-ref, or iterate a sequence")
    (idiom 'hand-written-output
           #px"\\(code:comment\\s+\"\\s*=>"
-          "evaluate it: an @examples block, or a chunk whose value the companion test checks")))
+          "evaluate it: an @examples block, or a chunk whose value the companion test checks")
+   (idiom 'page-helper
+          #px"\\(define\\s+\\(?(?:fmt|coef-line|~r\\d+)(?=[\\s()])"
+          "use the evaluator's fmt and coef-line, defined once in scribblings/utils.rkt")))
 
 ;; The hits each file, relative to the collection, may still have, by idiom.
 ;; A count must equal the file's hits exactly, so it only goes down; a file
@@ -198,7 +201,13 @@
                     (2 positional-access "(map\n cadr ")
                     (4 hand-written-output "(code:comment\n \"=>")
                     (5 hand-rounding "(/ (round (* x 1000")
-                    (5 hand-rounding "(/ (round (* (f x) 100"))))
+                    (5 hand-rounding "(/ (round (* (f x) 100")))
+    (check-equal? (hit-texts "@examples[(define (~r3 x) (~r x #:precision '(= 3)))
+(define (coef-line coefs)\n  coefs)\n(define (fmt x [digits 3]) x) (define ~r5 values)]")
+                  '((1 page-helper "(define (~r3")
+                    (2 page-helper "(define (coef-line")
+                    (4 page-helper "(define (fmt")
+                    (4 page-helper "(define ~r5"))))
 
   (test-case "CRLF line ends give the same hits"
     (check-equal? (hit-texts "@examples[\r\n(f x)\r\n(car row)]\r\n@examples[(second r)]")
@@ -213,7 +222,8 @@
 (scar x) (map cars xs) (rounded-up 1) (first-rows p 3) (/ (round (* 0.5 x)) 2)
 (code:comment \"the result => 3\")
 (glmnet-path-lambda p) (glmnet-path-df p) (glmnet-path? p) (my-glmnet-path-dev-ratio p)
-(/ ss (sub1 (length y))) (vector-ref v (sub1 k)) (for/last ([r (in-vector v)]) r) (last xs)]")
+(/ ss (sub1 (length y))) (vector-ref v (sub1 k)) (for/last ([r (in-vector v)]) r) (last xs)
+(fmt x 4) (coef-line β #:intercept? #f) (define (fmt-row r) r) (define (show-coefs cs) cs)]")
                   '()))
 
   (test-case "a helper module's example templates are block code"

@@ -69,9 +69,25 @@
                                   plot
                                   plot/utils))
          make-glmnet-eval
+         page-helpers-block
          noisy-fixture
          see-reference
          exnraise)
+
+(define-syntax-parse-rule (define-page-helpers forms:id block:id form:expr ...)
+  (begin
+    (define forms '(form ...))
+    (define block (racketblock form ...))))
+
+(define-page-helpers page-helpers page-helpers-block
+  (define (fmt x [digits 3])
+    (cond
+      [(real? x) (~r x #:precision (list '= digits))]
+      [else (for/list ([v x]) (fmt v digits))]))
+  (define (coef-line coefs [digits 3] #:intercept? [intercept? #t])
+    (match* (intercept? coefs)
+      [(#t (vector β₀ β ...)) (format "β₀ = ~a, β = ~a" (fmt β₀ digits) (fmt β digits))]
+      [(#f β) (format "β = ~a" (fmt β digits))])))
 
 (define (make-glmnet-eval)
   (parameterize ([sandbox-output 'string]
@@ -80,7 +96,7 @@
                  [sandbox-eval-limits #f]
                  [sandbox-security-guard current-security-guard]
                  [sandbox-path-permissions '((exists "/"))])
-    (make-base-eval #:lang 'racket '(require glmnet))))
+    (apply make-base-eval #:lang 'racket '(require glmnet) page-helpers)))
 
 (begin-for-syntax
   (define-splicing-syntax-class fixture-option
