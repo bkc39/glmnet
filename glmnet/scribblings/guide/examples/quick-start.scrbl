@@ -125,7 +125,7 @@ rows, which Racket cannot reproduce, so the new rows here are the first five
 of @racket[x]; @racket[design-matrix-select-rows] counts rows from 0:
 
 @examples[#:eval ev #:label #f
-(define first-five (design-matrix-select-rows x '(0 1 2 3 4)))
+(define first-five (design-matrix-select-rows x (range 5)))
 (predict fit first-five #:lambda '(0.1 0.05))
 ]
 
@@ -141,7 +141,7 @@ same folds as @tt{foldid <- rep(1:10, length.out = 100)}, counted from 1, and
 with them @tt{cv.glmnet(x, y, foldid = foldid)} gives the numbers below:
 
 @examples[#:eval ev #:label #f
-(define fold-ids (for/list ([i (in-range (length y))]) (modulo i 10)))
+(define fold-ids (build-list (length y) (λ (i) (modulo i 10))))
 (take fold-ids 12)
 (define cvfit (elnet-cv x y #:fold-ids fold-ids))
 cvfit

@@ -6,6 +6,7 @@
 
 (module+ test
   (require rackunit
+           syntax/macro-testing
            "../scribblings/utils.rkt")
 
   (test-case "the examples' evaluator has racket and glmnet"
@@ -14,4 +15,13 @@
                          (match-define (vector _ slope) (coef (ols '((1.0) (2.0) (3.0))
                                                                    '(2.0 4.0 6.0))))
                          (~r slope #:precision 3)))
-                  "2")))
+                  "2"))
+
+  (test-case "noisy-fixture defines the 40 noisy observations in the page's evaluator"
+    (define ev (make-glmnet-eval))
+    (noisy-fixture ev #:hidden)
+    (check-equal? (ev '(map length (list X40 y40))) '(40 40)))
+
+  (test-case "noisy-fixture rejects an option examples does not take"
+    (check-exn #rx"noisy-fixture: expected one of these literals: #:label or #:hidden"
+               (λ () (convert-compile-time-error (noisy-fixture ev #:bogus))))))

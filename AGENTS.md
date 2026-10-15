@@ -51,8 +51,9 @@ glmnet/                        Racket collection
   main.rkt                     public API (require glmnet)
   plot.rkt                     glmnet/plot: R's plot.glmnet / plot.cv.glmnet on plot-lib
                                (picts); not re-exported by main.rkt
-  examples/NN-*.rkt            #lang scribble/lp2 literate examples (run-example)
-  examples/test/NN-*.rkt       companion runners + rackunit harnesses
+  examples/NN-*.rkt            #lang scribble/lp2 literate examples; a <provide> chunk
+                               provides their data and results
+  examples/test/NN-*.rkt       companion runners + rackunit harnesses over those names
   scribblings/glmnet.scrbl     manual root: guide.scrbl (guide/*.scrbl) + reference.scrbl;
                                the plots are guide/plots.scrbl and reference's ref-plot
   scribblings/utils.rkt        for-label imports + make-glmnet-eval for live examples
@@ -248,10 +249,8 @@ different `α` (`parm`) and `λ`. Each new capability is shipped as one unit:
 
 1. **Add the example.** `glmnet/examples/NN-name.rkt`, `#lang scribble/lp2`.
    Its chunks define the data and results at module level, and a `<provide>`
-   chunk provides them (programs 04–11 and 13 still export a `run-example`
-   until their pages are rewritten). Write the prose first (the model, its
-   math, the expected result), then `@chunk` code. It won't run yet — it *is*
-   the spec.
+   chunk provides them. Write the prose first (the model, its math, the
+   expected result), then `@chunk` code. It won't run yet — it *is* the spec.
 2. **Add the Fortran C-API.** Extend `fortran/glmnet_capi.f90` with a
    `bind(C)` entry mapping clean C args -> the internal `elnet` call (set
    `ka`/`jd`/`vp`/`cl`/`flmin`/`ulam`, uncompress `ca`/`ia` -> dense `beta`).
@@ -285,8 +284,8 @@ different `α` (`parm`) and `λ`. Each new capability is shipped as one unit:
 6. **Verify the example end to end.** Wire `glmnet/examples/test/NN-name.rkt`:
    it requires the program's provided names, its `module+ main` prints them
    (a model prints itself), and its `module+ test` asserts the documented
-   result; `raco test` passes; `racket glmnet/examples/test/NN-name.rkt`
-   prints it.
+   result on them, never on a copy of the program's code; `raco test` passes;
+   `racket glmnet/examples/test/NN-name.rkt` prints it.
 7. **Add the user-guide pages.** Add the family to `scribblings/guide/concepts.scrbl`
    (its `@deftech`, response shape, table rows) and convert the example into
    `scribblings/guide/examples/name.scrbl`, included from
@@ -352,7 +351,13 @@ glmnet required; never paste output by hand. A `require` in an example says
 where a binding comes from (`glmnet/plot`, `glmnet/datasets`, `glmnet/data/*`,
 `polars`, `math/matrix`), never fetches what `racket` provides; the lp2
 programs stay `racket/base` modules with explicit requires. Use
-`eval:error` for expected failures. Each `@deftech` is defined once, in
+`eval:error` for expected failures. Where prose says a shown number is zero,
+equal to another, or right to some decimals, the example shows it through
+`~r` at that precision, one formatter per page, not as a raw float.
+`noisy-fixture` (`scribblings/utils.rkt`) evaluates the 40 noisy observations
+the lasso, elastic-net and plots pages cross-validate in the page's own
+evaluator, shown or `#:hidden`, because the random folds drawn after it
+continue the same generator. Each `@deftech` is defined once, in
 `guide/concepts.scrbl`. Every `@section` gets an explicit `#:tag`; the `ex-*`
 tags name the example pages and stay stable. An example section changes when
 its `glmnet/examples/NN-*.rkt` changes. `tests/docs-coverage-test.rkt` fails,
@@ -367,7 +372,8 @@ something includes it.
 
 Resyntax reads neither `.scrbl` files nor lp2 programs, so
 `tests/docs-idiom-test.rkt` checks their block code (examples, racketblock,
-chunk; not the reference) for #59's idioms: a family or path accessor where
+chunk; not the reference), and the `examples` templates of the helper
+modules under `scribblings/`, for #59's idioms: a family or path accessor where
 `coef`, `predict` or `deviance-ratio` belongs, a last element by index
 arithmetic, hand rounding, positional access and hand-written output. A hit
 names file:line, the idiom and the fix. `allowed-hits` counts, per file and

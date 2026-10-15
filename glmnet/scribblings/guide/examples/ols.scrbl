@@ -31,14 +31,19 @@ design matrix is a list of rows, and the response the matching list:
 @section[#:tag "ex-ols-fit"]{Fitting}
 
 @racket[ols] is @racket[elnet-fit] with @racket[#:lambda 0.0]. The fit prints
-as a summary; @racket[coef] gives the intercept and then the coefficients, and
-@racket[deviance-ratio] the @math{R²}:
+as a summary; @racket[coef] gives the intercept @math{β₀} and then the
+coefficients @math{β}, here shown to five decimals, and @racket[deviance-ratio]
+the @math{R²}, here to ten:
 
 @examples[#:eval ev #:label #f
 (define fit (ols X y))
 fit
-(coef fit)
-(deviance-ratio fit)
+(define (~r5 x) (~r x #:precision '(= 5)))
+(define (coef-line coefs)
+  (match-define (vector β₀ β ...) coefs)
+  (format "β₀ = ~a, β = ~a" (~r5 β₀) (map ~r5 β)))
+(displayln (coef-line (coef fit)))
+(~r (deviance-ratio fit) #:precision '(= 10))
 ]
 
 The intercept and coefficients match the generating equation to about five
@@ -48,7 +53,7 @@ because coordinate descent stops once a pass changes the objective by less than
 
 @examples[#:eval ev #:label #f
 (define tight (ols X y #:thresh 1e-14))
-(coef tight)
+(displayln (coef-line (coef tight)))
 (map elnet-result-num-passes (list fit tight))
 ]
 
@@ -60,14 +65,14 @@ rows, whose fitted values reproduce @racket[y] to the same five decimal
 places:
 
 @examples[#:eval ev #:label #f
-(predict fit X)
+(map ~r5 (predict fit X))
 ]
 
 @racket[elnet-predict] is the same computation under the Gaussian family's own
 name. On new rows the fit extrapolates the plane it found:
 
 @examples[#:eval ev #:label #f
-(elnet-predict fit '((6.0 5.0) (0.0 0.0)))
+(map ~r5 (elnet-predict fit '((6.0 5.0) (0.0 0.0))))
 ]
 
 @section[#:tag "ex-ols-when"]{When to use it}

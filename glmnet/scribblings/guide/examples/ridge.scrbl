@@ -50,19 +50,20 @@ it. That is the characteristic ridge behaviour: shrink, never select.
 list of @math{λ} in one call, largest first (@secref["concepts-path"]), and
 traces how the coefficients shrink. @racket[in-path] walks it, giving each
 @math{λ} with its coefficients as @racket[coef] gives them, the intercept
-first:
+@math{β₀} first and then @math{β}, shown to three decimals:
 
 @examples[#:eval ev #:label #f
+(define (~r3 x) (~r x #:precision '(= 3)))
+(define (coef-line coefs)
+  (match-define (vector β₀ β ...) coefs)
+  (format "β₀ = ~a, β = ~a" (~r3 β₀) (map ~r3 β)))
 (define path (elnet-path X y #:alpha 0.0 #:lambda '(0.01 0.1 1.0 10.0 100.0)))
-(for ([(λ β) (in-path path)])
-  (printf "λ = ~a: β = ~a\n"
-          λ
-          (for/list ([b (in-vector β)])
-            (~r b #:precision '(= 3)))))
+(for ([(λ coefs) (in-path path)])
+  (printf "λ = ~a: ~a\n" λ (coef-line coefs)))
 ]
 
-Read upward, as @math{λ} grows, every coefficient after the intercept heads
-toward zero and none reaches it, while the intercept heads toward the mean of
+Read upward, as @math{λ} grows, every coefficient in @math{β} heads toward
+zero and none reaches it, while the intercept heads toward the mean of
 @racket[y], which is @racket[4.5]. Along the way the
 coefficient on @math{x₂} changes sign. As @math{λ} grows, each ridge coefficient
 approaches a scaled-down copy of its predictor's covariance with the response,

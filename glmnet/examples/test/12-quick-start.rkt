@@ -17,6 +17,7 @@
 (module+ main
   (println fit)
   (printf "path plot: ~ax~a pict\n" (pict-width path-plot) (pict-height path-plot))
+  (println entries)
   (println coefficients)
   (println predictions)
   (println cvfit)
@@ -33,8 +34,6 @@
            rackunit
            (only-in pict pict?))
 
-  ;; Six significant digits: a tolerance relative to R's value, with a floor
-  ;; for a coefficient that is zero.
   (define (digits e) (max (* 1e-6 (abs e)) 1e-12))
   (define (check-values got expected)
     (check-equal? (length got) (length expected))
@@ -53,25 +52,13 @@
                   12 15 16 16 16 17 17 18 18 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 20 20
                   20 20 20 20))
 
-  ;; R's print(fit), from its header on.
   (check-equal? (take (rest (string-split (format "~a" fit) "\n")) 4)
                 '("   Df  %Dev  Lambda"
                   "1   0  0.00 1.63100"
                   "2   2  5.53 1.48600"
                   "3   2 14.59 1.35400"))
 
-  ;; R: the order in which the predictors enter, by the first λ at which each
-  ;; coefficient is nonzero, ties in column order. coef's index 0 is the
-  ;; intercept, so column j of x is index j + 1.
-  (define (entry-lambda j)
-    (for/first ([(λ β) (in-path fit)]
-                #:unless (zero? (vector-ref β j)))
-      λ))
-  (define entries
-    (sort (for/list ([name (in-list (design-matrix-column-names x))]
-                     [j (in-naturals 1)])
-            (cons name (entry-lambda j)))
-          > #:key cdr))
+  ;; R: the order in which the predictors enter, ties in column order.
   (check-equal? (dict-keys entries)
                 '("V1" "V14" "V5" "V20" "V6" "V3" "V8" "V11" "V7" "V10" "V15" "V13" "V2"
                   "V12" "V18" "V4" "V16" "V17" "V9" "V19"))

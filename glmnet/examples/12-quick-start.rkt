@@ -20,12 +20,13 @@ loads as R's @tt{data(QuickStartExample)} does. R's
 @tt{x <- QuickStartExample$x; y <- QuickStartExample$y} is one call:
 
 @chunk[<require>
-(require glmnet
+(require racket/list
+         glmnet
          glmnet/plot
          glmnet/datasets)]
 
 @chunk[<provide>
-(provide x y fit path-plot coefficients first-five predictions
+(provide x y fit path-plot entries coefficients first-five predictions
          fold-ids cvfit cv-plot lambda-min coefficients-min predictions-min)]
 
 @chunk[<data>
@@ -45,6 +46,22 @@ nonzero coefficients, the percentage of deviance explained and @math{λ}.
 @chunk[<plot>
 (define path-plot (plot-coefficient-path fit))]
 
+Each curve leaves zero where its predictor enters the model. @racket[entries]
+maps each column name to the largest @math{λ} at which its coefficient is
+nonzero, in order of entry. @racket[in-path] gives the intercept first, so
+column @racket[j] of @racket[x] is at index @racket[(+ j 1)].
+
+@chunk[<entries>
+(define (entry-lambda j)
+  (for/first ([(λ β) (in-path fit)]
+              #:unless (zero? (vector-ref β j)))
+    λ))
+(define entries
+  (sort (for/list ([name (in-list (design-matrix-column-names x))]
+                   [j (in-naturals 1)])
+          (cons name (entry-lambda j)))
+        > #:key cdr))]
+
 R's @tt{coef(fit, s = 0.1)}: the intercept and the 20 coefficients at
 @math{λ = 0.1}, which is between two fitted values, so they are interpolated
 as R interpolates them. Eleven are zero. R's
@@ -53,7 +70,7 @@ observations at two values of @math{λ}.
 
 @chunk[<coef>
 (define coefficients (coef fit #:lambda 0.1))
-(define first-five (design-matrix-select-rows x '(0 1 2 3 4)))
+(define first-five (design-matrix-select-rows x (range 5)))
 (define predictions (predict fit first-five #:lambda '(0.1 0.05)))]
 
 R's @tt{cv.glmnet(x, y)} assigns each observation to one of ten folds at
@@ -66,7 +83,7 @@ R's @tt{cv.glmnet(x, y, foldid = foldid)} and @racket[elnet-cv] agree:
 coefficients, and @tt{lambda.1se} is @math{0.1323}, with eight.
 
 @chunk[<cv>
-(define fold-ids (for/list ([i (in-range (length y))]) (modulo i 10)))
+(define fold-ids (build-list (length y) (λ (i) (modulo i 10))))
 (define cvfit (elnet-cv x y #:fold-ids fold-ids))
 (define cv-plot (plot-cv cvfit))]
 
@@ -84,6 +101,7 @@ R's @tt{cvfit$lambda.min}, @tt{coef(cvfit, s = "lambda.min")} and
   <data>
   <fit>
   <plot>
+  <entries>
   <coef>
   <cv>
   <lambda-min>]

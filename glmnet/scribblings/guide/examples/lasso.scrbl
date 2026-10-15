@@ -56,19 +56,20 @@ kept
 
 @racket[elnet-path] fits a list of @math{λ} in one call, largest first
 (@secref["concepts-path"]). @racket[in-path] walks it, giving each @math{λ}
-with its coefficients, the intercept first, and @racket[deviance-ratio] gives
-the path's @math{R²} at each @math{λ}. Read upward, raising @math{λ} removes
-predictors one at a time:
+with its coefficients, the intercept @math{β₀} first and then @math{β}, and
+@racket[deviance-ratio] gives the path's @math{R²} at each @math{λ}, all shown
+to three decimals. Read upward, raising @math{λ} removes predictors one at a
+time:
 
 @examples[#:eval ev #:label #f
+(define (~r3 x) (~r x #:precision '(= 3)))
+(define (coef-line coefs)
+  (match-define (vector β₀ β ...) coefs)
+  (format "β₀ = ~a, β = ~a" (~r3 β₀) (map ~r3 β)))
 (define path (elnet-path X y #:lambda '(0.01 0.05 0.2 0.5 1.0 2.5)))
-(for ([(λ β) (in-path path)]
+(for ([(λ coefs) (in-path path)]
       [r² (in-vector (deviance-ratio path))])
-  (printf "λ = ~a: β = ~a, R² = ~a\n"
-          λ
-          (for/list ([b (in-vector β)])
-            (~r b #:precision '(= 3)))
-          (~r r² #:precision '(= 3))))
+  (printf "λ = ~a: ~a, R² = ~a\n" λ (coef-line coefs) (~r3 r²)))
 ]
 
 At @math{λ = 0.01} all three predictors are in (the noise just barely);
@@ -111,8 +112,8 @@ reads the coefficients at either λ it chose:
 @examples[#:eval ev #:label #f
 (define cv (elnet-cv X40 y40))
 cv
-(coef cv #:lambda 'lambda-min)
-(coef cv)
+(printf "lambda-min: ~a\n" (coef-line (coef cv #:lambda 'lambda-min)))
+(printf "lambda-1se: ~a\n" (coef-line (coef cv)))
 ]
 
 Both choices keep @math{x₁} and @math{x₂} and drop @math{x₃}. @racket[coef]

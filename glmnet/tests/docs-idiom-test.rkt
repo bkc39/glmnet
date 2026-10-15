@@ -14,6 +14,7 @@
          scribble/reader)
 
 (define-runtime-path tests-dir ".")
+(define lp2-line "#lang scribble/lp2")
 (define collection-dir (simplify-path (build-path tests-dir "..")))
 
 (struct idiom (name pattern fix))
@@ -68,10 +69,20 @@
     racketinput racketinput0 racketresultblock racketresultblock0
     codeblock codeblock0 schemeblock schemeblock0 chunk CHUNK))
 
-;; The [start, end) character offsets of the block code in an @-syntax source.
+;; The [start, end) character offsets of the block code in a source: an
+;; @-syntax page or lp2 program, or a module of documentation helpers, whose
+;; macro templates hold block code.
 (define (code-spans in)
   (port-count-lines! in)
-  (let walk ([stx (read-syntax-inside (object-name in) in)])
+  (define file (object-name in))
+  (define source
+    (cond
+      [(lp2-source? in) (read-syntax-inside file in)]
+      [(path-has-extension? file #".rkt")
+       (parameterize ([read-accept-reader #t] [read-accept-lang #t])
+         (read-syntax file in))]
+      [else (read-syntax-inside file in)]))
+  (let walk ([stx source])
     (define forms (syntax->list stx))
     (match forms
       [#f '()]
@@ -80,6 +91,9 @@
        (define start (sub1 (syntax-position stx)))
        (list (cons start (+ start (syntax-span stx))))]
       [_ (append-map walk forms)])))
+
+(define (lp2-source? in)
+  (equal? (peek-string (string-length lp2-line) 0 in) lp2-line))
 
 (struct hit (file line idiom text))
 
@@ -135,16 +149,19 @@
                file n (idiom-name id) limit n)])))
 
 (define (lp2? path)
-  (equal? (call-with-input-file path read-line) "#lang scribble/lp2"))
+  (call-with-input-file path lp2-source?))
 
 ;; Every checked file, relative to the collection: the .scrbl files under
-;; scribblings/ but the reference, and the lp2 programs in examples/.
+;; scribblings/ but the reference, the helper modules there, and the lp2
+;; programs in examples/.
 (define (checked-files)
   (define (relative path) (path->string (find-relative-path collection-dir path)))
   (define pages
     (for/list ([path (in-directory (build-path collection-dir "scribblings"))]
-               #:when (and (path-has-extension? path #".scrbl")
-                           (not (equal? (file-name-from-path path) (string->path "reference.scrbl")))))
+               #:when (or (path-has-extension? path #".rkt")
+                          (and (path-has-extension? path #".scrbl")
+                               (not (equal? (file-name-from-path path)
+                                            (string->path "reference.scrbl"))))))
       (relative path)))
   (define programs
     (for/list ([path (in-list (directory-list (build-path collection-dir "examples") #:build? #t))]
@@ -158,8 +175,8 @@
 (module+ test
   (require rackunit)
 
-  (define (hit-texts text)
-    (for/list ([h (in-list (source-hits "t.scrbl" text))])
+  (define (hit-texts text [file "t.scrbl"])
+    (for/list ([h (in-list (source-hits file text))])
       (list (hit-line h) (idiom-name (hit-idiom h)) (hit-text h))))
 
   (test-case "each idiom hits in block code"
@@ -212,6 +229,20 @@
 (/ ss (sub1 (length y))) (vector-ref v (sub1 k)) (for/last ([r (in-vector v)]) r) (last xs)]")
                   '()))
 
+  (test-case "a helper module's example templates are block code"
+    (check-equal? (hit-texts "#lang racket/base
+(define (f row) (car row))
+(define-syntax-parse-rule (fixture ev)
+  (examples #:eval ev
+   (define X (car row))))"
+                             "u.rkt")
+                  '((5 positional-access "(car ")))
+    (define planted
+      (string-replace (file->string (build-path collection-dir "scribblings/utils.rkt"))
+                      "(random-seed 3)" "(random-seed 3) (car row)"))
+    (check-equal? (map hit-text (source-hits "scribblings/utils.rkt" planted))
+                  '("(car ")))
+
   (define (h name)
     (hit "f.scrbl" 1 (findf (λ (id) (eq? (idiom-name id) name)) idioms) "x"))
 
@@ -232,6 +263,7 @@
   (test-case "the pages and lp2 programs are found"
     (check-not-false (member "scribblings/guide/concepts.scrbl" files))
     (check-not-false (member "examples/04-logistic.rkt" files))
+    (check-not-false (member "scribblings/utils.rkt" files))
     (check-false (member "scribblings/reference.scrbl" files))
     (check-false (member "examples/test/04-logistic.rkt" files)))
 

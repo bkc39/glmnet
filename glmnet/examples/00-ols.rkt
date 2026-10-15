@@ -13,8 +13,6 @@ first model because its answer can be checked exactly.
 @chunk[<require>
 (require glmnet)]
 
-The program provides its data and its results, which its companion test checks.
-
 @chunk[<provide>
 (provide X y fit fitted)]
 

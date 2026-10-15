@@ -42,26 +42,27 @@ zero, as the lasso does.
 
 At a shared @math{λ}, the number of coefficients the elastic net zeroes lies
 between ridge, which zeroes none, and the lasso, which zeroes the most.
-@racket[coef] gives the intercept first, so the coefficients start at index 1:
+@racket[coef] gives the intercept first, and the count skips it:
 
 @examples[#:eval ev #:label #f
 (define (zeros model)
-  (for/sum ([b (in-vector (coef model) 1)] #:when (zero? b))
-    1))
+  (match-define (vector _ β ...) (coef model))
+  (count zero? β))
 (map zeros (list (ridge X y #:lambda 0.5)
                  fit
                  (lasso X y #:lambda 0.5)))
 ]
 
-Sweeping @math{α} at that @math{λ} moves between the two:
+Sweeping @math{α} at that @math{λ} moves between the two. Each line shows the
+intercept @math{β₀} and then @math{β}, to three decimals:
 
 @examples[#:eval ev #:label #f
+(define (~r3 x) (~r x #:precision '(= 3)))
+(define (coef-line coefs)
+  (match-define (vector β₀ β ...) coefs)
+  (format "β₀ = ~a, β = ~a" (~r3 β₀) (map ~r3 β)))
 (for ([α (in-list '(0.0 0.25 0.5 0.75 1.0))])
-  (define β (coef (elastic-net X y #:alpha α #:lambda 0.5)))
-  (printf "α = ~a: β = ~a\n"
-          α
-          (for/list ([b (in-vector β)])
-            (~r b #:precision '(= 3)))))
+  (printf "α = ~a: ~a\n" α (coef-line (coef (elastic-net X y #:alpha α #:lambda 0.5)))))
 ]
 
 @section[#:tag "ex-elastic-net-grouping"]{Correlated predictors}
@@ -73,13 +74,15 @@ are identical, and drop @math{x₃}:
 @examples[#:eval ev #:label #f
 (define X-dup
   (map (match-lambda [(list x₁ x₂ _) (list x₁ x₁ x₂)]) X))
-(coef (lasso X-dup y #:lambda 0.1))
-(coef (elastic-net X-dup y #:alpha 0.5 #:lambda 0.1))
+(printf "lasso:       ~a\n" (coef-line (coef (lasso X-dup y #:lambda 0.1))))
+(printf "elastic net: ~a\n"
+        (coef-line (coef (elastic-net X-dup y #:alpha 0.5 #:lambda 0.1))))
 ]
 
-The lasso puts all of @math{x₁}'s weight on one copy and leaves the other at
-zero, up to the solver's tolerance; which copy wins is an accident of the
-column order. The elastic net's L2 term makes
+The lasso puts all of @math{x₁}'s weight on one copy and leaves the other
+within rounding of zero, about @racket[1e-14]: the two identical columns tie
+exactly at this @math{λ}, and which copy wins is an accident of the column
+order. The elastic net's L2 term makes
 splitting the weight cheaper than concentrating it, so the two copies get
 almost equal coefficients. On real data the copies are merely correlated, but
 the effect is the same.
@@ -100,9 +103,9 @@ observations @racket[X40] and @racket[y40] of @secref["ex-lasso-cv"]:
   (define best (glmnet-cv-index-min cv))
   (printf "α = ~a: λ-min = ~a, error = ~a ± ~a\n"
           α
-          (~r (glmnet-cv-lambda-min cv) #:precision '(= 3))
-          (~r (vector-ref (glmnet-cv-cvm cv) best) #:precision '(= 3))
-          (~r (vector-ref (glmnet-cv-cvsd cv) best) #:precision '(= 3))))
+          (~r3 (glmnet-cv-lambda-min cv))
+          (~r3 (vector-ref (glmnet-cv-cvm cv) best))
+          (~r3 (vector-ref (glmnet-cv-cvsd cv) best))))
 ]
 
 Ridge, which keeps every predictor, the irrelevant @math{x₃} among them,

@@ -13,10 +13,12 @@ together, where the lasso would pick one of them arbitrarily. @math{α = 0}
 recovers @secref["ex-ridge"] and @math{α = 1} recovers @secref["ex-lasso"].
 
 @chunk[<require>
-(require glmnet)]
+(require racket/list
+         racket/match
+         glmnet)]
 
 @chunk[<provide>
-(provide X y fit zero-counts)]
+(provide X y fit zero-counts X-dup lasso-dup enet-dup)]
 
 The running fixture again, with the irrelevant @math{x₃ = x₁²}:
 
@@ -38,20 +40,35 @@ does.
 
 At a shared @math{λ}, the number of coefficients the elastic net zeroes lies
 between ridge, which zeroes none, and the lasso, which zeroes the most.
-@racket[coef] gives the intercept first, so the coefficients start at index 1:
+@racket[coef] gives the intercept first, and the count skips it:
 
 @chunk[<zeros>
 (define (zeros model)
-  (for/sum ([b (in-vector (coef model) 1)] #:when (zero? b))
-    1))
+  (match-define (vector _ β ...) (coef model))
+  (count zero? β))
 (define zero-counts
   (map zeros (list (ridge X y #:lambda 0.5)
                    fit
                    (lasso X y #:lambda 0.5))))]
+
+The case the elastic net was designed for is a group of predictors that carry
+the same signal. Take the extreme: duplicate @math{x₁}, so the first two
+columns are identical, and drop @math{x₃}. The lasso puts all of
+@math{x₁}'s weight on one copy and leaves the other within rounding of zero,
+because the two identical columns tie exactly; the elastic net's L2 term makes
+splitting the weight cheaper than concentrating it, so the two copies get
+almost equal coefficients.
+
+@chunk[<grouping>
+(define X-dup
+  (map (match-lambda [(list x₁ x₂ _) (list x₁ x₁ x₂)]) X))
+(define lasso-dup (lasso X-dup y #:lambda 0.1))
+(define enet-dup (elastic-net X-dup y #:alpha 0.5 #:lambda 0.1))]
 
 @chunk[<*>
   <require>
   <provide>
   <data>
   <fit>
-  <zeros>]
+  <zeros>
+  <grouping>]

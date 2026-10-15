@@ -20,7 +20,9 @@
          scribble/core
          scribble/decode
          racket/sandbox
-         syntax/parse/define)
+         syntax/parse/define
+         (for-syntax racket/base
+                     syntax/parse))
 
 (require (for-label glmnet
                     (only-in datasets load-dataset)
@@ -80,13 +82,14 @@
                  [sandbox-path-permissions '((exists "/"))])
     (make-base-eval #:lang 'racket '(require glmnet))))
 
-;; The 40 noisy observations the lasso, elastic-net and plots pages
-;; cross-validate, as `@examples` with the given options (`#:label #f` shows
-;; them, `#:hidden` does not). They are evaluated in the page's evaluator, not
-;; required from a module, because the random folds drawn after them continue
-;; the same generator.
-(define-syntax-parse-rule (noisy-fixture ev:expr option ...)
-  (examples #:eval ev option ...
+(begin-for-syntax
+  (define-splicing-syntax-class fixture-option
+    #:description "an examples option"
+    (pattern (~seq #:label label:expr) #:with (form ...) #'(#:label label))
+    (pattern (~seq #:hidden) #:with (form ...) #'(#:hidden))))
+
+(define-syntax-parse-rule (noisy-fixture ev:expr option:fixture-option ...)
+  (examples #:eval ev option.form ... ...
    (random-seed 3)
    (define (uniform a b) (+ a (* (- b a) (random))))
    (define-values (x₁ x₂)
