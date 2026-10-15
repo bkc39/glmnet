@@ -4,14 +4,14 @@
 @(define ev (make-glmnet-eval))
 
 @(require racket/format)
-@(define (enters path j)
-   (~r (ev `(for/first ([(lam β) (in-path ,path)]
-                        #:unless (zero? (vector-ref β ,j)))
-              (- (log lam))))
+@(define (enters path x)
+   (~r (ev `(for/first ([(λ β) (in-path ,path)]
+                        #:unless (zero? (match β [(vector _ x₁ x₂ x₃) ,x])))
+              (- (log λ))))
        #:precision 2))
-@(define (peak path j)
+@(define (peak path x)
    (~r (ev `(for/fold ([m 0.0]) ([(_ β) (in-path ,path)])
-              (max m (vector-ref β ,j))))
+              (max m (match β [(vector _ x₁ x₂ x₃) ,x]))))
        #:precision 2))
 
 @title[#:tag "plots" #:style 'toc]{Plots}
@@ -77,7 +77,7 @@ To read it as R users do:
 ]
 
 Read from the left, @math{x₁} enters the model at once. @math{x₂} enters at
-@math{−log λ = @(enters 'path 2)}, where the curve of @math{x₁} bends, and the
+@math{−log λ = @(enters 'path 'x₂)}, where the curve of @math{x₁} bends, and the
 two coefficients then grow towards their least-squares values, @math{2} and
 @math{−1}. The irrelevant @math{x₃} enters only over the last few @math{λ},
 with a coefficient below @racket[0.001]: its curve looks flat, but the count
@@ -96,9 +96,9 @@ elastic-net example does:
 The ridge part of the penalty spreads weight across correlated predictors,
 and @math{x₃ = x₁²} is strongly correlated with @math{x₁}. So @math{x₃} enters
 together with @math{x₁}, at the start. Its coefficient peaks near
-@racketvalfont{@(peak 'enet 3)} and shrinks again as the penalty weakens and
+@racketvalfont{@(peak 'enet 'x₃)} and shrinks again as the penalty weakens and
 @math{x₁} takes over, while @math{x₂} enters at
-@math{−log λ = @(enters 'enet 2)}. The lasso, which has no ridge part, picked
+@math{−log λ = @(enters 'enet 'x₂)}. The lasso, which has no ridge part, picked
 @math{x₁} alone. @secref["ex-elastic-net-grouping"]
 shows the same effect in single fits.
 
@@ -195,20 +195,24 @@ response's count):
 @section[#:tag "plot-cv"]{Cross-validation curves}
 
 The lasso example cross-validates 40 observations of the fixture's model,
-with noise added to @math{y} (see @secref["ex-lasso-cv"]).
-@racket[plot-cv] plots the result of @racket[elnet-cv] as R's
-@tt{plot(cvfit)} does:
+with noise added to @math{y} (see @secref["ex-lasso-cv"]):
 
 @examples[#:eval ev #:label #f
 (random-seed 3)
 (define (uniform a b) (+ a (* (- b a) (random))))
-(define-values (x1 x2)
-  (for/lists (x1 x2) ([_ (in-range 40)])
+(define-values (x₁ x₂)
+  (for/lists (x₁ x₂) ([_ (in-range 40)])
     (values (uniform 0 6) (uniform 0 6))))
-(define X40 (map list x1 x2 (map sqr x1)))
+(define X40 (map list x₁ x₂ (map sqr x₁)))
 (define y40
-  (for/list ([a (in-list x1)] [b (in-list x2)])
+  (for/list ([a (in-list x₁)] [b (in-list x₂)])
     (+ 1.0 (* 2 a) (- b) (uniform -1 1))))
+]
+
+@racket[plot-cv] plots the result of @racket[elnet-cv] as R's
+@tt{plot(cvfit)} does:
+
+@examples[#:eval ev #:label #f
 (define cv (elnet-cv X40 y40))
 (plot-cv cv)
 ]

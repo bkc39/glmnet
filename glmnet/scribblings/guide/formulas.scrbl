@@ -36,9 +36,10 @@ A name is a string or a symbol, and a column a list, vector, @racket[flvector]
 or @racket[f64vector] of reals, or a list or vector of strings, symbols or
 booleans, which a formula reads as categories (see
 @secref["formulas-factors"]). Names are compared as strings, so the symbol
-@racket['age] and the string @racket["age"] name the same column. The examples in this chapter use a table
-of 60 simulated patients, with three predictors, an @racket["age"], a
-@racket["dose"] and a @racket["marker"]:
+@racket['age] and the string @racket["age"] name the same column.
+
+The examples in this chapter use a table of 60 simulated patients, with three
+predictors, an @racket["age"], a @racket["dose"] and a @racket["marker"]:
 
 @examples[#:eval ev #:label #f
 (random-seed 1)
@@ -49,10 +50,9 @@ of 60 simulated patients, with three predictors, an @racket["age"], a
 (define marker (for/list ([_ (in-range n)]) (uniform -1 1)))
 ]
 
-and the responses of three models. Blood pressure, @racket["bp"], depends on
-age and dose; a relapse, @racket["relapse"] (0 or 1), on dose and the marker;
-and a survival time, @racket["time"] with its event indicator
-@racket["status"], on age and the marker:
+The table also holds the responses of three models. Blood pressure,
+@racket["bp"], depends on age and dose, and a relapse, @racket["relapse"]
+(0 or 1), on dose and the marker:
 
 @examples[#:eval ev #:label #f
 (define bp
@@ -61,10 +61,20 @@ and a survival time, @racket["time"] with its event indicator
 (define relapse
   (for/list ([d (in-list dose)] [m (in-list marker)])
     (if (> (+ 1 (* -0.4 d) (* 3 m) (uniform -1 1)) 0) 1 0)))
+]
+
+A survival time, @racket["time"], depends on age and the marker. It is the
+earlier of an event and a censoring time, and its indicator @racket["status"]
+is 1 where the event came first:
+
+@examples[#:eval ev #:label #f
 (define event-times
   (for/list ([a (in-list age)] [m (in-list marker)])
     (/ (- (log (random))) (exp (+ (* 0.04 (- a 55)) (* 1.5 m))))))
 (define censor-times (for/list ([_ (in-range n)]) (uniform 0 4)))
+(define status
+  (for/list ([e (in-list event-times)] [c (in-list censor-times)])
+    (if (<= e c) 1 0)))
 ]
 
 The table holds the columns by name:
@@ -74,9 +84,7 @@ The table holds the columns by name:
   (list (cons "age" age) (cons "dose" dose) (cons "marker" marker)
         (cons "bp" bp) (cons "relapse" relapse)
         (cons "time" (map min event-times censor-times))
-        (cons "status" (for/list ([e (in-list event-times)]
-                                  [c (in-list censor-times)])
-                         (if (<= e c) 1 0)))))
+        (cons "status" status)))
 (table-column-names patients)
 ]
 
@@ -212,8 +220,7 @@ bp-cv
 ]
 
 The model is a @racket[formula-model]. @racket[formula-model-fit] returns the
-result it holds, which is exactly what the family's procedure returns for the
-same columns as a matrix:
+fit it holds, which equals the matrix call that the formula replaces:
 
 @examples[#:eval ev #:label #f
 (formula-model-fit bp-fit)
@@ -590,8 +597,7 @@ formula front end. The examples in this section use R's @tt{mtcars}, whose
 @examples[#:eval ev #:label #f
 (require glmnet/datasets)
 (table-column-names iris)
-(define iris-species (dict-ref iris "Species"))
-(remove-duplicates (vector->list iris-species))
+(remove-duplicates (vector->list (dict-ref iris "Species")))
 ]
 
 @subsection[#:tag "formulas-factor-columns"]{Which columns are factors}
