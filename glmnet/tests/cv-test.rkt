@@ -9,13 +9,18 @@
 (module+ test
   (require rackunit
            racket/list
+           racket/file
            racket/logging
+           racket/match
            racket/math
+           racket/runtime-path
+           racket/string
            racket/vector
            racket/flonum
            (only-in racket/contract contract-first-order-passes?)
            ffi/vector
            glmnet
+           (only-in glmnet/datasets binomial-example quick-start-example)
            (submod glmnet/core/cv support))
 
   (define n 30)
@@ -447,17 +452,41 @@
                   (vector-ref (glmnet-path-dev-ratio full)
                               (index-of lams (glmnet-cv-lambda-1se cv)))))
 
-  (test-case "a CV result prints the measure and R's lambda.min and lambda.1se table"
-    (define lines (regexp-split #rx"\n" (format "~a" cv)))
-    (check-equal? (length lines) 4)
-    (check-equal? (first lines) "#<glmnet-cv:gaussian Mean-Squared Error")
-    (check-regexp-match #rx"^ +Lambda +Index +Measure +SE +Nonzero$" (second lines))
-    (check-regexp-match (pregexp (format "^  min +[0-9.e-]+ +~a +[0-9.e-]+ +[0-9.e-]+ +~a$"
-                                         (glmnet-cv-index-min cv)
-                                         (vector-ref (glmnet-cv-nzero cv) (glmnet-cv-index-min cv))))
-                        (third lines))
-    (check-regexp-match #rx"^  1se .*>$" (fourth lines))
+  (define-runtime-path fixtures "fixtures")
+
+  (define (r-print name)
+    (for/list ([line (in-list (file->lines (build-path fixtures (format "cv-print-~a.txt" name))))]
+               #:unless (or (string=? (string-trim line) "") (string-prefix? line "Call:")))
+      (string-trim line #:left? #f)))
+
+  (define (printed cv)
+    (define s (format "~a" cv))
+    (match-define (cons header lines) (string-split (substring s 0 (sub1 (string-length s))) "\n"))
+    (check-regexp-match #rx"^#<glmnet-cv:[a-z]+$" header)
+    (check-equal? (string-ref s (sub1 (string-length s))) #\>)
+    lines)
+
+  (define (rep-folds n) (for/list ([i (in-range n)]) (modulo i 10)))
+
+  (test-case "a CV result prints as R's print.cv.glmnet"
+    (define-values (qx qy) (quick-start-example))
+    (check-equal? (printed (elnet-cv qx qy #:fold-ids (rep-folds (length qy))))
+                  (r-print "quick-start"))
+    (define-values (bx by) (binomial-example))
+    (check-equal? (printed (logistic-cv bx by #:fold-ids (rep-folds (length by))
+                                        #:type-measure 'class))
+                  (r-print "binomial"))
     (check-equal? (format "~s" cv) (format "~a" cv)))
+
+  (test-case "each column of a printed CV result is zapped and formatted as R's"
+    (define path (glmnet-path 'gaussian (vector 2.5e-5 1.234e-7) (vector 0.0 0.0)
+                              (vector (vector 0.0) (vector 0.0)) (vector 0.0 0.0) (vector 0 1) 0))
+    (check-equal? (printed (glmnet-cv (vector 2.5e-5 1.234e-7) (vector 12345.678 0.5)
+                                      (vector 0.0 3.14159e-3) (vector 12345.678 0.5)
+                                      (vector 12345.678 0.5) (vector 0 120) 'mse
+                                      "Mean-Squared Error" path 1.234e-7 2.5e-5 1 0
+                                      (rep-folds 10)))
+                  (r-print "synthetic")))
 
   ;; --- errors ------------------------------------------------------------------
 

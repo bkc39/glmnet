@@ -20,7 +20,9 @@
            file/convertible
            (only-in racket/contract exn:fail:contract:blame?)
            pict
-           (only-in plot/no-gui renderer2d? plot-width plot-height ticks-format pre-tick)
+           racket/match
+           (only-in plot/no-gui renderer2d? plot-width plot-height ticks-format pre-tick
+                    plot-pict-bounds plot-pict-plot->dc)
            glmnet
            glmnet/plot
            (submod glmnet/plot support))
@@ -446,6 +448,29 @@
       (check-equal? (runs (panel-df pnl)) '((0 . 1) (1 . 10) (2 . 8) (3 . 81))))
     ;; plot.mrelnet's 2-norm panel counts the first response's coefficients.
     (check-equal? (panel-df (car (path-panels p '2norm))) (panel-df (car panels))))
+
+  (test-case "each curve label, drawn with a space on either side, fits inside the frame"
+    (define (room panel end right?)
+      (define ->dc (plot-pict-plot->dc panel))
+      (define (px x) (vector-ref (->dc (vector x 0)) 0))
+      (match-define (vector (vector x-min x-max) _) (plot-pict-bounds panel))
+      (if right? (- (px x-max) (px end)) (- (px end) (px x-min))))
+    (define (check-labels-fit p names xvar sign-lambda width height)
+      (define right? (not (and (eq? xvar 'lambda) (= sign-lambda 1))))
+      (define end (apply (if right? max min) (filter rational? (x-positions p xvar sign-lambda))))
+      (define drawn
+        (for/fold ([w 0]) ([name (in-list names)])
+          (max w (text-width (string-append " " name " ") (curve-label-size)))))
+      (for ([panel (in-list (coefficient-path-panels p xvar sign-lambda names 'coef
+                                                     width height #f))])
+        (check-true (>= (room panel end right?) drawn)
+                    (format "~a ~a ~a×~a" xvar sign-lambda width height))))
+    (define p (elnet-path Xr yr))
+    (for* ([xvar+sign (in-list '((norm -1) (dev -1) (lambda -1) (lambda 1)))]
+           [size (in-list '((400 300) (300 200)))])
+      (check-labels-fit p '("x1" "x2" "x3") (first xvar+sign) (second xvar+sign)
+                        (first size) (second size)))
+    (check-labels-fit p '("a long predictor name" "x2" "x3") 'norm -1 400 300))
 
   (test-case "the curve labels go at the end of the x axis, level with the last drawn λ"
     ;; R's plotCoef: xpos = max(index), or min(index) for log lambda, and

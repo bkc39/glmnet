@@ -100,7 +100,10 @@
            x-positions
            approx-f
            count-ticks
-           label-positions))
+           label-positions
+           coefficient-path-panels
+           curve-label-size
+           text-width))
 
 ;; --- R's conventions ---------------------------------------------------------
 
@@ -403,6 +406,14 @@
                                #:height [height (plot-height)]
                                #:title [title (plot-title)]
                                #:out-file [out-file #f])
+  (define picture
+    (apply vl-append (coefficient-path-panels model xvar sign-lambda label type-coef
+                                              width height title)))
+  (when out-file (write-image picture out-file))
+  picture)
+
+;; The plot of each panel of plot-coefficient-path, as a plot-lib pict.
+(define (coefficient-path-panels model xvar sign-lambda label type-coef width height title)
   (define who 'plot-coefficient-path)
   (define p (model-path who model))
   (define label* (model-label model label))
@@ -439,18 +450,17 @@
   (when (null? pictures)
     (raise-arguments-error who "every coefficient is zero at every λ, so there is nothing to plot"
                            "λ values" (vector-length (glmnet-path-lambda p))))
-  (define picture (apply vl-append pictures))
-  (when out-file (write-image picture out-file))
-  picture)
+  pictures)
 
-;; The width in pixels of the widest curve label.
+;; The width in pixels of the widest curve label, as point-label draws it: with
+;; a space on either side.
 (define (curve-label-width p label)
   (define n (vector-length
              (let ([beta (vector-ref (glmnet-path-coefficients p) 0)])
                (if (vector? (vector-ref beta 0)) (vector-ref beta 0) beta))))
   (define name (label-names 'plot-coefficient-path label n))
   (for/fold ([w 0]) ([j (in-range n)])
-    (max w (text-width (name j) (curve-label-size)))))
+    (max w (text-width (string-append " " (name j) " ") (curve-label-size)))))
 
 ;; The width in pixels of s in the font plot-lib draws text with at `size`.
 (define (text-width s size)

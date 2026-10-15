@@ -26,8 +26,9 @@
            count-nonzero
            count-nonzero-groups
            path-num-predictors
-           signif
-           write-table
+           write-r-table
+           r-format
+           zapsmall
            write-point
            write-path
            call-suffix))
@@ -141,21 +142,33 @@
 ;; (printCoefmat) does. `call`, when given, follows the family, as the formula of
 ;; a formula model does.
 (define (write-path p port [call #f])
-  (define columns
-    (list (cons "Df" (r-format (for/list ([df (in-vector (glmnet-path-df p))])
-                                 (exact->inexact df))))
-          (cons "%Dev" (r-format (zapsmall (for/list ([dev (in-vector (glmnet-path-dev-ratio p))])
-                                             (r-round (* dev 100.0) 2)))))
-          (cons "Lambda" (r-format (zapsmall (for/list ([lam (in-vector (glmnet-path-lambda p))])
-                                               (r-signif lam 4)))))))
-  (define row-names
-    (for/list ([i (in-range (vector-length (glmnet-path-lambda p)))])
-      (number->string (add1 i))))
+  (define (column header xs)
+    (cons header (r-format (zapsmall xs))))
+  (fprintf port "#<glmnet-path:~a~a" (glmnet-path-family p) (call-suffix call))
+  (write-r-table
+   (for/list ([i (in-range (vector-length (glmnet-path-lambda p)))])
+     (number->string (add1 i)))
+   (list (cons "Df" (r-format (for/list ([df (in-vector (glmnet-path-df p))])
+                                (exact->inexact df))))
+         (column "%Dev" (for/list ([dev (in-vector (glmnet-path-dev-ratio p))])
+                          (r-round (* dev 100.0) 2)))
+         (column "Lambda" (for/list ([lam (in-vector (glmnet-path-lambda p))])
+                            (r-signif lam 4))))
+   port)
+  (write-string ">" port))
+
+;; What a printed model shows after its family: nothing, or its call.
+(define (call-suffix call)
+  (if call (string-append " " call) ""))
+
+;; As R's print.default prints a character matrix with dimnames: the row names
+;; left-aligned, and each column, its header first, right-aligned, one space
+;; apart, a line per row.
+(define (write-r-table row-names columns port)
   (define name-width (apply max 0 (map string-length row-names)))
   (define widths
     (for/list ([column (in-list columns)])
       (apply max (map string-length column))))
-  (fprintf port "#<glmnet-path:~a~a" (glmnet-path-family p) (call-suffix call))
   (for ([name (in-list (cons "" row-names))]
         [row (in-list (apply map list columns))])
     (newline port)
@@ -163,24 +176,6 @@
     (for ([cell (in-list row)]
           [width (in-list widths)])
       (write-string " " port)
-      (write-string (~a cell #:min-width width #:align 'right) port)))
-  (write-string ">" port))
-
-;; What a printed model shows after its family: nothing, or its call.
-(define (call-suffix call)
-  (if call (string-append " " call) ""))
-
-;; Rows of strings as a table, one line each, every column right-aligned and
-;; indented by two spaces.
-(define (write-table rows port)
-  (define widths
-    (for/list ([column (in-list (apply map list rows))])
-      (apply max (map string-length column))))
-  (for ([row (in-list rows)])
-    (newline port)
-    (for ([cell (in-list row)]
-          [width (in-list widths)])
-      (write-string "  " port)
       (write-string (~a cell #:min-width width #:align 'right) port))))
 
 ;; R's signif(x, digits) (nmath/fprec.c), in the same double arithmetic.
@@ -216,18 +211,19 @@
   (define q (inexact->exact a))
   (- (integer-length (numerator q)) (integer-length (denominator q))))
 
-;; R's zapsmall(xs, 5) as of R 4.4: xs rounded to max(0, 5 - log10(max |x|))
-;; decimal places, which round() takes to the nearest integer.
-(define (zapsmall xs)
+;; R's zapsmall(xs, digits) as of R 4.4: xs rounded to
+;; max(0, digits - log10(max |x|)) decimal places, which round() takes to the
+;; nearest integer.
+(define (zapsmall xs [digits 5])
   (define mx (apply max 0.0 (map abs xs)))
-  (define places (if (positive? mx) (max 0.0 (- 5 (log mx 10))) 5))
+  (define places (if (positive? mx) (max 0.0 (- digits (log mx 10))) digits))
   (for/list ([x (in-list xs)])
     (r-round x (exact-floor (+ places 0.5)))))
 
-;; R's format(xs, digits = 5) of finite doubles (formatReal in main/format.c
-;; and EncodeReal0 in main/printutils.c): every element in fixed notation with
-;; the same number of decimals, or every element in scientific notation when
-;; that is narrower.
+;; R's format(xs, digits) of finite doubles (formatReal in main/format.c and
+;; EncodeReal0 in main/printutils.c): every element in fixed notation with the
+;; same number of decimals, or every element in scientific notation when that
+;; is narrower.
 (define (r-format xs [digits 5])
   (define-values (neg max-left min-left right max-signed-left max-sig)
     (for/fold ([neg 0] [max-left -inf.0] [min-left +inf.0] [right 0] [max-signed-left 1] [max-sig 1])

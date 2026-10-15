@@ -421,8 +421,8 @@ signal, with @math{y = 1 + 3x₁ − 2x₂ + x₃} plus noise:
 cv
 ]
 
-The result is a @racket[glmnet-cv]. It prints like R's @tt{print.cv.glmnet},
-with the index counted from 0: the measure, then a row for each of the two
+The result is a @racket[glmnet-cv]. It prints as R's @tt{print.cv.glmnet}
+does, with the index counted from 1: the measure, then a row for each of the two
 choices, with its @math{λ}, its index among the candidates, the
 cross-validated error, its standard error and the number of nonzero
 coefficients (see @secref["ref-model-printing"]).

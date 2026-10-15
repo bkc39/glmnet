@@ -385,6 +385,14 @@ cv_coef <- function(cv, s) {
   else unname(as.numeric(co[, 1]))
 }
 
+## The lines of R's print.cv.glmnet, from its Measure: line on, without blank
+## lines or trailing spaces.
+cv_print_lines <- function(cv) {
+  out <- sub(" +$", "", capture.output(print(cv)))
+  out <- out[nzchar(out)]
+  out[grep("^Measure:", out)[1]:length(out)]
+}
+
 ## A cv.glmnet result as the golden records it.
 cv_record <- function(cv)
   list(measure = names(cv$name), name = unname(cv$name),
@@ -394,7 +402,8 @@ cv_record <- function(cv)
        lambda_min = cv$lambda.min, lambda_1se = cv$lambda.1se,
        index_min = cv$index[1, 1], index_1se = cv$index[2, 1],
        coef_min = cv_coef(cv, "lambda.min"), coef_1se = cv_coef(cv, "lambda.1se"),
-       coef_names = coef_names(coef(cv, s = "lambda.min")))
+       coef_names = coef_names(coef(cv, s = "lambda.min")),
+       print = cv_print_lines(cv))
 
 cv_fixtures <- list(
   list(id = "cv-gaussian-longley-mse",           dataset = "longley",    family = "gaussian",    nfolds = 4,  seed = 1, type_measure = "mse"),
