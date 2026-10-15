@@ -28,11 +28,17 @@ The running fixture again, with the irrelevant @math{x₃ = x₁²}:
 (define y '(1.0 4.0 3.0 6.0 5.0 8.0))
 ]
 
-@racket[elastic-net] takes an explicit @racket[#:alpha]:
+@racket[elastic-net] takes an explicit @racket[#:alpha]. @racket[coef] gives
+the intercept @math{β₀} and then the coefficients @math{β}, here shown to three
+decimals:
 
 @examples[#:eval ev #:label #f
 (define fit (elastic-net X y #:alpha 0.5 #:lambda 0.5))
-(coef fit)
+(define (~r3 x) (~r x #:precision '(= 3)))
+(define (coef-line coefs)
+  (match-define (vector β₀ β ...) coefs)
+  (format "β₀ = ~a, β = ~a" (~r3 β₀) (map ~r3 β)))
+(displayln (coef-line (coef fit)))
 ]
 
 The fit both shrinks its coefficients, as ridge does, and sets one exactly to
@@ -42,7 +48,7 @@ zero, as the lasso does.
 
 At a shared @math{λ}, the number of coefficients the elastic net zeroes lies
 between ridge, which zeroes none, and the lasso, which zeroes the most.
-@racket[coef] gives the intercept first, and the count skips it:
+The count skips the intercept:
 
 @examples[#:eval ev #:label #f
 (define (zeros model)
@@ -53,14 +59,9 @@ between ridge, which zeroes none, and the lasso, which zeroes the most.
                  (lasso X y #:lambda 0.5)))
 ]
 
-Sweeping @math{α} at that @math{λ} moves between the two. Each line shows the
-intercept @math{β₀} and then @math{β}, to three decimals:
+Sweeping @math{α} at that @math{λ} moves between the two:
 
 @examples[#:eval ev #:label #f
-(define (~r3 x) (~r x #:precision '(= 3)))
-(define (coef-line coefs)
-  (match-define (vector β₀ β ...) coefs)
-  (format "β₀ = ~a, β = ~a" (~r3 β₀) (map ~r3 β)))
 (for ([α (in-list '(0.0 0.25 0.5 0.75 1.0))])
   (printf "α = ~a: ~a\n" α (coef-line (coef (elastic-net X y #:alpha α #:lambda 0.5)))))
 ]
@@ -80,7 +81,7 @@ are identical, and drop @math{x₃}:
 ]
 
 The lasso puts all of @math{x₁}'s weight on one copy and leaves the other
-within rounding of zero, about @racket[1e-14]: the two identical columns tie
+within rounding of zero: the two identical columns tie
 exactly at this @math{λ}, and which copy wins is an accident of the column
 order. The elastic net's L2 term makes
 splitting the weight cheaper than concentrating it, so the two copies get
