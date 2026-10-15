@@ -13,7 +13,7 @@
 (module+ test
   (require racket/match
            rackunit
-           "common.rkt")
+           (submod "common.rkt" test))
   (match-define (vector (vector _ up-x₁ x₂-in-y₁)
                         (vector _ down-x₁ x₂-in-y₂))
     (coef fit))

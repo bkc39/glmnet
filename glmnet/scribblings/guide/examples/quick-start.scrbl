@@ -53,19 +53,16 @@ each coefficient against @math{−log λ}:
 Each curve leaves zero where its predictor enters the model. The largest
 @math{λ} at which each coefficient is nonzero gives the order of entry.
 @racket[in-path] walks the path from the largest @math{λ}, giving the
-coefficients as @racket[coef] does, the intercept first, so column @racket[j]
-of @racket[x] is at index @racket[(+ j 1)]:
+coefficients as @racket[coef] does, the intercept first, so the columns of
+@racket[x] start at index 1:
 
 @examples[#:eval ev #:label #f
-(define (entry-lambda j)
-  (for/first ([(λ β) (in-path fit)]
-              #:unless (zero? (vector-ref β j)))
-    λ))
 (define entries
-  (sort (for/list ([name (in-list (design-matrix-column-names x))]
-                   [j (in-naturals 1)])
-          (cons name (entry-lambda j)))
-        > #:key cdr))
+  (for*/fold ([entered '()] #:result (reverse entered))
+             ([(λ β) (in-path fit)]
+              [(name b) (in-parallel (design-matrix-column-names x) (in-vector β 1))]
+              #:unless (or (zero? b) (dict-has-key? entered name)))
+    (cons (cons name λ) entered)))
 ]
 
 @racket[entries] is an association list, from each name to the @math{λ}
@@ -188,11 +185,14 @@ coefs-min
 (predict cvfit first-five #:lambda 'lambda-min)
 ]
 
-At @tech{lambda-min}, @tt{V10}, at index 10, has joined the nine predictors of
+At @tech{lambda-min}, @tt{V10} has joined the nine predictors of
 @math{λ = 0.1}, with a coefficient of @math{0.0012} to four decimals:
 
 @examples[#:eval ev #:label #f
-(fmt (vector-ref coefs-min 10) 4)
+(for/first ([name (in-list (design-matrix-column-names x))]
+            [b (in-vector coefs-min 1)]
+            #:when (equal? name "V10"))
+  (fmt b 4))
 ]
 
 @section[#:tag "ex-quick-start-r"]{Matching R}

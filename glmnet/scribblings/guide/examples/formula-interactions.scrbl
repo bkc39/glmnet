@@ -74,8 +74,8 @@ The infix spelling is the same formula, so it fits the same path:
 
 @examples[#:eval ev #:label #f
 (mpg . ~ . wt * hp)
-(equal? (formula-model-fit (formula-path (mpg . ~ . wt * hp) mtcars))
-        (formula-model-fit path))
+(define infix-path (formula-path (mpg . ~ . wt * hp) mtcars))
+(equal? (formula-model-fit infix-path) (formula-model-fit path))
 ]
 
 @section[#:tag "ex-formula-interactions-pairs"]{Every pair}
@@ -102,7 +102,7 @@ its interactions.
 
 @examples[#:eval ev #:label #f
 (define folds (for/list ([i (in-range 32)]) (modulo i 4)))
-(define cv (formula-cv (mpg . ~ . wt * hp) mtcars #:fold-ids folds))
+(define cv (formula-cv (~ mpg (* wt hp)) mtcars #:fold-ids folds))
 cv
 (coef cv)
 ]
@@ -114,7 +114,7 @@ model predicts from a new table, whose columns can come in any order; it
 computes the interaction itself:
 
 @examples[#:eval ev #:label #f
-(define new-cars (list (cons "hp" '(100 200)) (cons "wt" '(2.5 3.5))))
+(define new-cars '((hp 100 200) (wt 2.5 3.5)))
 (predict cv new-cars)
 ]
 

@@ -59,7 +59,8 @@ Sweeping @math{α} at that @math{λ} moves between the two:
 
 @examples[#:eval ev #:label #f
 (for ([α (in-list '(0.0 0.25 0.5 0.75 1.0))])
-  (printf "α = ~a: ~a\n" α (coef-line (coef (elastic-net X y #:alpha α #:lambda 0.5)))))
+  (define model (elastic-net X y #:alpha α #:lambda 0.5))
+  (printf "α = ~a: ~a\n" α (coef-line (coef model))))
 ]
 
 @section[#:tag "ex-elastic-net-grouping"]{Correlated predictors}
@@ -71,9 +72,10 @@ are identical, and drop @math{x₃}:
 @examples[#:eval ev #:label #f
 (define X-dup
   (map (match-lambda [(list x₁ x₂ _) (list x₁ x₁ x₂)]) X))
-(printf "lasso:       ~a\n" (coef-line (coef (lasso X-dup y #:lambda 0.1))))
-(printf "elastic net: ~a\n"
-        (coef-line (coef (elastic-net X-dup y #:alpha 0.5 #:lambda 0.1))))
+(define lasso-dup (lasso X-dup y #:lambda 0.1))
+(define enet-dup (elastic-net X-dup y #:alpha 0.5 #:lambda 0.1))
+(printf "lasso:       ~a\n" (coef-line (coef lasso-dup)))
+(printf "elastic net: ~a\n" (coef-line (coef enet-dup)))
 ]
 
 The lasso puts all of @math{x₁}'s weight on one copy and leaves the other
@@ -95,14 +97,11 @@ observations @racket[X40] and @racket[y40] of @secref["ex-lasso-cv"]:
 
 @examples[#:eval ev #:label #f
 (define folds (random-fold-ids 40))
-(for ([α (in-list '(0.0 0.25 0.5 0.75 1.0))])
-  (define cv (elnet-cv X40 y40 #:alpha α #:fold-ids folds))
-  (define best (glmnet-cv-index-min cv))
-  (printf "α = ~a: λ-min = ~a, error = ~a ± ~a\n"
-          α
-          (fmt (glmnet-cv-lambda-min cv))
-          (fmt (vector-ref (glmnet-cv-cvm cv) best))
-          (fmt (vector-ref (glmnet-cv-cvsd cv) best))))
+(for* ([α (in-list '(0.0 0.25 0.5 0.75 1.0))]
+       [cv (in-value (elnet-cv X40 y40 #:alpha α #:fold-ids folds))]
+       [(λ err sd) (in-parallel (glmnet-cv-lambda cv) (glmnet-cv-cvm cv) (glmnet-cv-cvsd cv))]
+       #:when (= λ (glmnet-cv-lambda-min cv)))
+  (printf "α = ~a: λ-min = ~a, error = ~a ± ~a\n" α (fmt λ) (fmt err) (fmt sd)))
 ]
 
 Ridge, which keeps every predictor, the irrelevant @math{x₃} among them,

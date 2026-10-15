@@ -32,13 +32,8 @@
            racket/match
            racket/string
            rackunit
-           (only-in pict pict?))
-
-  (define (digits e) (max (* 1e-6 (abs e)) 1e-12))
-  (define (check-values got expected)
-    (check-equal? (length got) (length expected))
-    (for ([g (in-list got)] [e (in-list expected)])
-      (check-within g e (digits e))))
+           (only-in pict pict?)
+           (submod "common.rkt" test))
 
   ;; R: 67 λ from 1.630762 down to 0.003513, 91.32% of the deviance at the
   ;; end; index 66 is R's fit$lambda[67].
@@ -66,11 +61,11 @@
   (check-pred pict? path-plot)
   (check-pred pict? cv-plot)
 
-  (check-values (vector->list coefficients)
-                '(0.15092807247412948 1.32059719454791158 0.0 0.67511023448474050 0.0
-                  -0.81741151754896735 0.52143667145873451 0.00482933514861668
-                  0.31941591671556846 0.0 0.0 0.14249851856673512 0.0 0.0
-                  -1.05997870191922949 0.0 0.0 0.0 0.0 0.0 -1.02187370368307984))
+  (check-coef coefficients
+              #(0.15092807247412948 1.32059719454791158 0.0 0.67511023448474050 0.0
+                -0.81741151754896735 0.52143667145873451 0.00482933514861668
+                0.31941591671556846 0.0 0.0 0.14249851856673512 0.0 0.0
+                -1.05997870191922949 0.0 0.0 0.0 0.0 0.0 -1.02187370368307984))
   (match-define (list predictions-0.1 predictions-0.05) predictions)
   (check-values predictions-0.1
                 '(-1.366760695877866 2.562379220607292 0.565026939440315 1.922395960000677
@@ -89,11 +84,11 @@
   (check-equal? (vector-ref (glmnet-cv-nzero cvfit) 27) 8)
   (check-within (vector-ref (glmnet-cv-cvm cvfit) 34) 1.02152422514955 1e-6)
   (check-within (vector-ref (glmnet-cv-cvsd cvfit) 34) 0.0820845136953187 1e-6)
-  (check-values (vector->list coefficients-min)
-                '(0.14792705583241417 1.33739391120070783 0.0 0.70408648061563961 0.0
-                  -0.84285314968357261 0.54940348029658681 0.03270391434751053
-                  0.34243052114343225 0.0 0.00120660768673628 0.17899598882838239 0.0 0.0
-                  -1.07999347268151591 0.0 0.0 0.0 0.0 0.0 -1.06138244352511890))
+  (check-coef coefficients-min
+              #(0.14792705583241417 1.33739391120070783 0.0 0.70408648061563961 0.0
+                -0.84285314968357261 0.54940348029658681 0.03270391434751053
+                0.34243052114343225 0.0 0.00120660768673628 0.17899598882838239 0.0 0.0
+                -1.07999347268151591 0.0 0.0 0.0 0.0 0.0 -1.06138244352511890))
   (check-values predictions-min
                 '(-1.362697695821565 2.573677362048242 0.576733459651696 2.006260443038276
                   1.541006086750130)))

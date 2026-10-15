@@ -29,7 +29,7 @@ The data are R's @tt{mtcars} and @tt{iris}, which
          glmnet/datasets)]
 
 @chunk[<provide>
-(provide run-example)]
+(provide cylinders slopes new-cars predictions species flowers classes)]
 
 The lasso path of fuel economy on the weight and the cylinders. The weight
 enters first, eight cylinders at @math{λ ≈ 2.45} and six cylinders at
@@ -55,11 +55,8 @@ level, but a level that the model was not fitted with, such as five
 cylinders, is an error that names it.
 
 @chunk[<new-cars>
-(define new-cars (list (cons "wt" '(2.5 3.5 3.5)) (cons "cyl" '(4 4 8))))
-(define predictions (predict cylinders new-cars #:lambda 0.1))
-(define unseen
-  (with-handlers ([exn:fail? exn-message])
-    (predict cylinders (list (cons "wt" '(3.0)) (cons "cyl" '(5))))))]
+(define new-cars '((wt 2.5 3.5 3.5) (cyl 4 4 8)))
+(define predictions (predict cylinders new-cars #:lambda 0.1))]
 
 The species are strings, so the multinomial path's classes are the species,
 in R's order of levels: @racket[coef] keys the coefficients by species, and
@@ -68,21 +65,16 @@ in R's order of levels: @racket[coef] keys the coefficients by species, and
 @chunk[<species>
 (define species (formula-path (~ Species all) iris #:family 'multinomial))
 (define flowers
-  (list (cons "Sepal.Length" '(5.0 6.0 6.5))
-        (cons "Sepal.Width" '(3.4 2.8 3.0))
-        (cons "Petal.Length" '(1.5 4.5 5.6))
-        (cons "Petal.Width" '(0.2 1.4 2.1))))
+  '((Sepal.Length 5.0 6.0 6.5)
+    (Sepal.Width 3.4 2.8 3.0)
+    (Petal.Length 1.5 4.5 5.6)
+    (Petal.Width 0.2 1.4 2.1)))
 (define classes (predict species flowers #:type 'class #:lambda 0.05))]
-
-@chunk[<run-example>
-(define (run-example)
-  <cylinders>
-  <slopes>
-  <new-cars>
-  <species>
-  (values cylinders slopes predictions unseen species classes))]
 
 @chunk[<*>
   <require>
   <provide>
-  <run-example>]
+  <cylinders>
+  <slopes>
+  <new-cars>
+  <species>]

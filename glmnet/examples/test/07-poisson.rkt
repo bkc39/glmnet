@@ -13,7 +13,7 @@
 (module+ test
   (require racket/match
            rackunit
-           "common.rkt")
+           (submod "common.rkt" test))
   (match-define (vector _ β₁ β₂) (coef fit))
   (check-true (positive? β₁) "rate rises with x₁")
   (check-equal? β₂ 0.0 "lasso zeros the noise coefficient")

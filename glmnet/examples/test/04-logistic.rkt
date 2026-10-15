@@ -14,7 +14,7 @@
 (module+ test
   (require racket/match
            rackunit
-           "common.rkt")
+           (submod "common.rkt" test))
   (match-define (vector _ β₁ β₂ β₃) (coef fit))
   (check-equal? β₃ 0.0 "lasso logistic zeros the noise coefficient")
   (check-true (positive? β₁) "x₁ has positive log-odds weight")

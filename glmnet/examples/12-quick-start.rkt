@@ -1,6 +1,7 @@
 #lang scribble/lp2
 
 @(require (for-label racket/base
+                     racket/dict
                      glmnet
                      glmnet/plot
                      glmnet/datasets))
@@ -20,7 +21,8 @@ loads as R's @tt{data(QuickStartExample)} does. R's
 @tt{x <- QuickStartExample$x; y <- QuickStartExample$y} is one call:
 
 @chunk[<require>
-(require racket/list
+(require racket/dict
+         racket/list
          glmnet
          glmnet/plot
          glmnet/datasets)]
@@ -48,19 +50,17 @@ nonzero coefficients, the percentage of deviance explained and @math{λ}.
 
 Each curve leaves zero where its predictor enters the model. @racket[entries]
 maps each column name to the largest @math{λ} at which its coefficient is
-nonzero, in order of entry. @racket[in-path] gives the intercept first, so
-column @racket[j] of @racket[x] is at index @racket[(+ j 1)].
+nonzero, in order of entry. @racket[in-path] walks the path from the largest
+@math{λ} and gives the intercept first, so the coefficients of the columns
+start at index 1.
 
 @chunk[<entries>
-(define (entry-lambda j)
-  (for/first ([(λ β) (in-path fit)]
-              #:unless (zero? (vector-ref β j)))
-    λ))
 (define entries
-  (sort (for/list ([name (in-list (design-matrix-column-names x))]
-                   [j (in-naturals 1)])
-          (cons name (entry-lambda j)))
-        > #:key cdr))]
+  (for*/fold ([entered '()] #:result (reverse entered))
+             ([(λ β) (in-path fit)]
+              [(name b) (in-parallel (design-matrix-column-names x) (in-vector β 1))]
+              #:unless (or (zero? b) (dict-has-key? entered name)))
+    (cons (cons name λ) entered)))]
 
 R's @tt{coef(fit, s = 0.1)}: the intercept and the 20 coefficients at
 @math{λ = 0.1}, which is between two fitted values, so they are interpolated

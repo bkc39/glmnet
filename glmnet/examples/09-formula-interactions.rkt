@@ -23,7 +23,7 @@ which @racketmodname[glmnet/datasets] provides as a table.
          glmnet/datasets)]
 
 @chunk[<provide>
-(provide run-example)]
+(provide path infix-path pairs-path folds cv new-cars predictions)]
 
 A lasso path over the crossed formula. Weight enters first, then briefly the
 interaction, standing in for horsepower until horsepower enters at
@@ -53,15 +53,18 @@ interaction at both of the λ values it chooses.
 (define folds (for/list ([i (in-range 32)]) (modulo i 4)))
 (define cv (formula-cv (~ mpg (* wt hp)) mtcars #:fold-ids folds))]
 
-@chunk[<run-example>
-(define (run-example)
-  <crossing>
-  <infix>
-  <pairs>
-  <cv>
-  (values path infix-path pairs-path cv))]
+The model predicts from a new table, whose columns can come in any order, and
+computes the interaction itself.
+
+@chunk[<predict>
+(define new-cars '((hp 100 200) (wt 2.5 3.5)))
+(define predictions (predict cv new-cars))]
 
 @chunk[<*>
   <require>
   <provide>
-  <run-example>]
+  <crossing>
+  <infix>
+  <pairs>
+  <cv>
+  <predict>]
