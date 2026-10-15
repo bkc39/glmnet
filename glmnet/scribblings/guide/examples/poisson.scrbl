@@ -32,24 +32,24 @@ fit
 ]
 
 After the intercept, @math{β₁} is close to the @racket[0.3] the counts were
-built around, and the noise coefficient is exactly @racket[0.0]. The coefficients are on the log
-scale; exponentiated, @math{β₁} is a @emph{rate ratio}, the factor by which one
-more unit of @math{x₁} multiplies the expected count:
+built around, and the noise coefficient is exactly @racket[0.0]. The
+coefficients are on the log scale; exponentiated, @math{β₁} is a
+@emph{rate ratio}, the factor by which one more unit of @math{x₁} multiplies the
+expected count:
 
 @examples[#:eval ev #:label #f
-(exp (vector-ref (poisson-result-coefficients fit) 0))
+(match-define (vector _ β₁ _) (coef fit))
+(exp β₁)
 ]
 
 @section[#:tag "ex-poisson-predict"]{Predicting}
 
-@racket[poisson-predict-mean] applies the log link and returns the fitted mean
-for each row; it is @racket[predict] with @racket[#:type 'response]. Next to
-the observed counts:
+@racket[predict] with @racket[#:type 'response] applies the log link and returns
+the fitted mean for each row; @racket[poisson-predict-mean] is the same call.
+Each observed count next to its fitted mean:
 
 @examples[#:eval ev #:label #f
-(for/list ([mu (in-list (poisson-predict-mean fit X))]
-           [count (in-list y)])
-  (list count mu))
+(map list y (predict fit X #:type 'response))
 ]
 
 @section[#:tag "ex-poisson-response"]{The response}
@@ -58,8 +58,8 @@ The response must be non-negative, but it need not be an integer, so rates such
 as events per hour fit too:
 
 @examples[#:eval ev #:label #f
-(poisson-result-coefficients
- (poisson-fit X '(0.5 1.0 1.2 1.5 2.0 3.1 4.0 5.6) #:lambda 0.1))
+(define rates (poisson-fit X '(0.5 1.0 1.2 1.5 2.0 3.1 4.0 5.6) #:lambda 0.1))
+(coef rates)
 ]
 
 When observations cover different exposures (different lengths of time,

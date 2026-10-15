@@ -6,18 +6,19 @@
          "../06-cox.rkt")
 
 (module+ main
-  (define r (run-example))
-  (printf "cox coefficients = ~a\n" (cox-result-coefficients r))
-  (printf "dev.ratio        = ~a\n" (cox-result-dev-ratio r)))
+  (println fit)
+  (println (coef fit))
+  (println log-risk)
+  (println risk))
 
 (module+ test
-  (require rackunit)
-  (define r (run-example))
-  (define b (cox-result-coefficients r))
-  ;; x1 is a risk factor: positive log-hazard coefficient.
-  (check-true (> (vector-ref b 0) 0.0) "risk coefficient is positive")
-  ;; x2 is noise: the L1 penalty zeros it.
-  (check-equal? (vector-ref b 1) 0.0 "lasso zeros the noise coefficient")
-  ;; dev.ratio in (0, 1].
-  (check-true (< 0.0 (cox-result-dev-ratio r)))
-  (check-true (<= (cox-result-dev-ratio r) 1.0)))
+  (require racket/match
+           rackunit)
+  (match-define (vector β₁ β₂) (coef fit))
+  (check-true (positive? β₁) "risk coefficient is positive")
+  (check-equal? β₂ 0.0 "lasso zeros the noise coefficient")
+  (check-true (< 0.0 (deviance-ratio fit)))
+  (check-true (<= (deviance-ratio fit) 1.0))
+  (for ([η (in-list log-risk)] [r (in-list risk)])
+    (check-= r (exp η) 1e-12 "the relative risk is exp of the linear predictor"))
+  (check-true (apply < risk) "risk rises with x₁, the subjects' order"))

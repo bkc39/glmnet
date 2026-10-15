@@ -30,13 +30,14 @@ class 2 at high @math{x₂}:
 
 @examples[#:eval ev #:label #f
 (define fit (multinomial-fit X y #:lambda 0.01))
-(multinomial-result-intercepts fit)
-(multinomial-result-coefficients fit)
+fit
+(coef fit)
 ]
 
-Each class keeps only the predictor that sets it apart. Classes 0 and 1 split on
-@math{x₁}, with opposite signs; class 2 is picked out by @math{x₂}; every other
-coefficient is exactly @racket[0.0].
+@racket[coef] gives one vector per class, the intercept first. Each class keeps
+only the predictor that sets it apart. Classes 0 and 1 split on @math{x₁}, with
+opposite signs; class 2 is picked out by @math{x₂}; every other coefficient is
+exactly @racket[0.0].
 
 Only differences between the classes' linear predictors matter: adding the same
 vector to every class's coefficients leaves the softmax unchanged. glmnet
@@ -48,16 +49,16 @@ the bindings centre them to sum to zero.
 
 @section[#:tag "ex-multinomial-predict"]{Predicting}
 
-@racket[multinomial-predict-proba] returns one probability per class for each
-row, summing to 1, and @racket[multinomial-predict] returns the most probable
-class. They are @racket[predict] with @racket[#:type 'response] and
-@racket[#:type 'class]:
+@racket[predict] with @racket[#:type 'response] returns one probability per
+class for each row, summing to 1, and with @racket[#:type 'class] the most
+probable class. @racket[multinomial-predict-proba] and
+@racket[multinomial-predict] are the same two calls:
 
 @examples[#:eval ev #:label #f
 (define new-points '((1.5 1.5) (5.5 1.5) (3.5 5.5) (3.5 1.5)))
-(multinomial-predict-proba fit new-points)
-(multinomial-predict fit new-points)
-(equal? (multinomial-predict fit X) y)
+(predict fit new-points #:type 'response)
+(predict fit new-points #:type 'class)
+(equal? (predict fit X #:type 'class) y)
 ]
 
 The first three points sit at the cluster centres and are classified with

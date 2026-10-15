@@ -23,7 +23,7 @@ distributed in both classes. A lasso-penalized fit recovers the signs
 (require glmnet)]
 
 @chunk[<provide>
-(provide run-example)]
+(provide X y fit probabilities labels)]
 
 @chunk[<data>
 (define X '((1.0 5.0 2.0)
@@ -42,30 +42,28 @@ distributed in both classes. A lasso-penalized fit recovers the signs
 
 @racket[logistic-fit] with @racket[#:alpha 1.0] is the sparse (lasso) logistic.
 The third coefficient --- the noise predictor @math{x₃} --- comes back exactly
-@racket[0.0], while @math{x₁} and @math{x₂} keep their (opposite) signs. The
-@racket[logistic-result] also carries @racket[logistic-result-dev-ratio], the
-fraction of null deviance explained (the logistic analogue of @math{R²}).
+@racket[0.0], while @math{x₁} and @math{x₂} keep their (opposite) signs.
+@racket[deviance-ratio] gives the fraction of null deviance explained (the
+logistic analogue of @math{R²}).
 
 @chunk[<fit>
-(define result (logistic-fit X y #:lambda 0.04))]
+(define fit (logistic-fit X y #:lambda 0.04))]
 
-Given a fit, @racket[logistic-predict-proba] returns the class-1 probability for
-each row and @racket[logistic-predict] thresholds it into a hard 0/1 label:
+@racket[predict] with @racket[#:type 'response] returns the class-1 probability
+for each row, low for class 0 and high for class 1, and @racket[#:type 'class]
+the label, which here is right for every training point:
 
-@racketblock[
-(logistic-predict-proba result X)
-(code:comment "=> (0.02 0.05 ... 0.97 0.99)  -- low for class 0, high for class 1")
-(logistic-predict result X)
-(code:comment "=> (0 0 0 0 0 0 1 1 1 1 1 1)   -- every training point correct")
-]
+@chunk[<predict>
+(define probabilities (predict fit X #:type 'response))
+(define labels (predict fit X #:type 'class))]
 
-@chunk[<run-example>
-(define (run-example)
-  <data>
-  <fit>
-  result)]
+@racket[logistic-predict-proba] is the first call. @racket[logistic-predict] is
+the second with a @racket[#:threshold] on the probability, @racket[0.5] unless
+given.
 
 @chunk[<*>
   <require>
   <provide>
-  <run-example>]
+  <data>
+  <fit>
+  <predict>]

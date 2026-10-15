@@ -45,22 +45,9 @@
 ;; A count must equal the file's hits exactly, so it only goes down; a file
 ;; not listed must have none.
 (define allowed-hits
-  '(("examples/04-logistic.rkt" (hand-written-output . 2))
-    ("examples/05-multinomial.rkt" (hand-written-output . 2))
-    ("examples/06-cox.rkt" (hand-written-output . 1))
-    ("examples/07-poisson.rkt" (hand-written-output . 1))
-    ("examples/08-mgaussian.rkt" (hand-written-output . 1))
-    ("examples/13-data-sources.rkt" (positional-access . 4))
-    ("scribblings/guide/examples/cox.scrbl"
-     (family-accessor . 1) (path-accessor . 2) (hand-rounding . 6))
+  '(("examples/13-data-sources.rkt" (positional-access . 4))
     ("scribblings/guide/examples/data-sources.scrbl" (positional-access . 3))
-    ("scribblings/guide/examples/formula-polynomial.scrbl" (last-by-index . 1))
-    ("scribblings/guide/examples/logistic.scrbl"
-     (family-accessor . 2) (path-accessor . 2) (hand-rounding . 7))
-    ("scribblings/guide/examples/mgaussian.scrbl"
-     (family-accessor . 7) (hand-rounding . 8) (positional-access . 4))
-    ("scribblings/guide/examples/multinomial.scrbl" (family-accessor . 2))
-    ("scribblings/guide/examples/poisson.scrbl" (family-accessor . 2))))
+    ("scribblings/guide/examples/formula-polynomial.scrbl" (last-by-index . 1))))
 
 ;; Forms whose body is block code shown to the reader.
 (define code-heads

@@ -49,32 +49,35 @@ Exponentiating a coefficient gives an @emph{odds ratio}, the factor by which
 one more unit of the predictor multiplies the odds of class 1:
 
 @examples[#:eval ev #:label #f
-(for/list ([b (in-vector (logistic-result-coefficients fit))])
+(for/list ([b (in-vector (coef fit) 1)])
   (exp b))
 ]
 
-@racket[logistic-result-dev-ratio] is the fraction of null deviance explained,
-the logistic analogue of @math{R²}.
+@racket[deviance-ratio] is the fraction of null deviance explained, the
+logistic analogue of @math{R²}:
+
+@examples[#:eval ev #:label #f
+(deviance-ratio fit)
+]
 
 @section[#:tag "ex-logistic-predict"]{Predicting}
 
-@racket[logistic-predict-proba] returns the class-1 probability for each row;
-@racket[logistic-predict] thresholds it into a label. The first is
-@racket[predict] with @racket[#:type 'response]; at its default threshold, the
-second agrees with @racket[#:type 'class]:
+@racket[predict] with @racket[#:type 'response] returns the class-1
+probability for each row, and with @racket[#:type 'class] the label:
 
 @examples[#:eval ev #:label #f
-(logistic-predict-proba fit X)
-(equal? (logistic-predict fit X) y)
+(predict fit X #:type 'response)
 (equal? (predict fit X #:type 'class) y)
 ]
 
-Every training point is classified correctly. The threshold defaults to
-@racket[0.5]; for a point near the boundary, where it sits decides the label:
+Every training point is classified correctly. @racket[logistic-predict-proba]
+is the first call. @racket[logistic-predict] is the second with a
+@racket[#:threshold] on the probability, @racket[0.5] unless given; for a point
+near the boundary, where it sits decides the label:
 
 @examples[#:eval ev #:label #f
 (define borderline '((3.5 3.5 2.0)))
-(logistic-predict-proba fit borderline)
+(predict fit borderline #:type 'response)
 (logistic-predict fit borderline)
 (logistic-predict fit borderline #:threshold 0.4)
 ]
@@ -89,19 +92,20 @@ These two classes are @emph{linearly separable}: a line in the
 no finite solution on such data, because making the coefficients larger always
 fits a little better. The penalty is what keeps the fit well defined, as
 @racket[logistic-path] shows by fitting a list of @math{λ} in one call, largest
-first (@secref["concepts-path"]):
+first (@secref["concepts-path"]). @racket[in-path] walks it, giving each
+@math{λ} with its coefficients, the intercept @math{β₀} first and then
+@math{β}, and @racket[deviance-ratio] gives the deviance ratio at each
+@math{λ}, all shown to three decimals:
 
 @examples[#:eval ev #:label #f
-(define (round3 x)
-  (/ (round (* 1000 x)) 1000))
-(define (rounded v)
-  (for/list ([b (in-vector v)])
-    (round3 b)))
+(define (~r3 x) (~r x #:precision '(= 3)))
+(define (coef-line coefs)
+  (match-define (vector β₀ β ...) coefs)
+  (format "β₀ = ~a, β = ~a" (~r3 β₀) (map ~r3 β)))
 (define path (logistic-path X y #:lambda '(0.0 0.001 0.01 0.04 0.1 0.3)))
-(for ([lam (in-vector (glmnet-path-lambda path))]
-      [beta (in-vector (glmnet-path-coefficients path))]
-      [dev (in-vector (glmnet-path-dev-ratio path))])
-  (printf "λ = ~a: β = ~a, dev-ratio = ~a\n" lam (rounded beta) (round3 dev)))
+(for ([(λ coefs) (in-path path)]
+      [dev (in-vector (deviance-ratio path))])
+  (printf "λ = ~a: ~a, dev-ratio = ~a\n" λ (coef-line coefs) (~r3 dev)))
 ]
 
 At @math{λ = 0} the solver returns large coefficients, the noise predictor among
@@ -111,11 +115,13 @@ depends on where it starts. The path starts from its fit at @math{λ = 0.001};
 a single fit starts from zero and returns different ones:
 
 @examples[#:eval ev #:label #f
-(rounded (logistic-result-coefficients (logistic-fit X y #:lambda 0.0)))
+(define unpenalized (logistic-fit X y #:lambda 0.0))
+(coef-line (coef unpenalized))
 ]
 
-Even a small penalty removes the noise and keeps the coefficients finite. On harder data, glmnet can instead fail with an error
-saying a class probability collapsed; a larger @racket[#:lambda] fixes that too.
+Even a small penalty removes the noise and keeps the coefficients finite. On
+harder data, glmnet can instead fail with an error saying a class probability
+collapsed; a larger @racket[#:lambda] fixes that too.
 
 @section[#:tag "ex-logistic-when"]{When to use it}
 

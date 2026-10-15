@@ -21,35 +21,34 @@ responses.
 (require glmnet)]
 
 @chunk[<provide>
-(provide run-example)]
+(provide X Y fit predictions)]
+
+The two responses are exactly @math{y₁ = 1 + 2x₁} and @math{y₂ = 10 − x₁}:
 
 @chunk[<data>
 (define X '((1.0 2.0) (2.0 1.0) (3.0 2.0) (4.0 1.0) (5.0 2.0) (6.0 1.0)))
-(code:comment "two responses: y1 = 1 + 2*x1, y2 = 10 - x1")
 (define Y '((3.0 9.0) (5.0 8.0) (7.0 7.0) (9.0 6.0) (11.0 5.0) (13.0 4.0)))]
 
-@racket[mgaussian-fit] takes the predictor matrix and the response matrix and
-returns a @racket[mgaussian-result] whose @racket[mgaussian-result-coefficients]
-is a vector of per-response coefficient vectors. The @math{x₁} coefficient is
-positive for response 1 and negative for response 2; the @math{x₂} coefficients
-are exactly @racket[0.0] for both.
+@racket[mgaussian-fit] takes the predictor matrix and the response matrix. Its
+@racket[coef] is a vector of per-response vectors, each an intercept followed by
+the coefficients. The @math{x₁} coefficient is positive for response 1 and
+negative for response 2; the @math{x₂} coefficients are exactly @racket[0.0]
+for both.
 
 @chunk[<fit>
-(define result (mgaussian-fit X Y #:lambda 0.1))]
+(define fit (mgaussian-fit X Y #:lambda 0.1))]
 
-@racket[mgaussian-predict] returns the per-response predictions for each row:
+@racket[predict] returns the per-response predictions for each row, one
+@math{(y₁ y₂)} pair per row, tracking @racket[Y]:
 
-@racketblock[
-(mgaussian-predict result X)
-(code:comment "=> one (y1 y2) pair per row, tracking Y")]
+@chunk[<predict>
+(define predictions (predict fit X))]
 
-@chunk[<run-example>
-(define (run-example)
-  <data>
-  <fit>
-  result)]
+@racket[mgaussian-predict] is the same call.
 
 @chunk[<*>
   <require>
   <provide>
-  <run-example>]
+  <data>
+  <fit>
+  <predict>]
