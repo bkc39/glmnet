@@ -68,7 +68,8 @@ In a formula @tt{^} crosses terms, and @tt{hp} crossed with itself is
 @examples[#:eval ev #:label #f
 (define trap (formula-path (mpg . ~ . hp + hp ^ 2) mtcars))
 (formula-model-predictor-names trap)
-(equal? (formula-model-fit trap) (formula-model-fit (formula-path (~ mpg hp) mtcars)))
+(define linear (formula-path (~ mpg hp) mtcars))
+(equal? (formula-model-fit trap) (formula-model-fit linear))
 ]
 
 R's @tt{glmnet} cannot fit this one, since it needs at least two columns;
@@ -89,11 +90,11 @@ At the end of the path the logarithm of horsepower and the weight explain
 @racketfont{(mpg . ~ . hp + wt)}, explain @math{82.7%}:
 
 @examples[#:eval ev #:label #f
+(define hp-path (formula-path (mpg . ~ . hp + wt) mtcars))
 (define (final-deviance-ratio model)
-  (define ratios (deviance-ratio model))
-  (vector-ref ratios (sub1 (vector-length ratios))))
-(final-deviance-ratio log-path)
-(final-deviance-ratio (formula-path (mpg . ~ . hp + wt) mtcars))
+  (for/last ([ratio (in-vector (deviance-ratio model))]) ratio))
+(fmt (final-deviance-ratio log-path))
+(fmt (final-deviance-ratio hp-path))
 ]
 
 @section[#:tag "ex-formula-polynomial-new"]{New data}
@@ -101,7 +102,7 @@ At the end of the path the logarithm of horsepower and the weight explain
 @racket[predict] evaluates the transforms again, on the new table's columns:
 
 @examples[#:eval ev #:label #f
-(define new-cars (list (cons "hp" '(100 200 300)) (cons "wt" '(2.5 3.5 4.0))))
+(define new-cars '((hp 100 200 300) (wt 2.5 3.5 4.0)))
 (predict quadratic new-cars #:lambda 0.01)
 (predict log-path new-cars #:lambda 0.1)
 ]

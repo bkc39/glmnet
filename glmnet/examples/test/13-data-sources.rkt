@@ -6,46 +6,51 @@
 ;;   fit <- glmnet(x, y); length(fit$lambda); range(fit$lambda)
 ;;   tail(fit$dev.ratio, 1); coef(fit, s = 0.5)
 
-(require racket/list
-         glmnet
+(require glmnet
          "../13-data-sources.rkt")
 
-(define sources '(table nested csv math polars))
-
 (module+ main
-  (define-values (design-matrices fits coefficients) (run-example))
-  (for ([source (in-list sources)] [x (in-list design-matrices)])
-    (printf "~a: ~a\n" source x))
-  (printf "same design matrices = ~a\n" (andmap (lambda (x) (equal? x (first design-matrices)))
-                                                design-matrices))
-  (printf "same fits            = ~a\n" (andmap (lambda (f) (equal? f (first fits))) fits))
-  (displayln (first fits))
-  (printf "coef, λ = 0.5        = ~a\n" coefficients))
+  (for ([fit (in-list (list from-table from-rows from-csv from-math from-polars from-design))])
+    (println fit))
+  (println coefficients)
+  (println formula-coefs)
+  (println nested)
+  (println matrix)
+  (println dataframe)
+  (display csv))
 
 (module+ test
-  (require rackunit)
-  (define-values (design-matrices fits coefficients) (run-example))
+  (require racket/dict
+           (only-in math/matrix matrix->list*)
+           (only-in polars column-names)
+           rackunit
+           (submod "common.rkt" test))
 
-  (check-equal? (length design-matrices) (length sources))
-  (for ([source (in-list sources)] [x (in-list design-matrices)] [f (in-list fits)])
-    (check-equal? x (first design-matrices) (format "~a: design matrix" source))
-    (check-equal? f (first fits) (format "~a: path" source)))
+  (for ([(source fit) (in-dict (list (cons 'rows from-rows)
+                                     (cons 'csv from-csv)
+                                     (cons 'math from-math)
+                                     (cons 'polars from-polars)
+                                     (cons 'design from-design)))])
+    (check-equal? fit from-table (format "~a: path" source)))
 
-  (define x (first design-matrices))
-  (check-equal? (design-matrix-column-names x) '("wt" "hp" "qsec"))
-  (check-equal? (design-matrix-nrows x) 32)
+  (check-lambda-range from-table 58 5.1469810628314443 0.025616646034883256)
+  (check-close (final-deviance-ratio from-table) 0.83473179432107047)
 
-  ;; R: 58 λ from 5.1469810628314443 down to 0.025616646034883256, 83.47% of
-  ;; the deviance at the end.
-  (define fit (first fits))
-  (define lambdas (glmnet-path-lambda fit))
-  (check-equal? (vector-length lambdas) 58)
-  (check-within (vector-ref lambdas 0) 5.1469810628314443 1e-9)
-  (check-within (vector-ref lambdas 57) 0.025616646034883256 1e-12)
-  (check-within (vector-ref (glmnet-path-dev-ratio fit) 57) 0.83473179432107047 1e-6)
+  (define r-coef
+    '(33.165620144257374591 -3.682927973039096692 -0.023852761602279591 0.127337031698973008))
+  (check-close coefficients (list->vector r-coef))
+  (for ([formula-coef (in-list formula-coefs)])
+    (check-close formula-coef (map cons '("(Intercept)" "wt" "hp" "qsec") r-coef)))
+  (for ([(source fit) (in-dict (list (cons 'table formula-from-table)
+                                     (cons 'csv formula-from-csv)
+                                     (cons 'polars formula-from-polars)))])
+    (check-equal? (glmnet-path-lambda (formula-model-fit fit)) (glmnet-path-lambda from-table)
+                  (format "~a formula: λ" source)))
 
-  ;; R: coef(fit, s = 0.5), to six significant digits.
-  (for ([g (in-vector coefficients)]
-        [e (in-list '(33.165620144257374591 -3.682927973039096692 -0.023852761602279591
-                      0.127337031698973008))])
-    (check-within g e (* 1e-6 (abs e)))))
+  (check-equal? (design-matrix-column-names design) predictors)
+  (check-equal? (design-matrix-nrows design) 32)
+  (define first-rows (for/list ([row (in-vector rows 0 3)]) (vector->list row)))
+  (check-equal? nested first-rows)
+  (check-equal? (matrix->list* matrix) first-rows)
+  (check-equal? (column-names dataframe) predictors)
+  (check-regexp-match #rx"^wt,hp,qsec\n2.62,110,16.46\n" csv))

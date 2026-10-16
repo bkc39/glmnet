@@ -31,14 +31,17 @@ The data are R's @tt{mtcars}, which
          glmnet/datasets)]
 
 @chunk[<provide>
-(provide run-example)]
+(provide quadratic as-in-r trap log-path hp-path final-deviance-ratio
+         new-cars curve log-predictions)]
 
 The quadratic's lasso path. Horsepower enters first, and the square only at
 @math{λ ≈ 0.26}; at @math{λ = 0.01} the coefficients are close to R's
-@tt{lm}, @math{40.4 − 0.213 hp + 0.00042 hp²}.
+@tt{lm}, @math{40.4 − 0.213 hp + 0.00042 hp²}. R's @tt{I(hp^2)}, written as
+R writes it, gives the same fit.
 
 @chunk[<quadratic>
-(define quadratic (formula-path (mpg . ~ . hp + (sqr hp)) mtcars))]
+(define quadratic (formula-path (mpg . ~ . hp + (sqr hp)) mtcars))
+(define as-in-r (formula-path (mpg . ~ . hp + (I (expt hp 2))) mtcars))]
 
 R's @tt{x^2} is not a square: this formula has the one predictor
 @racket["hp"].
@@ -51,26 +54,24 @@ itself does: at the end of the path the deviance ratio is @math{0.859}, where
 @tt{mpg ~ hp + wt} reaches @math{0.827}.
 
 @chunk[<log>
-(define log-path (formula-path (mpg . ~ . (log hp) + wt) mtcars))]
+(define log-path (formula-path (mpg . ~ . (log hp) + wt) mtcars))
+(define hp-path (formula-path (mpg . ~ . hp + wt) mtcars))
+(define (final-deviance-ratio model)
+  (for/last ([ratio (in-vector (deviance-ratio model))]) ratio))]
 
 @racket[predict] computes the transforms again from the new table's columns.
 The quadratic flattens out: from 100 to 200 horsepower it loses 8.6 miles per
 gallon at @math{λ = 0.01}, and from 200 to 300 only half a mile.
 
 @chunk[<new-data>
-(define new-cars (list (cons "hp" '(100 200 300)) (cons "wt" '(2.5 3.5 4.0))))
+(define new-cars '((hp 100 200 300) (wt 2.5 3.5 4.0)))
 (define curve (predict quadratic new-cars #:lambda 0.01))
 (define log-predictions (predict log-path new-cars #:lambda 0.1))]
-
-@chunk[<run-example>
-(define (run-example)
-  <quadratic>
-  <trap>
-  <log>
-  <new-data>
-  (values quadratic trap log-path curve log-predictions))]
 
 @chunk[<*>
   <require>
   <provide>
-  <run-example>]
+  <quadratic>
+  <trap>
+  <log>
+  <new-data>]

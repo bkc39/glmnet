@@ -15,10 +15,12 @@ recovers @secref["ex-ridge"] and @math{α = 1} recovers @secref["ex-lasso"].
 @chunk[<require>
 (require racket/list
          racket/match
+         racket/math
          glmnet)]
 
 @chunk[<provide>
-(provide X y fit zero-counts X-dup lasso-dup enet-dup)]
+(provide X y fit zero-counts X-dup lasso-dup enet-dup X40 y40 folds alpha-cvs
+         longer-grid longer-ridge-cv)]
 
 The running fixture again, with the irrelevant @math{x₃ = x₁²}:
 
@@ -65,10 +67,44 @@ almost equal coefficients.
 (define lasso-dup (lasso X-dup y #:lambda 0.1))
 (define enet-dup (elastic-net X-dup y #:alpha 0.5 #:lambda 0.1))]
 
+@racket[elnet-cv] chooses @math{λ} for one @math{α}. To choose @math{α} too,
+cross-validate each candidate on the same folds, so that the errors differ only
+because the models do. The data are the 40 noisy observations of
+@secref["ex-lasso-cv"]:
+
+@chunk[<noisy>
+(random-seed 3)
+(define (uniform a b) (+ a (* (- b a) (random))))
+(define-values (x₁ x₂)
+  (for/lists (x₁ x₂) ([_ (in-range 40)])
+    (values (uniform 0 6) (uniform 0 6))))
+(define X40 (map list x₁ x₂ (map sqr x₁)))
+(define y40
+  (for/list ([a (in-list x₁)] [b (in-list x₂)])
+    (+ 1.0 (* 2 a) (- b) (uniform -1 1))))]
+
+Ridge's default path stops before its error bottoms out, so its best @math{λ}
+is the last one; a longer @racket[#:lambda] grid closes the gap. Every
+@math{α} above 0 reaches nearly the same error, within one standard error of
+the others.
+
+@chunk[<choosing>
+(define folds (random-fold-ids 40))
+(define alpha-cvs
+  (for/list ([α (in-list '(0.0 0.25 0.5 0.75 1.0))])
+    (cons α (elnet-cv X40 y40 #:alpha α #:fold-ids folds))))
+(define longer-grid
+  (for/list ([i (in-range 160)])
+    (expt 10.0 (- 3.5 (* 0.05 i)))))
+(define longer-ridge-cv
+  (elnet-cv X40 y40 #:alpha 0.0 #:fold-ids folds #:lambda longer-grid))]
+
 @chunk[<*>
   <require>
   <provide>
   <data>
   <fit>
   <zeros>
-  <grouping>]
+  <grouping>
+  <noisy>
+  <choosing>]

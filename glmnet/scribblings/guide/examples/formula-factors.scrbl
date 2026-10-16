@@ -87,9 +87,9 @@ These three have only four and eight cylinders, which is fine; a car with
 five is an error that names the level, as R's "factor has new levels" is:
 
 @examples[#:eval ev #:label #f
-(define new-cars (list (cons "wt" '(2.5 3.5 3.5)) (cons "cyl" '(4 4 8))))
+(define new-cars '((wt 2.5 3.5 3.5) (cyl 4 4 8)))
 (predict cylinders new-cars #:lambda 0.1)
-(eval:error (predict cylinders (list (cons "wt" '(3.0)) (cons "cyl" '(5)))))
+(eval:error (predict cylinders '((wt 3.0) (cyl 5))))
 ]
 
 At @math{λ = 0.1}, a thousand pounds more cost the four-cylinder car 3.3
@@ -107,10 +107,10 @@ each new flower:
   (formula-path (~ Species all) iris #:family 'multinomial))
 (coef species #:lambda 0.05)
 (define flowers
-  (list (cons "Sepal.Length" '(5.0 6.0 6.5))
-        (cons "Sepal.Width" '(3.4 2.8 3.0))
-        (cons "Petal.Length" '(1.5 4.5 5.6))
-        (cons "Petal.Width" '(0.2 1.4 2.1))))
+  '((Sepal.Length 5.0 6.0 6.5)
+    (Sepal.Width 3.4 2.8 3.0)
+    (Petal.Length 1.5 4.5 5.6)
+    (Petal.Width 0.2 1.4 2.1)))
 (predict species flowers #:type 'class #:lambda 0.05)
 (predict species flowers #:type 'response #:lambda 0.05)
 ]
@@ -140,9 +140,11 @@ and the same for @tt{mpg ~ wt * factor(cyl)}. R 4.5.3 with glmnet 4.1.10
 gives the same paths, 61 λ values from @math{5.147} down to @math{0.01938}
 for the cylinders, 92 down to @math{0.001083} for the slopes and 100 down to
 @math{0.0000435} for the species, and the coefficients, predictions and
-classes above. R names the columns @tt{factor(cyl)6} and
+classes above. The example's companion test checks each number against R's to
+six significant digits.
+
+One thing differs: R names the columns @tt{factor(cyl)6} and
 @tt{wt:factor(cyl)6}, which are @racket["(factor cyl)6"] and
-@racket["wt:(factor cyl)6"] here. The example's companion test checks each
-number against R's to six significant digits.
+@racket["wt:(factor cyl)6"] here (see @secref["formulas-factors"]).
 
 @(close-eval ev)

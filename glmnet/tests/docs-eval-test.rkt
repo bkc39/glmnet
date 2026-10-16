@@ -22,6 +22,13 @@
     (noisy-fixture ev #:hidden)
     (check-equal? (ev '(map length (list X40 y40))) '(40 40)))
 
+  (test-case "the elastic-net page draws its program's X40, y40 and folds"
+    (define ev (make-glmnet-eval))
+    (noisy-fixture ev #:hidden)
+    (define (program name) (dynamic-require 'glmnet/examples/03-elastic-net name))
+    (check-equal? (list (ev 'X40) (ev 'y40) (ev '(random-fold-ids 40)))
+                  (map program '(X40 y40 folds))))
+
   (test-case "noisy-fixture rejects an option examples does not take"
     (check-exn #rx"noisy-fixture: expected one of these literals: #:label or #:hidden"
                (λ () (convert-compile-time-error (noisy-fixture ev #:bogus))))))

@@ -291,8 +291,12 @@ different `α` (`parm`) and `λ`. Each new capability is shipped as one unit:
 7. **Add the user-guide pages.** Add the family to `scribblings/guide/concepts.scrbl`
    (its `@deftech`, response shape, table rows) and convert the example into
    `scribblings/guide/examples/name.scrbl`, included from
-   `guide/examples.scrbl`: the lp2 prose and chunks as live `@examples`, plus a
-   λ/α sweep and the prediction helpers on new data.
+   `guide/examples.scrbl`: the lp2 prose and chunks as live `@examples`, at
+   top level, with `coef`, `predict` and `deviance-ratio` before any family
+   helper; plus a λ/α sweep and `predict` on new data. A value the page
+   shares with the program has the program's name; the page may show a
+   subset of the program and add helpers of its own. The page passes #59's
+   idiom checklist and `tests/docs-idiom-test.rkt`.
 8. **Add the reference entry.** Document the new public procs and result struct
    in `scribblings/reference.scrbl` (contract matching `contract-out` + a live
    example each).
@@ -379,13 +383,15 @@ Resyntax reads neither `.scrbl` files nor lp2 programs, so
 chunk; not the reference), and the `examples` templates of the helper
 modules under `scribblings/`, for #59's idioms: a family or path accessor where
 `coef`, `predict` or `deviance-ratio` belongs, a last element by index
-arithmetic, hand rounding, positional access, hand-written output and a page's
-own copy of `fmt` or `coef-line`. A hit
-names file:line, the idiom and the fix. `allowed-hits` counts, per file and
-idiom, the hits not yet rewritten, and a count must equal the file's hits: a
-file gains none, a rewrite lowers its counts in the same commit, and a file
-not listed has none. `racket glmnet/tests/docs-idiom-test.rkt` prints every
-hit and the current counts.
+arithmetic, hand rounding, positional access (`car`, `list-ref`,
+`vector-ref`, ...), hand-written output and a page's own copy of `fmt` or
+`coef-line`. It checks the companion tests in `examples/test/` whole, for
+positional access only. Every `scribblings/guide/examples/*.scrbl` page must
+carry a `Source:` margin note naming its program, and a page fails when its
+`define`, `match-define` or `define-values` binds an expression that the
+program binds under another name.
+A checked file has no hit; a hit names file:line, the idiom and the fix.
+`racket glmnet/tests/docs-idiom-test.rkt` prints every hit.
 
 ## Local dev loop
 
