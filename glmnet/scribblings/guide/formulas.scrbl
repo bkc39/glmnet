@@ -36,40 +36,55 @@ A name is a string or a symbol, and a column a list, vector, @racket[flvector]
 or @racket[f64vector] of reals, or a list or vector of strings, symbols or
 booleans, which a formula reads as categories (see
 @secref["formulas-factors"]). Names are compared as strings, so the symbol
-@racket['age] and the string @racket["age"] name the same column. The examples in this chapter use a table
-of 60 simulated patients: an @racket["age"], a @racket["dose"] and a
-@racket["marker"], and the responses of three models. Blood pressure,
-@racket["bp"], depends on age and dose; a relapse, @racket["relapse"] (0 or
-1), on dose and the marker; and a survival time, @racket["time"] with its
-event indicator @racket["status"], on age and the marker:
+@racket['age] and the string @racket["age"] name the same column.
+
+The examples in this chapter use a table of 60 simulated patients, with three
+predictors, an @racket["age"], a @racket["dose"] and a @racket["marker"]:
 
 @examples[#:eval ev #:label #f
 (random-seed 1)
 (define (uniform a b) (+ a (* (- b a) (random))))
 (define n 60)
-(define age (for/list ([i (in-range n)]) (+ 30 (random 51))))
-(define dose (for/list ([i (in-range n)]) (uniform 0 10)))
-(define marker (for/list ([i (in-range n)]) (uniform -1 1)))
+(define age (for/list ([_ (in-range n)]) (+ 30 (random 51))))
+(define dose (for/list ([_ (in-range n)]) (uniform 0 10)))
+(define marker (for/list ([_ (in-range n)]) (uniform -1 1)))
+]
+
+The table also holds the responses of three models. Blood pressure,
+@racket["bp"], depends on age and dose, and a relapse, @racket["relapse"]
+(0 or 1), on dose and the marker:
+
+@examples[#:eval ev #:label #f
 (define bp
   (for/list ([a (in-list age)] [d (in-list dose)])
     (+ 90 (* 0.6 a) (* -2 d) (uniform -5 5))))
 (define relapse
   (for/list ([d (in-list dose)] [m (in-list marker)])
     (if (> (+ 1 (* -0.4 d) (* 3 m) (uniform -1 1)) 0) 1 0)))
+]
+
+A survival time, @racket["time"], depends on age and the marker. It is the
+earlier of an event and a censoring time, and its indicator @racket["status"]
+is 1 where the event came first:
+
+@examples[#:eval ev #:label #f
 (define event-times
   (for/list ([a (in-list age)] [m (in-list marker)])
     (/ (- (log (random))) (exp (+ (* 0.04 (- a 55)) (* 1.5 m))))))
-(define censor-times (for/list ([i (in-range n)]) (uniform 0 4)))
+(define censor-times (for/list ([_ (in-range n)]) (uniform 0 4)))
+(define status
+  (for/list ([e (in-list event-times)] [c (in-list censor-times)])
+    (if (<= e c) 1 0)))
+]
+
+The table holds the columns by name:
+
+@examples[#:eval ev #:label #f
 (define patients
-  (list (cons "age" age)
-        (cons "dose" dose)
-        (cons "marker" marker)
-        (cons "bp" bp)
-        (cons "relapse" relapse)
+  (list (cons "age" age) (cons "dose" dose) (cons "marker" marker)
+        (cons "bp" bp) (cons "relapse" relapse)
         (cons "time" (map min event-times censor-times))
-        (cons "status" (for/list ([e (in-list event-times)]
-                                  [c (in-list censor-times)])
-                         (if (<= e c) 1 0)))))
+        (cons "status" status)))
 (table-column-names patients)
 ]
 
@@ -175,7 +190,7 @@ two predictors that blood pressure depends on:
 
 @examples[#:eval ev #:label #f
 (coef bp-fit)
-(cdr (assoc "dose" (coef bp-fit)))
+(dict-ref (coef bp-fit) "dose")
 ]
 
 @racket[predict] takes a new table and reads the predictors from it by name.
@@ -184,12 +199,12 @@ predictor is an error that names it:
 
 @examples[#:eval ev #:label #f
 (define new-patients
-  (list (cons "id" '(101 102))
-        (cons "marker" '(0.5 -0.5))
-        (cons "dose" '(2.0 8.0))
-        (cons "age" '(40 70))))
+  '((id 101 102)
+    (marker 0.5 -0.5)
+    (dose 2.0 8.0)
+    (age 40 70)))
 (predict bp-fit new-patients)
-(eval:error (predict bp-fit (list (cons "age" '(40)) (cons "dose" '(2.0)))))
+(eval:error (predict bp-fit '((age 40) (dose 2.0))))
 ]
 
 @racket[formula-path] fits a @tech{regularization path}, and
@@ -205,13 +220,12 @@ bp-cv
 ]
 
 The model is a @racket[formula-model]. @racket[formula-model-fit] returns the
-result it holds, which is exactly what the family's procedure returns for the
-same columns as a matrix:
+fit it holds, which equals the matrix call that the formula replaces:
 
 @examples[#:eval ev #:label #f
 (formula-model-fit bp-fit)
-(equal? (formula-model-fit bp-fit)
-        (lasso (map list age dose marker) bp #:lambda 0.5))
+(define age+dose+marker (map list age dose marker))
+(equal? (formula-model-fit bp-fit) (lasso age+dose+marker bp #:lambda 0.5))
 ]
 
 @section[#:tag "formulas-algebra"]{The formula algebra}
@@ -376,7 +390,7 @@ here the age and the dose:
 
 @examples[#:eval ev #:label #f
 (define crossed (formula-fit (~ bp (* age dose)) patients #:lambda 0.1))
-(predict crossed (list (cons "dose" '(2.0 8.0)) (cons "age" '(40 70))))
+(predict crossed '((dose 2.0 8.0) (age 40 70)))
 ]
 
 A table that lacks one of them is an error that names it, as
@@ -520,7 +534,7 @@ read, and it reads their Racket bindings again, as R's @tt{predict} does:
 (define curved
   (formula-fit (bp . ~ . age + (sqr age) + (log dose)) patients #:lambda 0.1))
 (predict curved new-patients)
-(eval:error (predict curved (list (cons "age" '(40)) (cons "dose" '(0.0)))))
+(eval:error (predict curved '((age 40) (dose 0.0))))
 ]
 
 @subsection[#:tag "formulas-transform-data"]{Transforms as data}
@@ -583,7 +597,7 @@ formula front end. The examples in this section use R's @tt{mtcars}, whose
 @examples[#:eval ev #:label #f
 (require glmnet/datasets)
 (table-column-names iris)
-(vector-ref (cdr (assoc "Species" iris)) 100)
+(remove-duplicates (vector->list (dict-ref iris "Species")))
 ]
 
 @subsection[#:tag "formulas-factor-columns"]{Which columns are factors}
@@ -756,9 +770,9 @@ string with its text. A level that the model was not fitted with is an error
 that names it, as R's "factor has new levels" is:
 
 @examples[#:eval ev #:label #f
-(define new-cars (list (cons "wt" '(2.5 3.5)) (cons "cyl" '(8 4))))
+(define new-cars '((wt 2.5 3.5) (cyl 8 4)))
 (predict cars new-cars)
-(eval:error (predict cars (list (cons "wt" '(3.0)) (cons "cyl" '(5)))))
+(eval:error (predict cars '((wt 3.0) (cyl 5))))
 ]
 
 A column that a transform reads must hold the kind of value it held when the
@@ -773,8 +787,7 @@ names the transform, the column and both kinds:
 (define setosa
   (formula-fit (Sepal.Length . ~ . (equal? Species "setosa") + Petal.Width) iris
                #:lambda 0.05))
-(eval:error (predict setosa (list (cons "Petal.Width" '(0.2))
-                                  (cons "Species" '(setosa)))))
+(eval:error (predict setosa '((Petal.Width 0.2) (Species setosa))))
 ]
 
 @subsection[#:tag "formulas-factor-response"]{Categorical responses}
@@ -790,12 +803,12 @@ model's coefficients by class, and @racket[predict] with
 (define species
   (formula-fit (~ Species all) iris
                #:family 'multinomial #:lambda 0.05))
-(map car (coef species))
+(dict-keys (coef species))
 (define flowers
-  (list (cons "Sepal.Length" '(5.0 6.5))
-        (cons "Sepal.Width" '(3.4 3.0))
-        (cons "Petal.Length" '(1.5 5.6))
-        (cons "Petal.Width" '(0.2 2.1))))
+  '((Sepal.Length 5.0 6.5)
+    (Sepal.Width 3.4 3.0)
+    (Petal.Length 1.5 5.6)
+    (Petal.Width 0.2 2.1)))
 (predict species flowers #:type 'class)
 ]
 
