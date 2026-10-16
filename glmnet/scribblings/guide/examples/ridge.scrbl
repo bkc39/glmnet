@@ -35,8 +35,8 @@ correlated with @math{x₁}:
 
 @examples[#:eval ev #:label #f
 (define fit (ridge X y #:lambda 0.1))
-(elnet-result-coefficients fit)
-(elnet-result-r-squared fit)
+(coef fit)
+(deviance-ratio fit)
 ]
 
 Least squares would give @math{x₃} a coefficient of zero. Ridge gives it a small
@@ -48,24 +48,23 @@ it. That is the characteristic ridge behaviour: shrink, never select.
 
 @racket[elnet-path] with @racket[#:alpha 0.0] fits the ridge penalty over a
 list of @math{λ} in one call, largest first (@secref["concepts-path"]), and
-traces how the coefficients shrink:
+traces how the coefficients shrink. @racket[in-path] walks it, giving each
+@math{λ} with its coefficients as @racket[coef] gives them, the intercept
+@math{β₀} first and then @math{β}, shown to three decimals:
 
 @examples[#:eval ev #:label #f
-(define (round3 x)
-  (/ (round (* 1000 x)) 1000))
-(define (rounded v)
-  (for/list ([b (in-vector v)])
-    (round3 b)))
+(define (~r3 x) (~r x #:precision '(= 3)))
+(define (coef-line coefs)
+  (match-define (vector β₀ β ...) coefs)
+  (format "β₀ = ~a, β = ~a" (~r3 β₀) (map ~r3 β)))
 (define path (elnet-path X y #:alpha 0.0 #:lambda '(0.01 0.1 1.0 10.0 100.0)))
-(for ([lam (in-vector (glmnet-path-lambda path))]
-      [a0 (in-vector (glmnet-path-intercepts path))]
-      [beta (in-vector (glmnet-path-coefficients path))])
-  (printf "λ = ~a: β₀ = ~a, β = ~a\n" lam (round3 a0) (rounded beta)))
+(for ([(λ coefs) (in-path path)])
+  (printf "λ = ~a: ~a\n" λ (coef-line coefs)))
 ]
 
-Read upward, as @math{λ} grows, every coefficient heads toward zero and none
-reaches it, while the intercept heads toward the mean of @racket[y], which is
-@racket[4.5]. Along the way the
+Read upward, as @math{λ} grows, every coefficient in @math{β} heads toward
+zero and none reaches it, while the intercept heads toward the mean of
+@racket[y], which is @racket[4.5]. Along the way the
 coefficient on @math{x₂} changes sign. As @math{λ} grows, each ridge coefficient
 approaches a scaled-down copy of its predictor's covariance with the response,
 taken on its own; @math{x₂} rises with @math{x₁}, so on its own it is

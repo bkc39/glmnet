@@ -51,21 +51,31 @@ each coefficient against @math{−log λ}:
 ]
 
 Each curve leaves zero where its predictor enters the model. The largest
-@math{λ} at which each coefficient is nonzero gives the order of entry:
+@math{λ} at which each coefficient is nonzero gives the order of entry.
+@racket[in-path] walks the path from the largest @math{λ}, giving the
+coefficients as @racket[coef] does, the intercept first, so column @racket[j]
+of @racket[x] is at index @racket[(+ j 1)]:
 
 @examples[#:eval ev #:label #f
 (define (entry-lambda j)
-  (for/first ([beta (in-vector (glmnet-path-coefficients fit))]
-              [lam (in-vector (glmnet-path-lambda fit))]
-              #:unless (zero? (vector-ref beta j)))
-    lam))
+  (for/first ([(λ β) (in-path fit)]
+              #:unless (zero? (vector-ref β j)))
+    λ))
 (define entries
   (sort (for/list ([name (in-list (design-matrix-column-names x))]
-                   [j (in-naturals)])
+                   [j (in-naturals 1)])
           (cons name (entry-lambda j)))
         > #:key cdr))
-(for/list ([entry (in-list entries)])
-  (cons (car entry) (/ (round (* 1000 (cdr entry))) 1000)))
+]
+
+@racket[entries] is an association list, from each name to the @math{λ}
+at which it enters, here shown to two decimals:
+
+@examples[#:eval ev #:label #f
+(string-join (dict-keys entries))
+(define (~r2 x) (~r x #:precision '(= 2)))
+(for ([(name λ) (in-dict (take entries 6))])
+  (printf "~a: λ = ~a\n" name (~r2 λ)))
 ]
 
 @tt{V1} and @tt{V14} enter first, at @math{λ ≈ 1.49}, then @tt{V5} and
@@ -117,7 +127,7 @@ rows, which Racket cannot reproduce, so the new rows here are the first five
 of @racket[x]; @racket[design-matrix-select-rows] counts rows from 0:
 
 @examples[#:eval ev #:label #f
-(define first-five (design-matrix-select-rows x '(0 1 2 3 4)))
+(define first-five (design-matrix-select-rows x (range 5)))
 (predict fit first-five #:lambda '(0.1 0.05))
 ]
 
@@ -133,7 +143,7 @@ same folds as @tt{foldid <- rep(1:10, length.out = 100)}, counted from 1, and
 with them @tt{cv.glmnet(x, y, foldid = foldid)} gives the numbers below:
 
 @examples[#:eval ev #:label #f
-(define fold-ids (for/list ([i (in-range (length y))]) (modulo i 10)))
+(define fold-ids (build-list (length y) (λ (i) (modulo i 10))))
 (take fold-ids 12)
 (define cvfit (elnet-cv x y #:fold-ids fold-ids))
 cvfit

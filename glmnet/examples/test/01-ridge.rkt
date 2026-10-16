@@ -6,18 +6,14 @@
          "../01-ridge.rkt")
 
 (module+ main
-  (define r (run-example))
-  (printf "ridge intercept    = ~a\n" (elnet-result-intercept r))
-  (printf "ridge coefficients = ~a\n" (elnet-result-coefficients r))
-  (printf "R^2                = ~a\n" (elnet-result-r-squared r)))
+  (println fit)
+  (println (coef fit)))
 
 (module+ test
-  (require rackunit)
-  (define r (run-example))
-  (define b (elnet-result-coefficients r))
-  ;; Ridge shrinks but never selects: every coefficient stays nonzero.
-  (check-true (for/and ([bi (in-vector b)]) (not (zero? bi)))
-              "ridge keeps all coefficients nonzero")
-  ;; The leading coefficient is shrunk below its OLS value (~2.0).
-  (check-true (< (abs (vector-ref b 0)) 2.0)
-              "ridge shrinks the leading coefficient"))
+  (require racket/match
+           rackunit)
+  (match-define (vector _ b1 b2 b3) (coef fit))
+  (check-false (ormap zero? (list b1 b2 b3))
+               "ridge keeps all coefficients nonzero")
+  (check-true (< (abs b1) 2.0)
+              "ridge shrinks the leading coefficient below its OLS value"))

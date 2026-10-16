@@ -20,7 +20,9 @@
          scribble/core
          scribble/decode
          racket/sandbox
-         syntax/parse/define)
+         syntax/parse/define
+         (for-syntax racket/base
+                     syntax/parse))
 
 (require (for-label glmnet
                     (only-in datasets load-dataset)
@@ -67,6 +69,7 @@
                                   plot
                                   plot/utils))
          make-glmnet-eval
+         noisy-fixture
          see-reference
          exnraise)
 
@@ -78,6 +81,24 @@
                  [sandbox-security-guard current-security-guard]
                  [sandbox-path-permissions '((exists "/"))])
     (make-base-eval #:lang 'racket '(require glmnet))))
+
+(begin-for-syntax
+  (define-splicing-syntax-class fixture-option
+    #:description "an examples option"
+    (pattern (~seq #:label label:expr) #:with (form ...) #'(#:label label))
+    (pattern (~seq #:hidden) #:with (form ...) #'(#:hidden))))
+
+(define-syntax-parse-rule (noisy-fixture ev:expr option:fixture-option ...)
+  (examples #:eval ev option.form ... ...
+   (random-seed 3)
+   (define (uniform a b) (+ a (* (- b a) (random))))
+   (define-values (x₁ x₂)
+     (for/lists (x₁ x₂) ([_ (in-range 40)])
+       (values (uniform 0 6) (uniform 0 6))))
+   (define X40 (map list x₁ x₂ (map sqr x₁)))
+   (define y40
+     (for/list ([a (in-list x₁)] [b (in-list x₂)])
+       (+ 1.0 (* 2 a) (- b) (uniform -1 1))))))
 
 ;; "the @exnraise[exn:fail:contract]" => "the `exn:fail:contract` exception is
 ;; raised", after mz.rkt.

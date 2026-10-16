@@ -30,41 +30,47 @@ The same fixture as @secref["ex-ridge"]: the response is exactly
 
 @section[#:tag "ex-lasso-fit"]{Fitting}
 
-@racket[lasso] is @racket[elnet-fit] with @racket[#:alpha 1.0]:
+@racket[lasso] is @racket[elnet-fit] with @racket[#:alpha 1.0]. @racket[coef]
+gives the intercept @math{β₀} and then the coefficients @math{β}, here shown to
+three decimals:
 
 @examples[#:eval ev #:label #f
 (define fit (lasso X y #:lambda 0.05))
-(elnet-result-coefficients fit)
+(define (~r3 x) (~r x #:precision '(= 3)))
+(define (coef-line coefs)
+  (match-define (vector β₀ β ...) coefs)
+  (format "β₀ = ~a, β = ~a" (~r3 β₀) (map ~r3 β)))
+(displayln (coef-line (coef fit)))
 ]
 
-The third coefficient is exactly @racket[0.0]: the irrelevant predictor has been
-selected out, while @math{x₁} and @math{x₂} keep their signs, a little shrunk.
-To list the predictors a fit kept:
+The coefficient of @math{x₃} is exactly zero: the irrelevant predictor
+has been selected out, while @math{x₁} and @math{x₂} keep their signs, a little
+shrunk. The predictors a fit kept are those with a nonzero coefficient.
+Since the intercept comes first, the coefficients start at index 1, which is
+also the number of their predictor:
 
 @examples[#:eval ev #:label #f
-(for/list ([b (in-vector (elnet-result-coefficients fit))]
-           [j (in-naturals 1)]
-           #:unless (zero? b))
-  j)
+(define kept
+  (for/list ([b (in-vector (coef fit) 1)]
+             [j (in-naturals 1)]
+             #:unless (zero? b))
+    j))
+kept
 ]
 
 @section[#:tag "ex-lasso-path"]{The selection path}
 
 @racket[elnet-path] fits a list of @math{λ} in one call, largest first
-(@secref["concepts-path"]). Read upward, raising @math{λ} removes predictors
-one at a time:
+(@secref["concepts-path"]). @racket[in-path] walks it, giving each @math{λ}
+with its coefficients, and @racket[deviance-ratio] gives the path's @math{R²}
+at each @math{λ}. Read upward, raising @math{λ} removes predictors one at a
+time:
 
 @examples[#:eval ev #:label #f
-(define (round3 x)
-  (/ (round (* 1000 x)) 1000))
-(define (rounded v)
-  (for/list ([b (in-vector v)])
-    (round3 b)))
 (define path (elnet-path X y #:lambda '(0.01 0.05 0.2 0.5 1.0 2.5)))
-(for ([lam (in-vector (glmnet-path-lambda path))]
-      [beta (in-vector (glmnet-path-coefficients path))]
-      [r2 (in-vector (glmnet-path-dev-ratio path))])
-  (printf "λ = ~a: β = ~a, R² = ~a\n" lam (rounded beta) (round3 r2)))
+(for ([(λ coefs) (in-path path)]
+      [r² (in-vector (deviance-ratio path))])
+  (printf "λ = ~a: ~a, R² = ~a\n" λ (coef-line coefs) (~r3 r²)))
 ]
 
 At @math{λ = 0.01} all three predictors are in (the noise just barely);
@@ -73,7 +79,7 @@ at @math{λ = 2.5} nothing is left. Once every coefficient is zero the fit is th
 intercept alone, which is the mean of the response:
 
 @examples[#:eval ev #:label #f
-(elnet-result-intercept (lasso X y #:lambda 2.5))
+(displayln (coef-line (coef (lasso X y #:lambda 2.5))))
 ]
 
 @racket[plot-coefficient-path], from @racketmodname[glmnet/plot], draws the
@@ -97,23 +103,19 @@ Six observations without noise are no test of @math{λ}: with no noise to
 overfit, the smallest @math{λ} predicts best. With noisy data, cross-validation
 chooses @math{λ} by how well each fit predicts observations it did not see
 (@secref["concepts-cv"]). Here are 40 observations of the same model, with
-uniform noise on @math{[−1, 1]} added to @math{y}:
+uniform noise on @math{[−1, 1]} added to @math{y}, as rows @racket[X40] and
+responses @racket[y40]:
+
+@noisy-fixture[ev #:label #f]
+
+@racket[elnet-cv] cross-validates the lasso path on them, and @racket[coef]
+reads the coefficients at either λ it chose:
 
 @examples[#:eval ev #:label #f
-(random-seed 3)
-(define (uniform a b)
-  (+ a (* (- b a) (random))))
-(define X40
-  (for/list ([i (in-range 40)])
-    (define x1 (uniform 0 6))
-    (list x1 (uniform 0 6) (* x1 x1))))
-(define y40
-  (for/list ([row (in-list X40)])
-    (+ 1.0 (* 2 (car row)) (- (cadr row)) (uniform -1 1))))
 (define cv (elnet-cv X40 y40))
 cv
-(rounded (coef cv #:lambda 'lambda-min))
-(rounded (coef cv))
+(printf "lambda-min: ~a\n" (coef-line (coef cv #:lambda 'lambda-min)))
+(printf "lambda-1se: ~a\n" (coef-line (coef cv)))
 ]
 
 Both choices keep @math{x₁} and @math{x₂} and drop @math{x₃}. @racket[coef]

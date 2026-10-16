@@ -5,26 +5,21 @@
 
 @section[#:tag "ex-ols"]{Ordinary least squares (@math{λ = 0})}
 
-The elastic net at penalty strength @math{λ = 0} is just @deftech{ordinary least
-squares}: with no penalty, the mixing parameter @math{α} drops out and glmnet
-returns the unregularized fit. It is the natural first model --- a known answer
-we can check exactly.
-
-We use a noise-free fixture so the answer is unambiguous. Take two predictors
-and build the response as an exact linear function of them,
-@math{y = 1 + 2 x₁ − x₂}, with no error term. Ordinary least squares then
-recovers the intercept @racket[1.0] and coefficients @racket[(2.0 -1.0)] --- up
-to the coordinate-descent solver's tolerance --- with @math{R² ≈ 1}.
+With the penalty strength set to @math{λ = 0}, the elastic net is
+@deftech{ordinary least squares}: there is no penalty, so the mixing parameter
+@math{α} drops out and glmnet returns the unregularized fit. It is the natural
+first model because its answer can be checked exactly.
 
 @chunk[<require>
 (require glmnet)]
 
 @chunk[<provide>
-(provide run-example)]
+(provide X y fit fitted)]
 
-The design matrix is a list of rows; the response is the matching vector. (Rows
-here, columns there: the binding marshals to the column-major layout the Fortran
-expects.)
+The response is an exact linear function of two predictors,
+@math{y = 1 + 2x₁ − x₂}, with no error term, so least squares should recover the
+intercept @racket[1.0] and the coefficients @racket[2.0] and @racket[-1.0]. The
+design matrix is a list of rows, and the response the matching list:
 
 @chunk[<data>
 (define X '((1.0 2.0)
@@ -34,20 +29,23 @@ expects.)
             (5.0 6.0)))
 (define y '(1.0 4.0 3.0 6.0 5.0))]
 
-@racket[ols] is @racket[elnet-fit] with @racket[#:lambda 0.0]. The result is an
-@racket[elnet-result] carrying the intercept, the dense coefficient vector, the
-achieved @math{R²}, and the @math{λ} actually used.
+@racket[ols] is @racket[elnet-fit] with @racket[#:lambda 0.0]. @racket[coef]
+gives the intercept and then the coefficients, and @racket[deviance-ratio] the
+@math{R²}, which is 1 up to the solver's tolerance:
 
 @chunk[<fit>
-(define result (ols X y))]
+(define fit (ols X y))]
 
-@chunk[<run-example>
-(define (run-example)
-  <data>
-  <fit>
-  result)]
+A fitted value is the intercept plus the dot product of a row with the
+coefficients. @racket[predict] computes it for each row, and on the training
+rows the fitted values reproduce @racket[y]:
+
+@chunk[<fitted>
+(define fitted (predict fit X))]
 
 @chunk[<*>
   <require>
   <provide>
-  <run-example>]
+  <data>
+  <fit>
+  <fitted>]
