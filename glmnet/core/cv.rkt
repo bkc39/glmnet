@@ -739,21 +739,20 @@
 
 ;; --- printing ------------------------------------------------------------------
 
-;; As R's print.cv.glmnet: the measure, then lambda.min and lambda.1se with
-;; their index, cvm, cvsd and nzero. `call`, when given, follows the family.
 (define (write-cv cv port [call #f])
-  (define (number x) (if (flrational? x) (signif x) (number->string x)))
-  (fprintf port "#<glmnet-cv:~a~a ~a"
+  (define (column header v)
+    (r-column header
+              (for/list ([i (in-list (list (glmnet-cv-index-min cv) (glmnet-cv-index-1se cv)))])
+                (exact->inexact (vector-ref v i)))
+              #:digits 4))
+  (define lambdas (glmnet-cv-lambda cv))
+  (fprintf port "#<glmnet-cv:~a~a\nMeasure: ~a"
            (glmnet-path-family (glmnet-cv-path cv)) (call-suffix call) (glmnet-cv-name cv))
-  (write-table
-   (cons '("" "Lambda" "Index" "Measure" "SE" "Nonzero")
-         (for/list ([label (in-list '("min" "1se"))]
-                    [i (in-list (list (glmnet-cv-index-min cv) (glmnet-cv-index-1se cv)))])
-           (list label
-                 (number (vector-ref (glmnet-cv-lambda cv) i))
-                 (number->string i)
-                 (number (vector-ref (glmnet-cv-cvm cv) i))
-                 (number (vector-ref (glmnet-cv-cvsd cv) i))
-                 (number->string (vector-ref (glmnet-cv-nzero cv) i)))))
-   port)
+  (write-r-table '("min" "1se")
+                 (list (column "Lambda" lambdas)
+                       (column "Index" (build-vector (vector-length lambdas) add1))
+                       (column "Measure" (glmnet-cv-cvm cv))
+                       (column "SE" (glmnet-cv-cvsd cv))
+                       (column "Nonzero" (glmnet-cv-nzero cv)))
+                 port)
   (write-string ">" port))

@@ -183,8 +183,6 @@
          (check-equal? (map car got) rows (format "~a: row names" msg))
          (check-vec-close (map cdr got) expected tol msg)])))
 
-  ;; The lines of a path's printed table, without the #<glmnet-path:family
-  ;; line before it and the > after it.
   (define (printed-table p)
     (define s (format "~a" p))
     (cdr (regexp-split #rx"\n" (substring s 0 (sub1 (string-length s))))))
@@ -339,7 +337,8 @@
     (check-equal? (add1 (glmnet-cv-index-1se cv)) (hash-ref g 'index_1se) "index-1se")
     (check-nested-close (coef cv #:lambda 'lambda-min) (hash-ref g 'coef_min) ctol
                         "coef at lambda-min")
-    (check-nested-close (coef cv) (hash-ref g 'coef_1se) ctol "coef, default lambda"))
+    (check-nested-close (coef cv) (hash-ref g 'coef_1se) ctol "coef, default lambda")
+    (check-equal? (printed-table cv) (hash-ref g 'print) "printed"))
 
   ;; C's %a of a double, such as "-0x1.8p+1", as that flonum.
   (define (hex->flonum s)

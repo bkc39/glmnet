@@ -253,6 +253,38 @@
     (check-not-false (memq 'glmnet/data/nested data-modules))
     (check-true (set-member? (exported 'glmnet/data/csv) 'csv->table)))
 
+  (define (fold-ids-contract signature)
+    (match signature
+      [(list name _ ... (list '#:fold-ids _ contract _ ...) _ ...) (list (list name contract))]
+      [_ '()]))
+
+  (define (fold-ids-contracts form)
+    (match form
+      [(list* (and head (or 'defproc 'defproc*)) (? keyword?) _ more)
+       (fold-ids-contracts (cons head more))]
+      [(list* 'defproc (? pair? signature) _) (fold-ids-contract signature)]
+      [(list* 'defproc* (list (cons signatures _) ...) _) (append-map fold-ids-contract signatures)]
+      [_ '()]))
+
+  (test-case "a #:fold-ids argument is found after a definition form's leading options"
+    (check-equal? (append-map fold-ids-contracts
+                              (doc-forms (read-string-inside
+                                          "@defproc[#:kind \"k\" (f [#:fold-ids ids any/c #f]) any]{}")))
+                  '((f any/c)))
+    (check-equal? (append-map fold-ids-contracts
+                              (doc-forms (read-string-inside
+                                          "@defproc*[#:link-target? #f ([(g [#:fold-ids ids any/c #f]) any])]{}")))
+                  '((g any/c))))
+
+  (test-case "the cross-validation procedures, and only they, document #:fold-ids as fold-ids/c"
+    (define fold-ids
+      (append-map (match-lambda [(cons _ datum) (append-map fold-ids-contracts (doc-forms datum))])
+                  files))
+    (check-equal? (sort fold-ids symbol<? #:key (match-lambda [(list name _) name]))
+                  (for/list ([name (in-list '(cox-cv elnet-cv formula-cv logistic-cv mgaussian-cv
+                                              multinomial-cv poisson-cv))])
+                    (list name 'fold-ids/c))))
+
   (for ([mod (in-list checked-modules)])
     (test-case (format "every export of ~a has a reference entry" mod)
       (define missing

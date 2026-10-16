@@ -1,0 +1,4 @@
+Measure: Mean-Squared Error
+      Lambda Index Measure       SE Nonzero
+min 1.23e-07     2       0 0.003142     120
+1se 2.50e-05     1   12346 0.000000       0

@@ -17,10 +17,16 @@
            racket/list
            racket/logging
            racket/math
+           (only-in racket/class new send)
+           (only-in racket/draw bitmap-dc% make-bitmap)
            file/convertible
-           (only-in racket/contract exn:fail:contract:blame?)
+           (only-in racket/contract contract-first-order-passes? exn:fail:contract:blame?)
            pict
-           (only-in plot/no-gui renderer2d? plot-width plot-height ticks-format pre-tick)
+           racket/match
+           (only-in plot/no-gui renderer2d? plot-width plot-height ticks-format pre-tick
+                    plot-pict-bounds plot-pict-plot->dc plot-font-face plot-font-family
+                    plot-font-size)
+           (only-in plot/private/common/plot-device plot-device%)
            glmnet
            glmnet/plot
            (submod glmnet/plot support))
@@ -320,13 +326,26 @@
     ;; is blamed.
     (define (out-file-blamed? e)
       (and (exn:fail:contract:blame? e)
-           (regexp-match? #rx"has-image-extension[?].*the #:out-file argument" (exn-message e))))
+           (regexp-match? #rx"image-path/c.*the #:out-file argument" (exn-message e))))
     (check-exn out-file-blamed? (lambda () (plot-cv cv #:out-file (build-path dir "cv.jpg"))))
     (check-exn out-file-blamed? (lambda () (plot-coefficient-path p #:out-file "path")))
     (check-exn out-file-blamed? (lambda () (plot-cv cv #:out-file (build-path dir ".png"))))
     (check-exn out-file-blamed? (lambda () (plot-coefficient-path p #:out-file "path.png.bak")))
+    (check-exn out-file-blamed?
+               (lambda () (plot-cv cv #:out-file (string-append (path->string dir) "/cv.png/"))))
     (check-false (file-exists? (build-path dir "cv.jpg")))
     (delete-directory/files dir))
+
+  (test-case "image-path/c accepts a file path ending in an image kind's extension, in any case"
+    (for ([kind (in-list image-kinds)])
+      (match-define (cons extension _) kind)
+      (for ([ext (in-list (list extension (string-upcase extension) (string-titlecase extension)))])
+        (check-true (contract-first-order-passes? image-path/c (string-append "plot." ext)) ext)
+        (check-true (contract-first-order-passes? image-path/c (build-path (string-append "plot." ext)))
+                    ext)))
+    (for ([bad (in-list (list "plot.jpg" "plot" ".png" "plot.png.bak" 'plot.png #f
+                              "plot.png/" (string->path "plot.png/") "." "a.png." "a.png/."))])
+      (check-false (contract-first-order-passes? image-path/c bad) (format "~s" bad))))
 
   (test-case "constant-approx is R's approx with method \"constant\" and rule 2"
     ;; R 4.5.3: x <- c(2, 0, 1, 1, 4); y <- c(3, 0, 1, 2, 5)
@@ -446,6 +465,50 @@
       (check-equal? (runs (panel-df pnl)) '((0 . 1) (1 . 10) (2 . 8) (3 . 81))))
     ;; plot.mrelnet's 2-norm panel counts the first response's coefficients.
     (check-equal? (panel-df (car (path-panels p '2norm))) (panel-df (car panels))))
+
+  (test-case "a curve label's width is plot-lib's measure of its text with a space on either side"
+    (define device
+      (new plot-device%
+           [dc (new bitmap-dc% [bitmap (make-bitmap 1 1)])]
+           [dc-x-min 0] [dc-y-min 0] [dc-x-size 1] [dc-y-size 1]))
+    (define (drawn-width name)
+      (send device get-text-width (string-append " " name " ")))
+    (define p (elnet-path Xr yr))
+    (for ([size (in-list '(10 11 13))])
+      (parameterize ([plot-font-size size])
+        (send device set-font-attribs (curve-label-size) (plot-font-face) (plot-font-family))
+        (for ([names (in-list '(("x1" "x2" "x3") ("a long predictor name" "x2" "x3")))])
+          (check-= (curve-label-width p names) (apply max (map drawn-width names)) 0
+                   (format "~s at plot-font-size ~a" names size))))))
+
+  (test-case "each curve label, drawn with a space on either side, fits inside the frame"
+    (define (room panel end right?)
+      (define ->dc (plot-pict-plot->dc panel))
+      (define (px x) (vector-ref (->dc (vector x 0)) 0))
+      (match-define (vector (vector x-min x-max) _) (plot-pict-bounds panel))
+      (if right? (- (px x-max) (px end)) (- (px end) (px x-min))))
+    (define (check-labels-fit p names xvar sign-lambda width height)
+      (define right?
+        (match (list xvar sign-lambda)
+          [(list 'lambda 1) #f]
+          [_ #t]))
+      (define end (apply (if right? max min) (filter rational? (x-positions p xvar sign-lambda))))
+      (for ([panel (in-list (coefficient-path-panels p
+                                                     #:xvar xvar
+                                                     #:sign-lambda sign-lambda
+                                                     #:label names
+                                                     #:width width
+                                                     #:height height
+                                                     #:title #f))])
+        (check-true (>= (room panel end right?) (curve-label-width p names))
+                    (format "~a ~a ~a×~a" xvar sign-lambda width height))))
+    (define p (elnet-path Xr yr))
+    (for* ([xvar+sign (in-list '((norm -1) (dev -1) (lambda -1) (lambda 1)))]
+           [size (in-list '((400 300) (300 200)))])
+      (match-define (list xvar sign-lambda) xvar+sign)
+      (match-define (list width height) size)
+      (check-labels-fit p '("x1" "x2" "x3") xvar sign-lambda width height))
+    (check-labels-fit p '("a long predictor name" "x2" "x3") 'norm -1 400 300))
 
   (test-case "the curve labels go at the end of the x axis, level with the last drawn λ"
     ;; R's plotCoef: xpos = max(index), or min(index) for log lambda, and

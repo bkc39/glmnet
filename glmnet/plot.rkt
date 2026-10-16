@@ -56,6 +56,7 @@
 (define type-coef/c (or/c 'coef '2norm))
 
 (provide
+ image-path/c
  (contract-out
   [coefficient-path-renderers
    (->* (model/c)
@@ -74,7 +75,7 @@
          #:width exact-positive-integer?
          #:height exact-positive-integer?
          #:title (or/c #f string?)
-         #:out-file out-file/c)
+         #:out-file (or/c #f image-path/c))
         pict?)]
   [cv-renderers
    (->* (cv/c) (#:sign-lambda sign-lambda/c) (listof renderer2d?))]
@@ -84,7 +85,7 @@
          #:width exact-positive-integer?
          #:height exact-positive-integer?
          #:title (or/c #f string?)
-         #:out-file out-file/c)
+         #:out-file (or/c #f image-path/c))
         pict?)]))
 
 ;; For the unit tests only; not part of the public API.
@@ -100,7 +101,11 @@
            x-positions
            approx-f
            count-ticks
-           label-positions))
+           label-positions
+           coefficient-path-panels
+           curve-label-size
+           curve-label-width
+           image-kinds))
 
 ;; --- R's conventions ---------------------------------------------------------
 
@@ -403,6 +408,26 @@
                                #:height [height (plot-height)]
                                #:title [title (plot-title)]
                                #:out-file [out-file #f])
+  (define picture
+    (apply vl-append (coefficient-path-panels model
+                                              #:xvar xvar
+                                              #:sign-lambda sign-lambda
+                                              #:label label
+                                              #:type-coef type-coef
+                                              #:width width
+                                              #:height height
+                                              #:title title)))
+  (when out-file (write-image picture out-file))
+  picture)
+
+(define (coefficient-path-panels model
+                                 #:xvar [xvar 'lambda]
+                                 #:sign-lambda [sign-lambda -1]
+                                 #:label [label #f]
+                                 #:type-coef [type-coef 'coef]
+                                 #:width [width (plot-width)]
+                                 #:height [height (plot-height)]
+                                 #:title [title (plot-title)])
   (define who 'plot-coefficient-path)
   (define p (model-path who model))
   (define label* (model-label model label))
@@ -439,18 +464,19 @@
   (when (null? pictures)
     (raise-arguments-error who "every coefficient is zero at every λ, so there is nothing to plot"
                            "λ values" (vector-length (glmnet-path-lambda p))))
-  (define picture (apply vl-append pictures))
-  (when out-file (write-image picture out-file))
-  picture)
+  pictures)
 
-;; The width in pixels of the widest curve label.
 (define (curve-label-width p label)
   (define n (vector-length
              (let ([beta (vector-ref (glmnet-path-coefficients p) 0)])
                (if (vector? (vector-ref beta 0)) (vector-ref beta 0) beta))))
   (define name (label-names 'plot-coefficient-path label n))
   (for/fold ([w 0]) ([j (in-range n)])
-    (max w (text-width (name j) (curve-label-size)))))
+    (max w (text-width (pad-label (name j)) (curve-label-size)))))
+
+;; plot-lib's point-label pads its text so (plot/private/plot2d/decoration.rkt).
+(define (pad-label name)
+  (string-append " " name " "))
 
 ;; The width in pixels of s in the font plot-lib draws text with at `size`.
 (define (text-width s size)
@@ -592,18 +618,21 @@
 (define image-kinds
   '(("png" . png-bytes) ("pdf" . pdf-bytes) ("svg" . svg-bytes) ("eps" . eps-bytes)))
 
-;; The convert format for the file's extension, or #f if there is none.
+;; The convert format for the file's extension, or #f if there is none or the
+;; path names a directory.
 (define (image-kind out-file)
+  (define-values (_base _name must-be-dir?) (split-path out-file))
   (define ext (path-get-extension out-file))
   (define kind
     (and ext (assoc (string-downcase (bytes->string/utf-8 (subbytes ext 1) #\?)) image-kinds)))
-  (and kind (cdr kind)))
+  (cond
+    [must-be-dir? #f]
+    [kind (cdr kind)]
+    [else #f]))
 
-;; Whether a path's extension, in any case, is .png, .pdf, .svg or .eps.
-(define (has-image-extension? out-file)
-  (and (image-kind out-file) #t))
-
-(define out-file/c (or/c #f (and/c path-string? has-image-extension?)))
+(define image-path/c
+  (flat-named-contract 'image-path/c
+                       (and/c path-string? (lambda (out-file) (and (image-kind out-file) #t)))))
 
 (define (write-image picture out-file)
   (call-with-output-file out-file

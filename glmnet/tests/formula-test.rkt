@@ -1600,6 +1600,6 @@
                         (format "~a" gfit))
     (check-regexp-match #rx"^#<glmnet-path:gaussian \\(~ Employed \\(- all Year\\)\\)\n +Df"
                         (format "~a" gpath))
-    (check-regexp-match #rx"^#<glmnet-cv:gaussian \\(~ Employed all\\) Mean-Squared Error\n"
+    (check-regexp-match #rx"^#<glmnet-cv:gaussian \\(~ Employed all\\)\nMeasure: Mean-Squared Error\n"
                         (format "~a" (formula-cv (~ Employed all) longley
                                                  #:fold-ids (folds 16))))))

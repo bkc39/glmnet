@@ -1841,11 +1841,8 @@ carry the signal:
   @racket[path]; @racket[predict] and @racket[coef] default to
   @racket[lambda-1se], as R's @tt{predict.cv.glmnet} does, and also accept
   @racket['lambda-min], @racket['lambda-1se] or any λ; and
-  @racket[deviance-ratio] is the path's at @racket[lambda-1se]. It prints
-  like R's @tt{print.cv.glmnet}, with the index counted from 0: the measure,
-  then for each of @racket[lambda-min] and @racket[lambda-1se] its value,
-  index, @racket[cvm], @racket[cvsd] and @racket[nzero] (see
-  @secref["ref-model-printing"]).
+  @racket[deviance-ratio] is the path's at @racket[lambda-1se]. For how it
+  prints, see @secref["ref-model-printing"].
 
   @examples[#:eval ev
   (define cv (elnet-cv X60 y60))
@@ -3069,14 +3066,10 @@ digits of the column's largest value, so a @math{λ} far below the first can
 show as @racket[0], and each column is written with one number of decimals
 throughout, or in scientific notation when that is narrower.
 
-A @racket[glmnet-cv] prints like R's @tt{print.cv.glmnet}: the name of its
-measure, then a row for each of @racket[glmnet-cv-lambda-min] and
-@racket[glmnet-cv-lambda-1se] with that @math{λ}, its index, the
-cross-validated error, its standard error and the number of nonzero
-coefficients. It differs from R's in two ways: the index counts from 0, where
-R's counts from 1, and each real is rounded to four significant digits on
-its own, where R formats each column as a whole and can show a digit more. A @racket[formula-model]
-prints as the result it holds, with its formula after the family.
+A @racket[glmnet-cv] prints as R's @tt{print.cv.glmnet}, without its
+@tt{Call:} line and blank lines, under a @tt{#<glmnet-cv:}@italic{family}
+header. A @racket[formula-model] prints as the result it holds, with
+its formula after the family.
 
 Printing does not change @racket[equal?], which compares results field by
 field.
@@ -3154,7 +3147,7 @@ cross-validated fit @racket[cv] of @secref["ref-cv"], and the formula model
                                 [#:height height exact-positive-integer? (plot-height)]
                                 [#:title title (or/c #f string?) (plot-title)]
                                 [#:out-file out-file
-                                            (or/c #f (and/c path-string? has-image-extension?))
+                                            (or/c #f image-path/c)
                                             #f])
          pict?]{
   Plots the coefficients of @racket[model]'s path against @racket[xvar], as R's
@@ -3180,11 +3173,8 @@ cross-validated fit @racket[cv] of @secref["ref-cv"], and the formula model
    @item{@racket[width] and @racket[height] are the size of each plot in
          pixels, and @racket[title] is its title.}
    @item{@racket[out-file], when given, names a file to which the plot is also
-         written, in the format its extension names: @filepath{png},
-         @filepath{pdf}, @filepath{svg} or @filepath{eps}, in upper or lower
-         case. @racket[has-image-extension?] in the contract holds for exactly
-         those paths, so any other extension, or none, raises
-         @racket[exn:fail:contract] before anything is drawn.}
+         written, in the format its extension names (see
+         @racket[image-path/c]).}
   ]
 
   An error is raised if every coefficient is zero at every @math{λ}, as there
@@ -3232,7 +3222,7 @@ cross-validated fit @racket[cv] of @secref["ref-cv"], and the formula model
                   [#:height height exact-positive-integer? (plot-height)]
                   [#:title title (or/c #f string?) (plot-title)]
                   [#:out-file out-file
-                              (or/c #f (and/c path-string? has-image-extension?))
+                              (or/c #f image-path/c)
                               #f])
          pict?]{
   Plots the cross-validation curve of @racket[cv] against
@@ -3257,5 +3247,27 @@ cross-validated fit @racket[cv] of @secref["ref-cv"], and the formula model
   @examples[#:eval ev
   (length (cv-renderers cv))
   (length (cv-renderers cv-model))]}
+
+@(require (only-in racket/dict in-dict)
+          (only-in racket/list add-between)
+          (only-in racket/match match)
+          (only-in (submod glmnet/plot support) image-kinds))
+@(define image-extensions
+   (match (for/list ([(extension kind) (in-dict image-kinds)])
+            (filepath (string-append "." extension)))
+     [(list extensions ... final) (list (add-between extensions ", ") " or " final)]))
+
+@defthing[image-path/c flat-contract?]{
+  The contract on the @racket[#:out-file] argument of
+  @racket[plot-coefficient-path] and @racket[plot-cv]: a
+  @racket[path-string?] ending in @|image-extensions|, in any case. The
+  extension names the format the plot is written in. As for
+  @racket[path-get-extension], a name such as @filepath{.png} has no
+  extension.
+
+  @examples[#:eval ev
+  (contract-first-order-passes? image-path/c "lasso.PNG")
+  (contract-first-order-passes? image-path/c "lasso.jpg")
+  (eval:error (plot-cv cv #:out-file "cv.jpg"))]}
 
 @(close-eval ev)

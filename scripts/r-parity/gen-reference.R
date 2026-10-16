@@ -29,6 +29,8 @@ invisible(Sys.setlocale("LC_COLLATE", "C"))
 ## Goldens are written to GLMNET_GOLDENS_OUT (the CI check points this at a temp
 ## dir; local `nix run .#gen-goldens` defaults to scripts/r-parity/goldens, which
 ## is gitignored). They are never committed -- the parity check regenerates them.
+source("scripts/r-parity/cv-print.R")
+
 data_dir    <- "glmnet/private/data"
 goldens_dir <- Sys.getenv("GLMNET_GOLDENS_OUT", "scripts/r-parity/goldens")
 dir.create(goldens_dir, showWarnings = FALSE, recursive = TRUE)
@@ -394,7 +396,8 @@ cv_record <- function(cv)
        lambda_min = cv$lambda.min, lambda_1se = cv$lambda.1se,
        index_min = cv$index[1, 1], index_1se = cv$index[2, 1],
        coef_min = cv_coef(cv, "lambda.min"), coef_1se = cv_coef(cv, "lambda.1se"),
-       coef_names = coef_names(coef(cv, s = "lambda.min")))
+       coef_names = coef_names(coef(cv, s = "lambda.min")),
+       print = cv_print_lines(cv))
 
 cv_fixtures <- list(
   list(id = "cv-gaussian-longley-mse",           dataset = "longley",    family = "gaussian",    nfolds = 4,  seed = 1, type_measure = "mse"),

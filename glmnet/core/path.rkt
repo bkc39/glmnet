@@ -9,6 +9,7 @@
 (require racket/contract
          racket/format
          racket/math
+         racket/string
          ffi/vector)
 
 (provide (struct-out glmnet-path))
@@ -26,8 +27,8 @@
            count-nonzero
            count-nonzero-groups
            path-num-predictors
-           signif
-           write-table
+           write-r-table
+           r-column
            write-point
            write-path
            call-suffix))
@@ -141,47 +142,47 @@
 ;; (printCoefmat) does. `call`, when given, follows the family, as the formula of
 ;; a formula model does.
 (define (write-path p port [call #f])
-  (define columns
-    (list (cons "Df" (r-format (for/list ([df (in-vector (glmnet-path-df p))])
-                                 (exact->inexact df))))
-          (cons "%Dev" (r-format (zapsmall (for/list ([dev (in-vector (glmnet-path-dev-ratio p))])
-                                             (r-round (* dev 100.0) 2)))))
-          (cons "Lambda" (r-format (zapsmall (for/list ([lam (in-vector (glmnet-path-lambda p))])
-                                               (r-signif lam 4)))))))
-  (define row-names
-    (for/list ([i (in-range (vector-length (glmnet-path-lambda p)))])
-      (number->string (add1 i))))
-  (define name-width (apply max 0 (map string-length row-names)))
-  (define widths
-    (for/list ([column (in-list columns)])
-      (apply max (map string-length column))))
   (fprintf port "#<glmnet-path:~a~a" (glmnet-path-family p) (call-suffix call))
-  (for ([name (in-list (cons "" row-names))]
-        [row (in-list (apply map list columns))])
-    (newline port)
-    (write-string (~a name #:min-width name-width) port)
-    (for ([cell (in-list row)]
-          [width (in-list widths)])
-      (write-string " " port)
-      (write-string (~a cell #:min-width width #:align 'right) port)))
+  (write-r-table
+   (for/list ([i (in-range (vector-length (glmnet-path-lambda p)))])
+     (number->string (add1 i)))
+   (list (r-column "Df"
+                   (for/list ([df (in-vector (glmnet-path-df p))])
+                     (exact->inexact df))
+                   #:digits 5)
+         (r-column "%Dev"
+                   (for/list ([dev (in-vector (glmnet-path-dev-ratio p))])
+                     (r-round (* dev 100.0) 2))
+                   #:digits 5)
+         (r-column "Lambda"
+                   (for/list ([lam (in-vector (glmnet-path-lambda p))])
+                     (r-signif lam 4))
+                   #:digits 5))
+   port)
   (write-string ">" port))
 
 ;; What a printed model shows after its family: nothing, or its call.
 (define (call-suffix call)
   (if call (string-append " " call) ""))
 
-;; Rows of strings as a table, one line each, every column right-aligned and
-;; indented by two spaces.
-(define (write-table rows port)
-  (define widths
-    (for/list ([column (in-list (apply map list rows))])
-      (apply max (map string-length column))))
-  (for ([row (in-list rows)])
+(define (write-r-table row-names columns port)
+  (define aligned
+    (cons (aligned-column (cons "" row-names) 'left)
+          (for/list ([column (in-list columns)])
+            (aligned-column column 'right))))
+  (for ([cells (in-list (apply map list aligned))])
     (newline port)
-    (for ([cell (in-list row)]
-          [width (in-list widths)])
-      (write-string "  " port)
-      (write-string (~a cell #:min-width width #:align 'right) port))))
+    (write-string (string-join cells " ") port)))
+
+(define (aligned-column cells align)
+  (define width
+    (for/fold ([width 0]) ([cell (in-list cells)])
+      (max width (string-length cell))))
+  (for/list ([cell (in-list cells)])
+    (~a cell #:min-width width #:align align)))
+
+(define (r-column header xs #:digits digits)
+  (cons header (r-format (zapsmall xs digits) digits)))
 
 ;; R's signif(x, digits) (nmath/fprec.c), in the same double arithmetic.
 (define (r-signif x digits)
@@ -204,6 +205,7 @@
   (define down (/ (floor x10) pow10))
   (define up (/ (ceiling x10) pow10))
   (cond
+    [(not (rational? x)) x]
     [(zero? places) (round x)]
     [(or (zero? x) (> (+ (* 0.301029995663981195 (+ 0.5 (binary-exponent a))) places) 15)) x]
     [else
@@ -216,22 +218,23 @@
   (define q (inexact->exact a))
   (- (integer-length (numerator q)) (integer-length (denominator q))))
 
-;; R's zapsmall(xs, 5) as of R 4.4: xs rounded to max(0, 5 - log10(max |x|))
-;; decimal places, which round() takes to the nearest integer.
-(define (zapsmall xs)
-  (define mx (apply max 0.0 (map abs xs)))
-  (define places (if (positive? mx) (max 0.0 (- 5 (log mx 10))) 5))
+;; R's zapsmall and formatReal (main/format.c), as of R 4.4.
+(define (zapsmall xs digits)
+  (define mx
+    (for/fold ([mx 0.0]) ([x (in-list xs)] #:unless (nan? x))
+      (max mx (abs x))))
+  (define places (if (positive? mx) (max 0.0 (- digits (log mx 10))) digits))
   (for/list ([x (in-list xs)])
-    (r-round x (exact-floor (+ places 0.5)))))
+    (r-round x (round-half-up places))))
 
-;; R's format(xs, digits = 5) of finite doubles (formatReal in main/format.c
-;; and EncodeReal0 in main/printutils.c): every element in fixed notation with
-;; the same number of decimals, or every element in scientific notation when
-;; that is narrower.
-(define (r-format xs [digits 5])
+(define (round-half-up x)
+  (exact-floor (+ x 0.5)))
+
+(define (r-format xs digits)
   (define-values (neg max-left min-left right max-signed-left max-sig)
     (for/fold ([neg 0] [max-left -inf.0] [min-left +inf.0] [right 0] [max-signed-left 1] [max-sig 1])
-              ([x (in-list xs)])
+              ([x (in-list xs)]
+               #:when (rational? x))
       (define-values (sign left nsig) (significant-digits x digits))
       (values (max neg sign) (max max-left left) (min min-left left) (max right (- nsig left))
               (max max-signed-left (+ sign (max 1 left))) (max max-sig nsig))))
@@ -242,9 +245,11 @@
     (+ neg (if (zero? mantissa-places) 0 1) mantissa-places 4
        (if (or (> max-left 100) (<= min-left -99)) 2 1)))
   (for/list ([x (in-list xs)])
-    (if (<= width-fixed width-scientific)
-        (fixed-notation x right)
-        (scientific-notation x mantissa-places))))
+    (cond
+      [(nan? x) "NaN"]
+      [(infinite? x) (if (positive? x) "Inf" "-Inf")]
+      [(<= width-fixed width-scientific) (fixed-notation x right)]
+      [else (scientific-notation x mantissa-places)])))
 
 ;; R's scientific() at `digits` significant digits: x's sign (1 if negative),
 ;; its digits left of the point in fixed notation, and how many significant

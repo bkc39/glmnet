@@ -1,0 +1,4 @@
+Measure: Misclassification Error
+      Lambda Index Measure      SE Nonzero
+min 0.003330    47    0.14 0.03712      28
+1se 0.006387    40    0.17 0.05175      27

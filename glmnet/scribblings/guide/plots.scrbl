@@ -259,9 +259,8 @@ cross-validation on the coefficient path:
 @section[#:tag "plot-files"]{Writing to a file}
 
 With @racket[#:out-file], both plot procedures also write the plot to a file,
-in the format that the file's extension names: @filepath{.png}, @filepath{.pdf},
-@filepath{.svg} or @filepath{.eps}, in upper or lower case. They still return
-the pict. Any other extension breaks their contract:
+in the format its extension names (see @racket[image-path/c]). They still
+return the pict. Any other extension breaks their contract:
 
 @examples[#:eval ev #:label #f
 (define file (make-temporary-file "cv-~a.png"))
