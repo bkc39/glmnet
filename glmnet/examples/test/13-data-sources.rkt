@@ -10,7 +10,7 @@
          "../13-data-sources.rkt")
 
 (module+ main
-  (for ([fit (in-list fits)])
+  (for ([fit (in-list (list from-table from-rows from-csv from-math from-polars from-design))])
     (println fit))
   (println coefficients)
   (println formula-coefs)
@@ -20,36 +20,37 @@
   (display csv))
 
 (module+ test
-  (require racket/match
-           (only-in math/matrix matrix->vector*)
+  (require racket/dict
+           (only-in math/matrix matrix->list*)
            (only-in polars column-names)
            rackunit
            (submod "common.rkt" test))
 
-  (match-define (list from-table from-rows from-csv from-math from-polars) fits)
-  (for ([source (in-list '(rows csv math polars design))]
-        [fit (in-list (list from-rows from-csv from-math from-polars from-design))])
+  (for ([(source fit) (in-dict (list (cons 'rows from-rows)
+                                     (cons 'csv from-csv)
+                                     (cons 'math from-math)
+                                     (cons 'polars from-polars)
+                                     (cons 'design from-design)))])
     (check-equal? fit from-table (format "~a: path" source)))
 
-  ;; R: 58 λ from 5.1469810628314443 down to 0.025616646034883256, 83.47% of
-  ;; the deviance at the end.
-  (match-define (vector first-λ λs ... last-λ) (glmnet-path-lambda from-table))
-  (check-equal? (+ 2 (length λs)) 58)
-  (check-within first-λ 5.1469810628314443 1e-9)
-  (check-within last-λ 0.025616646034883256 1e-12)
-  (check-values (for/last ([ratio (in-vector (deviance-ratio from-table))]) ratio)
-                0.83473179432107047)
+  (check-lambda-range from-table 58 5.1469810628314443 0.025616646034883256)
+  (check-close (final-deviance-ratio from-table) 0.83473179432107047)
 
   (define r-coef
     '(33.165620144257374591 -3.682927973039096692 -0.023852761602279591 0.127337031698973008))
-  (check-coef coefficients (list->vector r-coef))
+  (check-close coefficients (list->vector r-coef))
   (for ([formula-coef (in-list formula-coefs)])
-    (check-coef formula-coef (map cons '("(Intercept)" "wt" "hp" "qsec") r-coef)))
+    (check-close formula-coef (map cons '("(Intercept)" "wt" "hp" "qsec") r-coef)))
+  (for ([(source fit) (in-dict (list (cons 'table formula-from-table)
+                                     (cons 'csv formula-from-csv)
+                                     (cons 'polars formula-from-polars)))])
+    (check-equal? (glmnet-path-lambda (formula-model-fit fit)) (glmnet-path-lambda from-table)
+                  (format "~a formula: λ" source)))
 
   (check-equal? (design-matrix-column-names design) predictors)
   (check-equal? (design-matrix-nrows design) 32)
   (define first-rows (for/list ([row (in-vector rows 0 3)]) (vector->list row)))
   (check-equal? nested first-rows)
-  (check-equal? (map vector->list (vector->list (matrix->vector* matrix))) first-rows)
+  (check-equal? (matrix->list* matrix) first-rows)
   (check-equal? (column-names dataframe) predictors)
   (check-regexp-match #rx"^wt,hp,qsec\n2.62,110,16.46\n" csv))

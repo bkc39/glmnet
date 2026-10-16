@@ -97,17 +97,18 @@ observations @racket[X40] and @racket[y40] of @secref["ex-lasso-cv"]:
 
 @examples[#:eval ev #:label #f
 (define folds (random-fold-ids 40))
-(for* ([α (in-list '(0.0 0.25 0.5 0.75 1.0))]
-       [cv (in-value (elnet-cv X40 y40 #:alpha α #:fold-ids folds))]
-       [(λ err sd) (in-parallel (glmnet-cv-lambda cv) (glmnet-cv-cvm cv) (glmnet-cv-cvsd cv))]
-       #:when (= λ (glmnet-cv-lambda-min cv)))
-  (printf "α = ~a: λ-min = ~a, error = ~a ± ~a\n" α (fmt λ) (fmt err) (fmt sd)))
+(define alpha-cvs
+  (for/list ([α (in-list '(0.0 0.25 0.5 0.75 1.0))])
+    (cons α (elnet-cv X40 y40 #:alpha α #:fold-ids folds))))
+(for ([(α cv) (in-dict alpha-cvs)])
+  (printf "α = ~a: ~a\n" α cv))
 ]
 
-Ridge, which keeps every predictor, the irrelevant @math{x₃} among them,
-predicts clearly worse. Every @math{α} above 0 reaches nearly the same error,
-well within one standard error of each other, so on these data the choice
-among them matters much less than the choice of @math{λ}.
+Ridge's default path stops before its error bottoms out, so its best @math{λ}
+is the last one; a longer @racket[#:lambda] grid closes the gap. Every
+@math{α} above 0 reaches nearly the same error, within one standard error of
+the others, so on these data the choice among them matters much less than the
+choice of @math{λ}.
 
 @section[#:tag "ex-elastic-net-when"]{When to use it}
 

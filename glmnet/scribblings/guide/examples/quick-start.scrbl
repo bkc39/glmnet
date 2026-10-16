@@ -58,11 +58,12 @@ coefficients as @racket[coef] does, the intercept first, so the columns of
 
 @examples[#:eval ev #:label #f
 (define entries
-  (for*/fold ([entered '()] #:result (reverse entered))
-             ([(λ β) (in-path fit)]
-              [(name b) (in-parallel (design-matrix-column-names x) (in-vector β 1))]
-              #:unless (or (zero? b) (dict-has-key? entered name)))
-    (cons (cons name λ) entered)))
+  (remove-duplicates
+   (for*/list ([(λ β) (in-path fit)]
+               [(name b) (in-parallel (design-matrix-column-names x) (in-vector β 1))]
+               #:unless (zero? b))
+     (cons name λ))
+   #:key car))
 ]
 
 @racket[entries] is an association list, from each name to the @math{λ}
@@ -178,8 +179,8 @@ model's @racket[coef] and @racket[predict] take @racket['lambda-min] and
 
 @examples[#:eval ev #:label #f
 (glmnet-cv-lambda-min cvfit)
-(define coefs-min (coef cvfit #:lambda 'lambda-min))
-coefs-min
+(define coefficients-min (coef cvfit #:lambda 'lambda-min))
+coefficients-min
 (predict cvfit first-five #:lambda 'lambda-min)
 ]
 
@@ -187,10 +188,9 @@ At @tech{lambda-min}, @tt{V10} has joined the nine predictors of
 @math{λ = 0.1}, with a coefficient of @math{0.0012} to four decimals:
 
 @examples[#:eval ev #:label #f
-(for/first ([name (in-list (design-matrix-column-names x))]
-            [b (in-vector coefs-min 1)]
-            #:when (equal? name "V10"))
-  (fmt b 4))
+(define named-min
+  (map cons (cons "(Intercept)" (design-matrix-column-names x)) (vector->list coefficients-min)))
+(fmt (dict-ref named-min "V10") 4)
 ]
 
 @section[#:tag "ex-quick-start-r"]{Matching R}
