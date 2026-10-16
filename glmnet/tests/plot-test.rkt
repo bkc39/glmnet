@@ -24,7 +24,8 @@
            pict
            racket/match
            (only-in plot/no-gui renderer2d? plot-width plot-height ticks-format pre-tick
-                    plot-pict-bounds plot-pict-plot->dc plot-font-face plot-font-family)
+                    plot-pict-bounds plot-pict-plot->dc plot-font-face plot-font-family
+                    plot-font-size)
            (only-in plot/private/common/plot-device plot-device%)
            glmnet
            glmnet/plot
@@ -470,12 +471,15 @@
       (new plot-device%
            [dc (new bitmap-dc% [bitmap (make-bitmap 1 1)])]
            [dc-x-min 0] [dc-y-min 0] [dc-x-size 1] [dc-y-size 1]))
-    (send device set-font-attribs (curve-label-size) (plot-font-face) (plot-font-family))
     (define (drawn-width name)
       (send device get-text-width (string-append " " name " ")))
     (define p (elnet-path Xr yr))
-    (for ([names (in-list '(("x1" "x2" "x3") ("a long predictor name" "x2" "x3")))])
-      (check-= (curve-label-width p names) (apply max (map drawn-width names)) 0 (format "~s" names))))
+    (for ([size (in-list '(10 11 13))])
+      (parameterize ([plot-font-size size])
+        (send device set-font-attribs (curve-label-size) (plot-font-face) (plot-font-family))
+        (for ([names (in-list '(("x1" "x2" "x3") ("a long predictor name" "x2" "x3")))])
+          (check-= (curve-label-width p names) (apply max (map drawn-width names)) 0
+                   (format "~s at plot-font-size ~a" names size))))))
 
   (test-case "each curve label, drawn with a space on either side, fits inside the frame"
     (define (room panel end right?)
