@@ -17,12 +17,15 @@
            racket/list
            racket/logging
            racket/math
+           (only-in racket/class new send)
+           (only-in racket/draw bitmap-dc% make-bitmap)
            file/convertible
            (only-in racket/contract contract-first-order-passes? exn:fail:contract:blame?)
            pict
            racket/match
            (only-in plot/no-gui renderer2d? plot-width plot-height ticks-format pre-tick
-                    plot-pict-bounds plot-pict-plot->dc)
+                    plot-pict-bounds plot-pict-plot->dc plot-font-face plot-font-family)
+           (only-in plot/private/common/plot-device plot-device%)
            glmnet
            glmnet/plot
            (submod glmnet/plot support))
@@ -327,17 +330,20 @@
     (check-exn out-file-blamed? (lambda () (plot-coefficient-path p #:out-file "path")))
     (check-exn out-file-blamed? (lambda () (plot-cv cv #:out-file (build-path dir ".png"))))
     (check-exn out-file-blamed? (lambda () (plot-coefficient-path p #:out-file "path.png.bak")))
+    (check-exn out-file-blamed?
+               (lambda () (plot-cv cv #:out-file (string-append (path->string dir) "/cv.png/"))))
     (check-false (file-exists? (build-path dir "cv.jpg")))
     (delete-directory/files dir))
 
-  (test-case "image-path/c accepts a path string ending in an image kind's extension, in any case"
+  (test-case "image-path/c accepts a file path ending in an image kind's extension, in any case"
     (for ([kind (in-list image-kinds)])
       (match-define (cons extension _) kind)
       (for ([ext (in-list (list extension (string-upcase extension) (string-titlecase extension)))])
         (check-true (contract-first-order-passes? image-path/c (string-append "plot." ext)) ext)
         (check-true (contract-first-order-passes? image-path/c (build-path (string-append "plot." ext)))
                     ext)))
-    (for ([bad (in-list (list "plot.jpg" "plot" ".png" "plot.png.bak" 'plot.png #f))])
+    (for ([bad (in-list (list "plot.jpg" "plot" ".png" "plot.png.bak" 'plot.png #f
+                              "plot.png/" (string->path "plot.png/") "." "a.png." "a.png/."))])
       (check-false (contract-first-order-passes? image-path/c bad) (format "~s" bad))))
 
   (test-case "constant-approx is R's approx with method \"constant\" and rule 2"
@@ -458,6 +464,18 @@
       (check-equal? (runs (panel-df pnl)) '((0 . 1) (1 . 10) (2 . 8) (3 . 81))))
     ;; plot.mrelnet's 2-norm panel counts the first response's coefficients.
     (check-equal? (panel-df (car (path-panels p '2norm))) (panel-df (car panels))))
+
+  (test-case "a curve label's width is plot-lib's measure of its text with a space on either side"
+    (define device
+      (new plot-device%
+           [dc (new bitmap-dc% [bitmap (make-bitmap 1 1)])]
+           [dc-x-min 0] [dc-y-min 0] [dc-x-size 1] [dc-y-size 1]))
+    (send device set-font-attribs (curve-label-size) (plot-font-face) (plot-font-family))
+    (define (drawn-width name)
+      (send device get-text-width (string-append " " name " ")))
+    (define p (elnet-path Xr yr))
+    (for ([names (in-list '(("x1" "x2" "x3") ("a long predictor name" "x2" "x3")))])
+      (check-= (curve-label-width p names) (apply max (map drawn-width names)) 0 (format "~s" names))))
 
   (test-case "each curve label, drawn with a space on either side, fits inside the frame"
     (define (room panel end right?)

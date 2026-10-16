@@ -501,7 +501,7 @@
                                           #:lambda-min 0.5 #:lambda-1se 0.1))
                   (r-print "not-a-number")))
 
-  (test-case "a CV result whose cvsd overflows to +inf.0 prints"
+  (test-case "a CV result whose cvsd overflows to +inf.0 prints Inf in its SE column"
     (define xs
       (for/list ([i (in-range 40)])
         (list (exact->inexact (modulo (* 7 i) 11)) (sin (* 1.0 i)))))
@@ -510,7 +510,11 @@
         (* 1e100 (+ 1.0 (sin (* 3.0 i))))))
     (define huge (elnet-cv xs ys #:fold-ids (for/list ([i (in-range 40)]) (modulo i 4))))
     (check-true (for/or ([sd (in-vector (glmnet-cv-cvsd huge))]) (infinite? sd)))
-    (check-not-exn (lambda () (format "~a" huge))))
+    (check-match (printed huge)
+                 (list "Measure: Mean-Squared Error"
+                       (pregexp #px"^ +Lambda +Index +Measure +SE +Nonzero$")
+                       (pregexp #px"^min +\\S+ +\\S+ +\\S+ +Inf +\\S+$")
+                       (pregexp #px"^1se +\\S+ +\\S+ +\\S+ +Inf +\\S+$"))))
 
   ;; --- errors ------------------------------------------------------------------
 

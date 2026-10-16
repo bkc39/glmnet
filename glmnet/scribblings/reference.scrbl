@@ -3067,7 +3067,8 @@ show as @racket[0], and each column is written with one number of decimals
 throughout, or in scientific notation when that is narrower.
 
 A @racket[glmnet-cv] prints as R's @tt{print.cv.glmnet}, without its
-@tt{Call:} line. A @racket[formula-model] prints as the result it holds, with
+@tt{Call:} line and blank lines, under a @tt{#<glmnet-cv:}@italic{family}
+header. A @racket[formula-model] prints as the result it holds, with
 its formula after the family.
 
 Printing does not change @racket[equal?], which compares results field by
@@ -3260,7 +3261,9 @@ cross-validated fit @racket[cv] of @secref["ref-cv"], and the formula model
   The contract on the @racket[#:out-file] argument of
   @racket[plot-coefficient-path] and @racket[plot-cv]: a
   @racket[path-string?] ending in @|image-extensions|, in any case. The
-  extension names the format the plot is written in.
+  extension names the format the plot is written in. As for
+  @racket[path-get-extension], a name such as @filepath{.png} has no
+  extension.
 
   @examples[#:eval ev
   (contract-first-order-passes? image-path/c "lasso.PNG")

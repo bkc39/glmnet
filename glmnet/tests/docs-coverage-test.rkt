@@ -253,6 +253,24 @@
     (check-not-false (memq 'glmnet/data/nested data-modules))
     (check-true (set-member? (exported 'glmnet/data/csv) 'csv->table)))
 
+  (test-case "the cross-validation procedures, and only they, document #:fold-ids as fold-ids/c"
+    (define (fold-ids-contract signature)
+      (match signature
+        [(list name _ ... (list '#:fold-ids _ contract _ ...) _ ...) (list (list name contract))]
+        [_ '()]))
+    (define (fold-ids-contracts form)
+      (match form
+        [(list* 'defproc (? pair? signature) _) (fold-ids-contract signature)]
+        [(list* 'defproc* (list (cons signatures _) ...) _) (append-map fold-ids-contract signatures)]
+        [_ '()]))
+    (define fold-ids
+      (append-map (match-lambda [(cons _ datum) (append-map fold-ids-contracts (doc-forms datum))])
+                  files))
+    (check-equal? (sort fold-ids symbol<? #:key (match-lambda [(list name _) name]))
+                  (for/list ([name (in-list '(cox-cv elnet-cv formula-cv logistic-cv mgaussian-cv
+                                              multinomial-cv poisson-cv))])
+                    (list name 'fold-ids/c))))
+
   (for ([mod (in-list checked-modules)])
     (test-case (format "every export of ~a has a reference entry" mod)
       (define missing

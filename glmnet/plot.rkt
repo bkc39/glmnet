@@ -103,6 +103,7 @@
            count-ticks
            label-positions
            coefficient-path-panels
+           curve-label-size
            curve-label-width
            image-kinds))
 
@@ -617,12 +618,17 @@
 (define image-kinds
   '(("png" . png-bytes) ("pdf" . pdf-bytes) ("svg" . svg-bytes) ("eps" . eps-bytes)))
 
-;; The convert format for the file's extension, or #f if there is none.
+;; The convert format for the file's extension, or #f if there is none or the
+;; path names a directory.
 (define (image-kind out-file)
+  (define-values (_base _name must-be-dir?) (split-path out-file))
   (define ext (path-get-extension out-file))
   (define kind
     (and ext (assoc (string-downcase (bytes->string/utf-8 (subbytes ext 1) #\?)) image-kinds)))
-  (and kind (cdr kind)))
+  (cond
+    [must-be-dir? #f]
+    [kind (cdr kind)]
+    [else #f]))
 
 (define image-path/c
   (flat-named-contract 'image-path/c
