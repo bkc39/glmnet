@@ -104,11 +104,20 @@ observations @racket[X40] and @racket[y40] of @secref["ex-lasso-cv"]:
   (printf "α = ~a: ~a\n" α cv))
 ]
 
-Ridge's default path stops before its error bottoms out, so its best @math{λ}
-is the last one; a longer @racket[#:lambda] grid closes the gap. Every
-@math{α} above 0 reaches nearly the same error, within one standard error of
-the others, so on these data the choice among them matters much less than the
-choice of @math{λ}.
+Every @math{α} above 0 reaches nearly the same error, within one standard
+error of the others, so on these data the choice among them matters much less
+than the choice of @math{λ}. Ridge's default path stops before its error
+bottoms out, so its best @math{λ} is the last one; a longer
+@racket[#:lambda] grid closes the gap:
+
+@examples[#:eval ev #:label #f
+(define longer-grid
+  (for/list ([i (in-range 160)])
+    (expt 10.0 (- 3.5 (* 0.05 i)))))
+(define longer-ridge-cv
+  (elnet-cv X40 y40 #:alpha 0.0 #:fold-ids folds #:lambda longer-grid))
+longer-ridge-cv
+]
 
 @section[#:tag "ex-elastic-net-when"]{When to use it}
 

@@ -34,9 +34,6 @@
                 #:when (= λ (glmnet-cv-lambda-min cv)))
       (list err se)))
   (define ridge-cv (dict-ref alpha-cvs 0.0))
-  (define longer-ridge-cv
-    (elnet-cv X40 y40 #:alpha 0.0 #:fold-ids folds
-              #:lambda (for/list ([i (in-range 120)]) (expt 10.0 (- 3.5 (* 0.05 i))))))
   (match-define (list ridge-err _) (best ridge-cv))
   (match-define (list longer-ridge-err _) (best longer-ridge-cv))
   (match-define (list lasso-err lasso-se) (best (dict-ref alpha-cvs 1.0)))
@@ -44,9 +41,8 @@
                 "ridge's best λ is the last of its default path")
   (check-true (> ridge-err (+ lasso-err lasso-se))
               "on its default path, ridge is more than one standard error worse than the lasso")
-  (check-true (< (glmnet-cv-index-min longer-ridge-cv)
-                 (sub1 (vector-length (glmnet-cv-lambda longer-ridge-cv))))
-              "on a longer grid ridge's error bottoms out")
+  (check-true (< (+ (glmnet-cv-index-min longer-ridge-cv) 25) (length longer-grid))
+              "on a longer grid ridge's error bottoms out at least 25 points before its end")
   (check-true (<= longer-ridge-err (+ lasso-err lasso-se))
               "and is within one standard error of the lasso")
   (for* ([(α cv) (in-dict alpha-cvs)]

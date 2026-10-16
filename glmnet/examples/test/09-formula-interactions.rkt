@@ -39,6 +39,8 @@
     (for/first ([(λ β) (in-path path)]
                 #:when (positive? (dict-ref β "wt:hp")))
       λ))
+  (check-close ((entry path) "wt") 4.68973745088373 "wt enters at R's fit$lambda[2]")
+  (check-close wt:hp-λ 3.89350242165014 "wt:hp enters at R's fit$lambda[4]")
   (check-true (> wt:hp-λ hp-λ) "wt:hp enters before hp")
   (check-close hp-λ 2.68364019197806 "hp enters at R's fit$lambda[8]")
   (check-close leave-λ 2.44523299374503 "wt:hp leaves at R's fit$lambda[9]")
