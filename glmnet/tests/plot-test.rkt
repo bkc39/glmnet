@@ -18,7 +18,7 @@
            racket/logging
            racket/math
            file/convertible
-           (only-in racket/contract exn:fail:contract:blame?)
+           (only-in racket/contract contract-first-order-passes? exn:fail:contract:blame?)
            pict
            racket/match
            (only-in plot/no-gui renderer2d? plot-width plot-height ticks-format pre-tick
@@ -322,13 +322,23 @@
     ;; is blamed.
     (define (out-file-blamed? e)
       (and (exn:fail:contract:blame? e)
-           (regexp-match? #rx"has-image-extension[?].*the #:out-file argument" (exn-message e))))
+           (regexp-match? #rx"image-path/c.*the #:out-file argument" (exn-message e))))
     (check-exn out-file-blamed? (lambda () (plot-cv cv #:out-file (build-path dir "cv.jpg"))))
     (check-exn out-file-blamed? (lambda () (plot-coefficient-path p #:out-file "path")))
     (check-exn out-file-blamed? (lambda () (plot-cv cv #:out-file (build-path dir ".png"))))
     (check-exn out-file-blamed? (lambda () (plot-coefficient-path p #:out-file "path.png.bak")))
     (check-false (file-exists? (build-path dir "cv.jpg")))
     (delete-directory/files dir))
+
+  (test-case "image-path/c accepts a path string ending in an image kind's extension, in any case"
+    (for ([kind (in-list image-kinds)])
+      (match-define (cons extension _) kind)
+      (for ([ext (in-list (list extension (string-upcase extension) (string-titlecase extension)))])
+        (check-true (contract-first-order-passes? image-path/c (string-append "plot." ext)) ext)
+        (check-true (contract-first-order-passes? image-path/c (build-path (string-append "plot." ext)))
+                    ext)))
+    (for ([bad (in-list (list "plot.jpg" "plot" ".png" "plot.png.bak" 'plot.png #f))])
+      (check-false (contract-first-order-passes? image-path/c bad) (format "~s" bad))))
 
   (test-case "constant-approx is R's approx with method \"constant\" and rule 2"
     ;; R 4.5.3: x <- c(2, 0, 1, 1, 4); y <- c(3, 0, 1, 2, 5)
@@ -456,20 +466,26 @@
       (match-define (vector (vector x-min x-max) _) (plot-pict-bounds panel))
       (if right? (- (px x-max) (px end)) (- (px end) (px x-min))))
     (define (check-labels-fit p names xvar sign-lambda width height)
-      (define right? (not (and (eq? xvar 'lambda) (= sign-lambda 1))))
+      (define right?
+        (match (list xvar sign-lambda)
+          [(list 'lambda 1) #f]
+          [_ #t]))
       (define end (apply (if right? max min) (filter rational? (x-positions p xvar sign-lambda))))
-      (define drawn
-        (for/fold ([w 0]) ([name (in-list names)])
-          (max w (text-width (string-append " " name " ") (curve-label-size)))))
-      (for ([panel (in-list (coefficient-path-panels p xvar sign-lambda names 'coef
-                                                     width height #f))])
-        (check-true (>= (room panel end right?) drawn)
+      (for ([panel (in-list (coefficient-path-panels p
+                                                     #:xvar xvar
+                                                     #:sign-lambda sign-lambda
+                                                     #:label names
+                                                     #:width width
+                                                     #:height height
+                                                     #:title #f))])
+        (check-true (>= (room panel end right?) (curve-label-width p names))
                     (format "~a ~a ~a×~a" xvar sign-lambda width height))))
     (define p (elnet-path Xr yr))
     (for* ([xvar+sign (in-list '((norm -1) (dev -1) (lambda -1) (lambda 1)))]
            [size (in-list '((400 300) (300 200)))])
-      (check-labels-fit p '("x1" "x2" "x3") (first xvar+sign) (second xvar+sign)
-                        (first size) (second size)))
+      (match-define (list xvar sign-lambda) xvar+sign)
+      (match-define (list width height) size)
+      (check-labels-fit p '("x1" "x2" "x3") xvar sign-lambda width height))
     (check-labels-fit p '("a long predictor name" "x2" "x3") 'norm -1 400 300))
 
   (test-case "the curve labels go at the end of the x axis, level with the last drawn λ"

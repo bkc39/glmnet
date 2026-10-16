@@ -29,6 +29,8 @@ invisible(Sys.setlocale("LC_COLLATE", "C"))
 ## Goldens are written to GLMNET_GOLDENS_OUT (the CI check points this at a temp
 ## dir; local `nix run .#gen-goldens` defaults to scripts/r-parity/goldens, which
 ## is gitignored). They are never committed -- the parity check regenerates them.
+source("scripts/r-parity/cv-print.R")
+
 data_dir    <- "glmnet/private/data"
 goldens_dir <- Sys.getenv("GLMNET_GOLDENS_OUT", "scripts/r-parity/goldens")
 dir.create(goldens_dir, showWarnings = FALSE, recursive = TRUE)
@@ -383,14 +385,6 @@ cv_coef <- function(cv, s) {
   co <- coef(cv, s = s)
   if (is.list(co)) unname(lapply(co, function(B) unname(as.numeric(B[, 1]))))
   else unname(as.numeric(co[, 1]))
-}
-
-## The lines of R's print.cv.glmnet, from its Measure: line on, without blank
-## lines or trailing spaces.
-cv_print_lines <- function(cv) {
-  out <- sub(" +$", "", capture.output(print(cv)))
-  out <- out[nzchar(out)]
-  out[grep("^Measure:", out)[1]:length(out)]
 }
 
 ## A cv.glmnet result as the golden records it.

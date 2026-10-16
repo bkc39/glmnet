@@ -183,8 +183,6 @@
          (check-equal? (map car got) rows (format "~a: row names" msg))
          (check-vec-close (map cdr got) expected tol msg)])))
 
-  ;; The lines of a printed path or CV result after its #<glmnet-path:family or
-  ;; #<glmnet-cv:family line, without the > after them.
   (define (printed-table p)
     (define s (format "~a" p))
     (cdr (regexp-split #rx"\n" (substring s 0 (sub1 (string-length s))))))

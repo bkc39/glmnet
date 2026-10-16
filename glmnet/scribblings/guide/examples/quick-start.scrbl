@@ -154,8 +154,8 @@ with them @tt{cv.glmnet(x, y, foldid = foldid)} gives the numbers below:
 cvfit
 ]
 
-The printed summary is R's @tt{print(cvfit)}, without its @tt{Call:} line and
-blank lines. R's @tt{plot(cvfit)} draws the cross-validated mean
+The printed summary is R's @tt{print(cvfit)} (see
+@secref["ref-model-printing"]). R's @tt{plot(cvfit)} draws the cross-validated mean
 squared error with one standard error above and below it, and a dotted line
 at each of @tech{lambda-min} and @tech{lambda-1se}:
 

@@ -89,10 +89,10 @@ Every difference from R that we know of is listed here, by topic.
   - *Non-finite new data in a prediction.* R's `predict()` does not check `newx`. A row with a `NaN`, `NA` or infinite value predicts `NaN`, `NA` or ±`Inf`, unless every such value falls in a column whose coefficient is 0: the sparse product skips that column, and the prediction is finite. The prediction helpers raise an error instead.
 
   Where R also stops, only the message differs: an infinite Cox time, and a non-finite multi-response `Y`, for which R warns about convergence and then fails with "length of 'dimnames' [2] not equal to array extent".
-- **Class labels.** `coef` of a multinomial model fitted from named columns keys each class by its label, so integer classes are keyed by integers, `0`, where R's `coef` names them by level, the string `"0"`.
+- **Class labels.** `coef` of a multinomial model fitted from named columns keys each class by its label, so integer classes are keyed by integers, `0`, where R's `coef` names them by level, the string `"0"`. A numeric multinomial response fitted from named columns must use every label from 0 to its largest, where R's `as.factor` accepts any values: labels 1, 2 and 3 are an error here (`check-class-labels` in `glmnet/core/formula.rkt`).
 - **Prediction types.** R's `predict` accepts `type = "class"` for a Gaussian fit and returns the linear predictor, because `predict.elnet` hands the type on to `predict.glmnet`. Our `predict` raises for `'class` on the Gaussian family, as R's methods for the Poisson, Cox and multi-response families do for theirs (#25).
 - **Coefficients between fitted λ values (#25).** R's `exact = TRUE`, which refits at `s`, is not reproduced. When every fitted λ is the same, as for a user sequence `(0.1 0.1)`, the rescaling divides by zero and R's `coef` and `predict` stop with "need at least two non-NA values to interpolate" for any `s`; ours return the first fitted point.
-- **Printing (#25, #27).** The `Call:` line R prints above a path's table and a CV result's measure is left out, and so are the blank lines around that measure.
+- **Printing (#25, #27).** The `Call:` line R's `print.glmnet` and `print.cv.glmnet` print first is left out, and so are the blank lines R prints around it and, for a CV result, around its measure.
 - **Cross-validation (#27).**
   - Fold ids count from 0, not 1.
   - R's warnings for small folds (above) are log messages, at level `warning` with the topic `glmnet`, as for a partial path.

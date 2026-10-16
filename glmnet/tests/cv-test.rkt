@@ -455,16 +455,23 @@
   (define-runtime-path fixtures "fixtures")
 
   (define (r-print name)
-    (for/list ([line (in-list (file->lines (build-path fixtures (format "cv-print-~a.txt" name))))]
-               #:unless (or (string=? (string-trim line) "") (string-prefix? line "Call:")))
-      (string-trim line #:left? #f)))
+    (file->lines (build-path fixtures (format "cv-print-~a.txt" name))))
 
   (define (printed cv)
-    (define s (format "~a" cv))
-    (match-define (cons header lines) (string-split (substring s 0 (sub1 (string-length s))) "\n"))
-    (check-regexp-match #rx"^#<glmnet-cv:[a-z]+$" header)
-    (check-equal? (string-ref s (sub1 (string-length s))) #\>)
-    lines)
+    (match-define (regexp #rx"^#<glmnet-cv:[a-z]+\n(.*)>$" (list _ table)) (format "~a" cv))
+    (string-split table "\n"))
+
+  (define (cv-of-columns #:lambda lambdas #:cvm cvm #:cvsd cvsd #:nzero nzero
+                         #:lambda-min lambda-min #:lambda-1se lambda-1se)
+    (struct-copy glmnet-cv cv
+                 [lambda (list->vector lambdas)]
+                 [cvm (list->vector cvm)]
+                 [cvsd (list->vector cvsd)]
+                 [nzero (list->vector nzero)]
+                 [lambda-min lambda-min]
+                 [lambda-1se lambda-1se]
+                 [index-min (index-of lambdas lambda-min)]
+                 [index-1se (index-of lambdas lambda-1se)]))
 
   (define (rep-folds n) (for/list ([i (in-range n)]) (modulo i 10)))
 
@@ -479,14 +486,31 @@
     (check-equal? (format "~s" cv) (format "~a" cv)))
 
   (test-case "each column of a printed CV result is zapped and formatted as R's"
-    (define path (glmnet-path 'gaussian (vector 2.5e-5 1.234e-7) (vector 0.0 0.0)
-                              (vector (vector 0.0) (vector 0.0)) (vector 0.0 0.0) (vector 0 1) 0))
-    (check-equal? (printed (glmnet-cv (vector 2.5e-5 1.234e-7) (vector 12345.678 0.5)
-                                      (vector 0.0 3.14159e-3) (vector 12345.678 0.5)
-                                      (vector 12345.678 0.5) (vector 0 120) 'mse
-                                      "Mean-Squared Error" path 1.234e-7 2.5e-5 1 0
-                                      (rep-folds 10)))
+    (check-equal? (printed (cv-of-columns #:lambda '(2.5e-5 1.234e-7) #:cvm '(12345.678 0.5)
+                                          #:cvsd '(0.0 3.14159e-3) #:nzero '(0 120)
+                                          #:lambda-min 1.234e-7 #:lambda-1se 2.5e-5))
                   (r-print "synthetic")))
+
+  (test-case "a non-finite cvm or cvsd prints as R's Inf, -Inf or NaN"
+    (check-equal? (printed (cv-of-columns #:lambda '(0.5 0.1) #:cvm '(1.5 2.25)
+                                          #:cvsd (list +inf.0 0.3) #:nzero '(1 2)
+                                          #:lambda-min 0.5 #:lambda-1se 0.1))
+                  (r-print "infinite"))
+    (check-equal? (printed (cv-of-columns #:lambda '(0.5 0.1) #:cvm (list +nan.0 1.2345e-4)
+                                          #:cvsd (list -inf.0 0.3) #:nzero '(1 2)
+                                          #:lambda-min 0.5 #:lambda-1se 0.1))
+                  (r-print "not-a-number")))
+
+  (test-case "a CV result whose cvsd overflows to +inf.0 prints"
+    (define xs
+      (for/list ([i (in-range 40)])
+        (list (exact->inexact (modulo (* 7 i) 11)) (sin (* 1.0 i)))))
+    (define ys
+      (for/list ([i (in-range 40)])
+        (* 1e100 (+ 1.0 (sin (* 3.0 i))))))
+    (define huge (elnet-cv xs ys #:fold-ids (for/list ([i (in-range 40)]) (modulo i 4))))
+    (check-true (for/or ([sd (in-vector (glmnet-cv-cvsd huge))]) (infinite? sd)))
+    (check-not-exn (lambda () (format "~a" huge))))
 
   ;; --- errors ------------------------------------------------------------------
 

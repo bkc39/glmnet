@@ -739,24 +739,20 @@
 
 ;; --- printing ------------------------------------------------------------------
 
-;; As R's print.cv.glmnet, without its Call: line and blank lines: the
-;; measure, then lambda.min and lambda.1se with their 1-based index, cvm, cvsd
-;; and nzero, each column zapped and formatted to 4 significant digits as
-;; print.anova does. `call`, when given, follows the family.
 (define (write-cv cv port [call #f])
-  (define rows (list (glmnet-cv-index-min cv) (glmnet-cv-index-1se cv)))
-  (define (at v)
-    (for/list ([i (in-list rows)]) (exact->inexact (vector-ref v i))))
+  (define (column header v)
+    (r-column header
+              (for/list ([i (in-list (list (glmnet-cv-index-min cv) (glmnet-cv-index-1se cv)))])
+                (exact->inexact (vector-ref v i)))
+              #:digits 4))
+  (define lambdas (glmnet-cv-lambda cv))
   (fprintf port "#<glmnet-cv:~a~a\nMeasure: ~a"
            (glmnet-path-family (glmnet-cv-path cv)) (call-suffix call) (glmnet-cv-name cv))
-  (write-r-table
-   '("min" "1se")
-   (for/list ([header (in-list '("Lambda" "Index" "Measure" "SE" "Nonzero"))]
-              [xs (in-list (list (at (glmnet-cv-lambda cv))
-                                 (for/list ([i (in-list rows)]) (exact->inexact (add1 i)))
-                                 (at (glmnet-cv-cvm cv))
-                                 (at (glmnet-cv-cvsd cv))
-                                 (at (glmnet-cv-nzero cv))))])
-     (cons header (r-format (zapsmall xs 4) 4)))
-   port)
+  (write-r-table '("min" "1se")
+                 (list (column "Lambda" lambdas)
+                       (column "Index" (build-vector (vector-length lambdas) add1))
+                       (column "Measure" (glmnet-cv-cvm cv))
+                       (column "SE" (glmnet-cv-cvsd cv))
+                       (column "Nonzero" (glmnet-cv-nzero cv)))
+                 port)
   (write-string ">" port))
