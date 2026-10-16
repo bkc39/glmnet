@@ -34,10 +34,6 @@ decimals:
 
 @examples[#:eval ev #:label #f
 (define fit (elastic-net X y #:alpha 0.5 #:lambda 0.5))
-(define (~r3 x) (~r x #:precision '(= 3)))
-(define (coef-line coefs)
-  (match-define (vector β₀ β ...) coefs)
-  (format "β₀ = ~a, β = ~a" (~r3 β₀) (map ~r3 β)))
 (displayln (coef-line (coef fit)))
 ]
 
@@ -104,9 +100,9 @@ observations @racket[X40] and @racket[y40] of @secref["ex-lasso-cv"]:
   (define best (glmnet-cv-index-min cv))
   (printf "α = ~a: λ-min = ~a, error = ~a ± ~a\n"
           α
-          (~r3 (glmnet-cv-lambda-min cv))
-          (~r3 (vector-ref (glmnet-cv-cvm cv) best))
-          (~r3 (vector-ref (glmnet-cv-cvsd cv) best))))
+          (fmt (glmnet-cv-lambda-min cv))
+          (fmt (vector-ref (glmnet-cv-cvm cv) best))
+          (fmt (vector-ref (glmnet-cv-cvsd cv) best))))
 ]
 
 Ridge, which keeps every predictor, the irrelevant @math{x₃} among them,

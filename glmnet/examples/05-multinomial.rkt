@@ -22,7 +22,7 @@ feature, and the argmax classifies every training point correctly.
 (require glmnet)]
 
 @chunk[<provide>
-(provide run-example)]
+(provide X y fit probabilities labels)]
 
 @chunk[<data>
 (define X '((1.0 1.0) (2.0 1.0) (1.0 2.0) (2.0 2.0)
@@ -30,32 +30,29 @@ feature, and the argmax classifies every training point correctly.
             (3.0 5.0) (4.0 5.0) (3.0 6.0) (4.0 6.0)))
 (define y '(0 0 0 0 1 1 1 1 2 2 2 2))]
 
-@racket[multinomial-fit] takes integer class labels and returns a
-@racket[multinomial-result] whose @racket[multinomial-result-coefficients] is a
-vector of @math{K} per-class coefficient vectors. Here each class keeps only the
-feature that distinguishes it (class 0 and 1 split on @math{x₁}, class 2 on
-@math{x₂}); the others come back exactly @racket[0.0].
+@racket[multinomial-fit] takes integer class labels. Its @racket[coef] is a
+vector of @math{K} per-class vectors, each an intercept followed by the
+coefficients. Here each class keeps only the feature that distinguishes it
+(class 0 and 1 split on @math{x₁}, class 2 on @math{x₂}); the others come back
+exactly @racket[0.0].
 
 @chunk[<fit>
-(define result (multinomial-fit X y #:lambda 0.01))]
+(define fit (multinomial-fit X y #:lambda 0.01))]
 
-@racket[multinomial-predict-proba] gives the per-class softmax probabilities for
-each row (they sum to 1), and @racket[multinomial-predict] takes the argmax:
+@racket[predict] with @racket[#:type 'response] gives the per-class softmax
+probabilities for each row, which sum to 1, and @racket[#:type 'class] takes
+the argmax, which is right for every training point:
 
-@racketblock[
-(multinomial-predict-proba result X)
-(code:comment "=> per-row probabilities, each summing to 1")
-(multinomial-predict result X)
-(code:comment "=> (0 0 0 0 1 1 1 1 2 2 2 2)  -- every training point correct")
-]
+@chunk[<predict>
+(define probabilities (predict fit X #:type 'response))
+(define labels (predict fit X #:type 'class))]
 
-@chunk[<run-example>
-(define (run-example)
-  <data>
-  <fit>
-  result)]
+@racket[multinomial-predict-proba] and @racket[multinomial-predict] are the same
+two calls.
 
 @chunk[<*>
   <require>
   <provide>
-  <run-example>]
+  <data>
+  <fit>
+  <predict>]

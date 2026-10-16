@@ -29,23 +29,23 @@ carries no signal:
 
 @examples[#:eval ev #:label #f
 (define fit (mgaussian-fit X Y #:lambda 0.1))
-(mgaussian-result-intercepts fit)
-(mgaussian-result-coefficients fit)
-(mgaussian-result-r-squared fit)
+fit
+(coef fit)
+(deviance-ratio fit)
 ]
 
-There is one coefficient vector per response. The @math{x₁} coefficient is
-positive for the first and negative for the second, and @math{x₂} is exactly
-@racket[0.0] in both. @racket[mgaussian-result-r-squared] is a single number
-covering all the responses together.
+@racket[coef] gives one vector per response, the intercept first. The
+@math{x₁} coefficient is positive for the first response and negative for the
+second, and @math{x₂} is exactly @racket[0.0] in both. @racket[deviance-ratio]
+is a single @math{R²} covering all the responses together.
 
 @section[#:tag "ex-mgaussian-predict"]{Predicting}
 
-@racket[mgaussian-predict], which is @racket[predict] with its defaults,
-returns one list per row, with one prediction per response:
+@racket[predict] returns one list per row, with one prediction per response;
+@racket[mgaussian-predict] is the same call:
 
 @examples[#:eval ev #:label #f
-(mgaussian-predict fit '((7.0 1.0) (8.0 2.0)))
+(predict fit '((7.0 1.0) (8.0 2.0)))
 ]
 
 @section[#:tag "ex-mgaussian-grouped"]{Grouped versus separate fits}
@@ -56,36 +56,36 @@ second without one:
 
 @examples[#:eval ev #:label #f
 (define Y2
-  (for/list ([row (in-list X)])
-    (define x1 (car row))
-    (define x2 (cadr row))
-    (list (+ 1 (* 2 x1) (* 0.5 x2))
-          (- 10 x1))))
+  (map (match-lambda
+         [(list x₁ x₂)
+          (define y₁ (+ 1 (* 2 x₁) (* 0.5 x₂)))
+          (list y₁ (- 10 x₁))])
+       X))
 ]
 
 Fitting each response on its own with the lasso keeps @math{x₂} for the first
 and drops it for the second. The grouped fit keeps @math{x₂} for both, with a
-small coefficient where it does not belong:
+small coefficient where it does not belong. Each fit's coefficients are shown
+to three decimals, the intercept @math{β₀} first and then @math{β}:
 
 @examples[#:eval ev #:label #f
-(define (round3 x)
-  (/ (round (* 1000 x)) 1000))
-(define (rounded v)
-  (for/list ([b (in-vector v)])
-    (round3 b)))
-(rounded (elnet-result-coefficients (lasso X (map car Y2) #:lambda 0.05)))
-(rounded (elnet-result-coefficients (lasso X (map cadr Y2) #:lambda 0.05)))
-(map rounded
-     (vector->list
-      (mgaussian-result-coefficients (mgaussian-fit X Y2 #:lambda 0.05))))
+(define (show-coefs coefs)
+  (for-each (compose displayln coef-line) (sequence->list coefs)))
+(match-define (list y₁ y₂) (apply map list Y2))
+(define separate (list (lasso X y₁ #:lambda 0.05) (lasso X y₂ #:lambda 0.05)))
+(show-coefs (map coef separate))
+]
+
+@examples[#:eval ev #:label #f
+(define grouped (mgaussian-fit X Y2 #:lambda 0.05))
+(show-coefs (coef grouped))
 ]
 
 Raise @math{λ} and the grouped fit drops @math{x₂} from both responses at once:
 
 @examples[#:eval ev #:label #f
-(map rounded
-     (vector->list
-      (mgaussian-result-coefficients (mgaussian-fit X Y2 #:lambda 0.2))))
+(define grouped-0.2 (mgaussian-fit X Y2 #:lambda 0.2))
+(show-coefs (coef grouped-0.2))
 ]
 
 @section[#:tag "ex-mgaussian-when"]{When to use it}

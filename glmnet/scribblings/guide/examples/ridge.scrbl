@@ -53,10 +53,6 @@ traces how the coefficients shrink. @racket[in-path] walks it, giving each
 @math{β₀} first and then @math{β}, shown to three decimals:
 
 @examples[#:eval ev #:label #f
-(define (~r3 x) (~r x #:precision '(= 3)))
-(define (coef-line coefs)
-  (match-define (vector β₀ β ...) coefs)
-  (format "β₀ = ~a, β = ~a" (~r3 β₀) (map ~r3 β)))
 (define path (elnet-path X y #:alpha 0.0 #:lambda '(0.01 0.1 1.0 10.0 100.0)))
 (for ([(λ coefs) (in-path path)])
   (printf "λ = ~a: ~a\n" λ (coef-line coefs)))

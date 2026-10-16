@@ -54,6 +54,8 @@ glmnet/                        Racket collection
   examples/NN-*.rkt            #lang scribble/lp2 literate examples; a <provide> chunk
                                provides their data and results
   examples/test/NN-*.rkt       companion runners + rackunit harnesses over those names
+  examples/test/common.rkt     shared checks, provided from its `test` submodule only:
+                               rackunit is a build-dep (tests/run-deps-test.rkt)
   scribblings/glmnet.scrbl     manual root: guide.scrbl (guide/*.scrbl) + reference.scrbl;
                                the plots are guide/plots.scrbl and reference's ref-plot
   scribblings/utils.rkt        for-label imports + make-glmnet-eval for live examples
@@ -352,8 +354,10 @@ where a binding comes from (`glmnet/plot`, `glmnet/datasets`, `glmnet/data/*`,
 `polars`, `math/matrix`), never fetches what `racket` provides; the lp2
 programs stay `racket/base` modules with explicit requires. Use
 `eval:error` for expected failures. Where prose says a shown number is zero,
-equal to another, or right to some decimals, the example shows it through
-`~r` at that precision, one formatter per page, not as a raw float.
+equal to another, or right to some decimals, the example shows it at that
+precision through `fmt`, not as a raw float. `fmt` and `coef-line` are defined
+once, in the evaluator `make-glmnet-eval` starts, and shown on the examples
+index page; no page defines its own.
 `noisy-fixture` (`scribblings/utils.rkt`) evaluates the 40 noisy observations
 the lasso, elastic-net and plots pages cross-validate in the page's own
 evaluator, shown or `#:hidden`, because the random folds drawn after it
@@ -375,7 +379,8 @@ Resyntax reads neither `.scrbl` files nor lp2 programs, so
 chunk; not the reference), and the `examples` templates of the helper
 modules under `scribblings/`, for #59's idioms: a family or path accessor where
 `coef`, `predict` or `deviance-ratio` belongs, a last element by index
-arithmetic, hand rounding, positional access and hand-written output. A hit
+arithmetic, hand rounding, positional access, hand-written output and a page's
+own copy of `fmt` or `coef-line`. A hit
 names file:line, the idiom and the fix. `allowed-hits` counts, per file and
 idiom, the hits not yet rewritten, and a count must equal the file's hits: a
 file gains none, a rewrite lowers its counts in the same commit, and a file

@@ -47,19 +47,21 @@ is exactly @racket[0.0]. Exponentiated, a coefficient is a @emph{hazard ratio}:
 one more unit of @math{x₁} multiplies the hazard at every time by
 
 @examples[#:eval ev #:label #f
-(exp (vector-ref (cox-result-coefficients fit) 0))
+(match-define (vector β₁ _) (coef fit))
+(exp β₁)
 ]
 
 @section[#:tag "ex-cox-risk"]{Ranking by risk}
 
-@racket[cox-linear-predictor] returns @math{xβ} for each row and
-@racket[cox-relative-risk] returns @math{exp(xβ)}, the hazard relative to the
-baseline. They are @racket[predict] with @racket[#:type 'link] and
-@racket[#:type 'response]:
+@racket[predict] with @racket[#:type 'link] returns @math{xβ} for each row,
+and with @racket[#:type 'response] @math{exp(xβ)}, the hazard relative to the
+baseline. @racket[cox-linear-predictor] and @racket[cox-relative-risk] are the
+same two calls:
 
 @examples[#:eval ev #:label #f
-(cox-linear-predictor fit '((1.0 1.0) (2.0 1.0) (3.0 1.0)))
-(cox-relative-risk fit '((1.0 1.0) (2.0 1.0) (3.0 1.0)))
+(define subjects '((1.0 1.0) (2.0 1.0) (3.0 1.0)))
+(predict fit subjects #:type 'link)
+(predict fit subjects #:type 'response)
 ]
 
 Each step of one unit in @math{x₁} multiplies the relative risk by the hazard
@@ -70,19 +72,16 @@ curve.
 @section[#:tag "ex-cox-path"]{Varying @math{λ}}
 
 @racket[cox-path] fits a list of @math{λ} in one call, largest first
-(@secref["concepts-path"]):
+(@secref["concepts-path"]). @racket[in-path] walks it, giving each @math{λ}
+with its coefficients, and @racket[deviance-ratio] gives the deviance ratio at
+each @math{λ}, all shown to three decimals:
 
 @examples[#:eval ev #:label #f
-(define (round3 x)
-  (/ (round (* 1000 x)) 1000))
-(define (rounded v)
-  (for/list ([b (in-vector v)])
-    (round3 b)))
 (define path (cox-path X times statuses #:lambda '(0.01 0.1 0.5 1.0)))
-(for ([lam (in-vector (glmnet-path-lambda path))]
-      [beta (in-vector (glmnet-path-coefficients path))]
-      [dev (in-vector (glmnet-path-dev-ratio path))])
-  (printf "λ = ~a: β = ~a, dev-ratio = ~a\n" lam (rounded beta) (round3 dev)))
+(for ([(λ β) (in-path path)]
+      [dev (in-vector (deviance-ratio path))])
+  (printf "λ = ~a: ~a, dev-ratio = ~a\n"
+          λ (coef-line β #:intercept? #f) (fmt dev)))
 ]
 
 With eight subjects and five events, a small penalty lets the noise predictor

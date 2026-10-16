@@ -22,40 +22,40 @@ In the synthetic cohort below @math{x₁} is a risk factor: subjects with higher
 (require glmnet)]
 
 @chunk[<provide>
-(provide run-example)]
+(provide X times statuses fit log-risk risk)]
+
+The higher-risk subjects have the shorter follow-up times; a status of 1 is an
+observed event, 0 a right-censored time:
 
 @chunk[<data>
 (define X '((0.5 1.0) (1.0 2.0) (1.5 1.0) (2.0 2.0)
             (2.5 1.0) (3.0 2.0) (3.5 1.0) (4.0 2.0)))
-(code:comment "follow-up times (higher-risk subjects fail sooner)")
 (define times '(12.0 10.0 11.0 8.0 6.0 7.0 4.0 3.0))
-(code:comment "1 = event observed, 0 = right-censored")
 (define statuses '(0 0 0 1 1 1 1 1))]
 
-@racket[cox-fit] takes the predictor matrix, the times, and the 0/1 statuses.
-There is no intercept, so @racket[cox-result-coefficients] is the whole model;
-@math{β₁} comes back positive (risk rises with @math{x₁}) and the noise @math{β₂}
-is exactly @racket[0.0].
+@racket[cox-fit] takes the predictor matrix, the follow-up times, and the 0/1
+statuses. There is no intercept, so @racket[coef] is the coefficients alone;
+@math{β₁} comes back positive (risk rises with @math{x₁}) and the noise
+@math{β₂} is exactly @racket[0.0].
 
 @chunk[<fit>
-(define result (cox-fit X times statuses #:lambda 0.1))]
+(define fit (cox-fit X times statuses #:lambda 0.1))]
 
-@racket[cox-relative-risk] turns a fit into @math{exp(x·β)}, the hazard relative
-to the baseline, so subjects can be ranked by risk; @racket[cox-linear-predictor]
-returns the raw log relative hazard @math{x·β}:
+@racket[predict] with @racket[#:type 'link] returns the log relative hazard
+@math{x·β} of each subject, and @racket[#:type 'response] returns
+@math{exp(x·β)}, the hazard relative to the baseline, which ranks the subjects
+by risk:
 
-@racketblock[
-(cox-relative-risk result X)
-(code:comment "=> relative hazard per subject; larger = higher risk")
-(cox-linear-predictor result X)]
+@chunk[<risk>
+(define log-risk (predict fit X #:type 'link))
+(define risk (predict fit X #:type 'response))]
 
-@chunk[<run-example>
-(define (run-example)
-  <data>
-  <fit>
-  result)]
+@racket[cox-linear-predictor] and @racket[cox-relative-risk] are the same two
+calls.
 
 @chunk[<*>
   <require>
   <provide>
-  <run-example>]
+  <data>
+  <fit>
+  <risk>]
