@@ -386,8 +386,10 @@ modules under `scribblings/`, for #59's idioms: a family or path accessor where
 arithmetic, hand rounding, positional access (`car`, `list-ref`,
 `vector-ref`, ...), hand-written output and a page's own copy of `fmt` or
 `coef-line`. It checks the companion tests in `examples/test/` whole, for
-positional access only, and fails a page whose top-level `define` binds an
-expression its program (the `Source:` margin note) binds under another name.
+positional access only. Every `scribblings/guide/examples/*.scrbl` page must
+carry a `Source:` margin note naming its program, and a page fails when its
+`define`, `match-define` or `define-values` binds an expression that the
+program binds under another name.
 A checked file has no hit; a hit names file:line, the idiom and the fix.
 `racket glmnet/tests/docs-idiom-test.rkt` prints every hit.
 

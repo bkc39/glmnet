@@ -19,7 +19,8 @@ recovers @secref["ex-ridge"] and @math{α = 1} recovers @secref["ex-lasso"].
          glmnet)]
 
 @chunk[<provide>
-(provide X y fit zero-counts X-dup lasso-dup enet-dup X40 y40 folds alpha-cvs)]
+(provide X y fit zero-counts X-dup lasso-dup enet-dup X40 y40 folds alpha-cvs
+         longer-grid longer-ridge-cv)]
 
 The running fixture again, with the irrelevant @math{x₃ = x₁²}:
 
@@ -91,7 +92,12 @@ the others.
 (define folds (random-fold-ids 40))
 (define alpha-cvs
   (for/list ([α (in-list '(0.0 0.25 0.5 0.75 1.0))])
-    (cons α (elnet-cv X40 y40 #:alpha α #:fold-ids folds))))]
+    (cons α (elnet-cv X40 y40 #:alpha α #:fold-ids folds))))
+(define longer-grid
+  (for/list ([i (in-range 160)])
+    (expt 10.0 (- 3.5 (* 0.05 i)))))
+(define longer-ridge-cv
+  (elnet-cv X40 y40 #:alpha 0.0 #:fold-ids folds #:lambda longer-grid))]
 
 @chunk[<*>
   <require>
